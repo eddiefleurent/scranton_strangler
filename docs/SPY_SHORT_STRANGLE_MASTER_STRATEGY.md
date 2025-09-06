@@ -100,20 +100,106 @@ If Experienced/Active Management:
 ## Exit Rules
 
 ### Standard Exits
-1. **Profit Target Hit**: 50% of initial credit
+1. **Profit Target Hit**: 50% of initial credit (GTC limit order when using OTOCO)
 2. **Time Exit**: 21 DTE remaining (avoid gamma risk)
 3. **Whichever comes first**
 
-### Emergency Exits
-- Loss exceeds 200% of collected premium
+### Profit Taking Mechanics
+- **With OTOCO**: Automatically places GTC limit order at entry
+- **Without OTOCO**: Monitor daily for 50% profit opportunity
+- **Target**: Buy to close at 50% of credit received
+- **Example**: Collected $3.00 credit → Exit at $1.50 debit
+
+### Emergency Exits (Manual Intervention Only)
+- Loss exceeds 200% of collected premium (manageable threshold)
+- Loss approaching 300% (must take action)
 - Black swan event (market drops/rises >8% in day)
 - Major unexpected news event
 - Assignment risk becomes imminent
 
-### No Stop Loss Policy
-- Tastytrade research shows stops don't improve returns
-- Manage through rolling instead
-- Exception: Catastrophic moves (>2x expected move)
+### Automated Management Policy
+- **Research**: Tastytrade studies show mechanical stops reduce returns
+- **Philosophy**: Manage through rolling and adjustments with hard limits
+- **Automated System**: Must have definitive stop conditions
+- **Never**: Let losses exceed defined thresholds without action
+- **Rationale**: Balance management benefits with automation requirements
+
+---
+
+## Automated Management Rules
+
+### Management Sequence (Football System - Automated)
+
+#### First Down (Initial Position)
+- **Goal**: 50% profit via OTOCO exit order
+- **Monitor**: Position delta, time decay, price movement
+- **Action**: None - let theta work
+- **Trigger Next**: Stock within 5 points of either strike
+
+#### Second Down (Strike Challenged)
+- **Trigger**: SPY within 5 points of put or call strike
+- **Action**: Roll untested side closer (1st adjustment)
+- **OCO Order**: Close untested side at 70% profit OR roll to new strike
+- **Count**: Strike adjustments = 1
+- **Trigger Next**: Original strike breached
+
+#### Third Down (Strike Breached) 
+- **Trigger**: SPY breaks through original strike price
+- **Action**: Roll untested side to same strike (2nd adjustment = straddle)
+- **OCO Order**: Take 25% total profit OR continue to Fourth Down
+- **Count**: Strike adjustments = 2
+- **Limit**: Hold straddle maximum 7 days
+- **Trigger Next**: Loss exceeds 150% of credit
+
+#### Fourth Down (Critical Decision) - AUTOMATED STOPS
+- **Trigger**: Loss > 150% of credit received
+- **Three Actions** (Bot selects based on conditions):
+
+**Option A - Field Goal (Inverted Strangle)**
+- Roll untested strike below tested strike (3rd adjustment)
+- **Count**: Strike adjustments = 3 (FINAL ADJUSTMENT)
+- **STOP**: Close at any profit OR at 200% loss (whichever first)
+- **Time Limit**: 5 days maximum
+
+**Option B - Go For It (Hold Straddle)** 
+- Keep current straddle, wait for recovery (no additional roll)
+- **Count**: Strike adjustments remain at 2
+- **STOP**: Close at 25% profit OR 200% loss (whichever first)
+- **Time Limit**: 3 days maximum
+
+**Option C - Punt (Time Roll)**
+- Roll entire position to next expiration (time adjustment, not strike)
+- **Count**: Strike adjustments reset to 0, but trade marked as "punted"
+- **STOP**: Close at 50% profit OR 21 DTE OR 200% total loss
+- **LIMIT**: Maximum 1 punt per original trade
+- **RESET**: New expiration cycle allows fresh First→Fourth Down sequence
+
+### Hard Stop Conditions (Non-Negotiable)
+
+1. **Maximum Loss Stop**: 250% of credit received
+2. **Time Stop**: 5 DTE remaining (assignment risk)
+3. **Delta Stop**: Position delta > |1.0| (directional risk too high)
+4. **Management Stop**: Completed Fourth Down without recovery
+5. **Black Swan Stop**: SPY moves >8% in single day
+6. **Liquidity Stop**: Bid-ask spread >$0.50 on either leg
+
+### Automated Decision Matrix
+
+| Condition | Days Remaining | Loss Level | Action |
+|-----------|---------------|------------|---------|
+| Normal | >21 DTE | <50% | Continue monitoring |
+| Strike approached | >21 DTE | <100% | Roll untested side |
+| Strike breached | >14 DTE | <150% | Create straddle |
+| Critical loss | >7 DTE | >150% | Execute Fourth Down |
+| **HARD STOP** | Any | >250% | **Close immediately** |
+| **HARD STOP** | <5 DTE | Any | **Close immediately** |
+
+### Emergency Exit Triggers (Immediate Close)
+- SPY gap >5% overnight
+- VIX spike >50% in single day  
+- Major market circuit breaker triggered
+- Broker margin call received
+- System error/connectivity loss
 
 ---
 

@@ -1,6 +1,7 @@
 package mock
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -20,18 +21,18 @@ func NewMockDataProvider() *MockDataProvider {
 	}
 }
 
-func (m *MockDataProvider) GetQuote(symbol string) *broker.Quote {
+func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	// Simulate small price movements
 	m.currentPrice += (rand.Float64() - 0.5) * 2
 	
 	spread := 0.02 // 2 cent spread
-	return &broker.Quote{
+	return &broker.QuoteItem{
 		Symbol: symbol,
 		Last:   m.currentPrice,
 		Bid:    m.currentPrice - spread/2,
 		Ask:    m.currentPrice + spread/2,
 		Volume: rand.Int63n(100000000),
-	}
+	}, nil
 }
 
 func (m *MockDataProvider) GetIVR() float64 {
@@ -41,19 +42,11 @@ func (m *MockDataProvider) GetIVR() float64 {
 	return m.ivr
 }
 
-func (m *MockDataProvider) GetOptionChain(symbol string, dte int) *broker.OptionChain {
-	expiration := time.Now().AddDate(0, 0, dte)
+func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	expDate, _ := time.Parse("2006-01-02", expiration)
+	dte := int(time.Until(expDate).Hours() / 24)
 	
-	// Find the next Friday
-	for expiration.Weekday() != time.Friday {
-		expiration = expiration.AddDate(0, 0, 1)
-	}
-	
-	chain := &broker.OptionChain{
-		Symbol:     symbol,
-		Expiration: expiration.Format("2006-01-02"),
-		Strikes:    []broker.OptionStrike{},
-	}
+	var options []broker.Option
 	
 	// Generate strikes around current price
 	strikeInterval := 5.0
@@ -81,23 +74,61 @@ func (m *MockDataProvider) GetOptionChain(symbol string, dte int) *broker.Option
 		putPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(putDelta))
 		callPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(callDelta))
 		
-		chain.Strikes = append(chain.Strikes, broker.OptionStrike{
-			Strike:     strike,
-			CallDelta:  callDelta,
-			PutDelta:   putDelta,
-			CallBid:    callPrice - 0.05,
-			CallAsk:    callPrice + 0.05,
-			PutBid:     putPrice - 0.05,
-			PutAsk:     putPrice + 0.05,
-			CallVolume: rand.Int63n(10000),
-			PutVolume:  rand.Int63n(10000),
-		})
+		// Create put option
+		putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expDate.Format("060102"), int(strike*1000))
+		putOption := broker.Option{
+			Symbol:         putSymbol,
+			Description:    fmt.Sprintf("%s %s $%.2f Put", symbol, expDate.Format("Jan 02 2006"), strike),
+			Strike:         strike,
+			OptionType:     "put",
+			ExpirationDate: expiration,
+			Bid:            putPrice - 0.05,
+			Ask:            putPrice + 0.05,
+			Last:           putPrice,
+			Volume:         rand.Int63n(10000),
+			OpenInterest:   rand.Int63n(50000),
+			Underlying:     symbol,
+		}
+		
+		// Create call option
+		callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expDate.Format("060102"), int(strike*1000))
+		callOption := broker.Option{
+			Symbol:         callSymbol,
+			Description:    fmt.Sprintf("%s %s $%.2f Call", symbol, expDate.Format("Jan 02 2006"), strike),
+			Strike:         strike,
+			OptionType:     "call",
+			ExpirationDate: expiration,
+			Bid:            callPrice - 0.05,
+			Ask:            callPrice + 0.05,
+			Last:           callPrice,
+			Volume:         rand.Int63n(10000),
+			OpenInterest:   rand.Int63n(50000),
+			Underlying:     symbol,
+		}
+		
+		// Add Greeks if requested
+		if withGreeks {
+			putOption.Greeks = &broker.Greeks{
+				Delta:  putDelta,
+				MidIV:  vol,
+				Theta:  -0.05 * vol,
+				Vega:   0.10 * vol,
+			}
+			callOption.Greeks = &broker.Greeks{
+				Delta: callDelta,
+				MidIV: vol,
+				Theta: -0.05 * vol,
+				Vega:  0.10 * vol,
+			}
+		}
+		
+		options = append(options, putOption, callOption)
 	}
 	
-	return chain
+	return options, nil
 }
 
-func (m *MockDataProvider) Find16DeltaStrikes(chain *broker.OptionChain) (putStrike, callStrike float64) {
+func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, callStrike float64) {
 	targetDelta := 0.16
 	
 	// Find put strike closest to -16 delta
@@ -108,45 +139,52 @@ func (m *MockDataProvider) Find16DeltaStrikes(chain *broker.OptionChain) (putStr
 	bestCallStrike := 0.0
 	bestCallDiff := math.MaxFloat64
 	
-	for _, strike := range chain.Strikes {
-		putDiff := math.Abs(math.Abs(strike.PutDelta) - targetDelta)
-		if putDiff < bestPutDiff {
-			bestPutDiff = putDiff
-			bestPutStrike = strike.Strike
+	for _, option := range options {
+		if option.Greeks == nil {
+			continue
 		}
 		
-		callDiff := math.Abs(strike.CallDelta - targetDelta)
-		if callDiff < bestCallDiff {
-			bestCallDiff = callDiff
-			bestCallStrike = strike.Strike
+		if option.OptionType == "put" {
+			putDiff := math.Abs(math.Abs(option.Greeks.Delta) - targetDelta)
+			if putDiff < bestPutDiff {
+				bestPutDiff = putDiff
+				bestPutStrike = option.Strike
+			}
+		} else if option.OptionType == "call" {
+			callDiff := math.Abs(option.Greeks.Delta - targetDelta)
+			if callDiff < bestCallDiff {
+				bestCallDiff = callDiff
+				bestCallStrike = option.Strike
+			}
 		}
 	}
 	
 	return bestPutStrike, bestCallStrike
 }
 
-func (m *MockDataProvider) CalculateStrangleCredit(chain *broker.OptionChain, putStrike, callStrike float64) float64 {
+func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putStrike, callStrike float64) float64 {
 	putCredit := 0.0
 	callCredit := 0.0
 	
-	for _, strike := range chain.Strikes {
-		if strike.Strike == putStrike {
-			putCredit = (strike.PutBid + strike.PutAsk) / 2
+	for _, option := range options {
+		if option.Strike == putStrike && option.OptionType == "put" {
+			putCredit = (option.Bid + option.Ask) / 2
 		}
-		if strike.Strike == callStrike {
-			callCredit = (strike.CallBid + strike.CallAsk) / 2
+		if option.Strike == callStrike && option.OptionType == "call" {
+			callCredit = (option.Bid + option.Ask) / 2
 		}
 	}
-	
+		
 	return putCredit + callCredit
 }
 
 // Generate sample position for testing
 func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
-	quote := m.GetQuote("SPY")
-	chain := m.GetOptionChain("SPY", 45)
-	putStrike, callStrike := m.Find16DeltaStrikes(chain)
-	credit := m.CalculateStrangleCredit(chain, putStrike, callStrike)
+	quote, _ := m.GetQuote("SPY")
+	expiration := time.Now().AddDate(0, 0, 45).Format("2006-01-02")
+	options, _ := m.GetOptionChain("SPY", expiration, true)
+	putStrike, callStrike := m.Find16DeltaStrikes(options)
+	credit := m.CalculateStrangleCredit(options, putStrike, callStrike)
 	
 	return map[string]interface{}{
 		"symbol":      "SPY",
@@ -155,7 +193,7 @@ func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
 		"put_strike":  putStrike,
 		"call_strike": callStrike,
 		"credit":      credit,
-		"expiration":  chain.Expiration,
+		"expiration":  expiration,
 		"dte":         45,
 	}
 }

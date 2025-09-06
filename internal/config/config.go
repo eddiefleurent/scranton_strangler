@@ -25,6 +25,7 @@ type BrokerConfig struct {
 	APIKey      string `yaml:"api_key"`
 	APIEndpoint string `yaml:"api_endpoint"`
 	AccountID   string `yaml:"account_id"`
+	UseOTOCO    bool   `yaml:"use_otoco"` // Use OTOCO orders for preset exits
 }
 
 type StrategyConfig struct {

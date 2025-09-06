@@ -10,7 +10,8 @@ import (
 	"github.com/eddie/spy-strangle-bot/internal/models"
 )
 
-type Storage struct {
+// JSONStorage implements StorageInterface using JSON file persistence
+type JSONStorage struct {
 	mu       sync.RWMutex
 	filepath string
 	data     *StorageData
@@ -36,8 +37,9 @@ type Statistics struct {
 	CurrentStreak  int     `json:"current_streak"`
 }
 
-func NewStorage(filepath string) (*Storage, error) {
-	s := &Storage{
+// NewJSONStorage creates a new JSON-based storage implementation
+func NewJSONStorage(filepath string) (*JSONStorage, error) {
+	s := &JSONStorage{
 		filepath: filepath,
 		data:     &StorageData{
 			DailyPnL:   make(map[string]float64),
@@ -55,7 +57,7 @@ func NewStorage(filepath string) (*Storage, error) {
 	return s, nil
 }
 
-func (s *Storage) Load() error {
+func (s *JSONStorage) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -71,10 +73,15 @@ func (s *Storage) Load() error {
 	return nil
 }
 
-func (s *Storage) Save() error {
+func (s *JSONStorage) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveUnsafe()
+}
 
+// saveUnsafe performs the actual save operation without acquiring locks
+// Must be called with mutex already held
+func (s *JSONStorage) saveUnsafe() error {
 	s.data.LastUpdated = time.Now()
 
 	data, err := json.MarshalIndent(s.data, "", "  ")
@@ -92,21 +99,21 @@ func (s *Storage) Save() error {
 	return os.Rename(tmpFile, s.filepath)
 }
 
-func (s *Storage) GetCurrentPosition() *models.Position {
+func (s *JSONStorage) GetCurrentPosition() *models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.data.CurrentPosition
 }
 
-func (s *Storage) SetCurrentPosition(pos *models.Position) error {
+func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
 	s.mu.Lock()
-	s.data.CurrentPosition = pos
-	s.mu.Unlock()
+	defer s.mu.Unlock()
 	
-	return s.Save()
+	s.data.CurrentPosition = pos
+	return s.saveUnsafe()
 }
 
-func (s *Storage) ClosePosition(finalPnL float64) error {
+func (s *JSONStorage) ClosePosition(finalPnL float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -115,7 +122,10 @@ func (s *Storage) ClosePosition(finalPnL float64) error {
 	}
 
 	// Update position status
-	s.data.CurrentPosition.Status = "closed"
+	// Position state will be managed by the state machine, not a string field
+	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, "position_closed"); err != nil {
+		return fmt.Errorf("failed to transition position to closed state: %w", err)
+	}
 	s.data.CurrentPosition.CurrentPnL = finalPnL
 
 	// Add to history
@@ -131,10 +141,10 @@ func (s *Storage) ClosePosition(finalPnL float64) error {
 	// Clear current position
 	s.data.CurrentPosition = nil
 
-	return s.Save()
+	return s.saveUnsafe()
 }
 
-func (s *Storage) updateStatistics(pnl float64) {
+func (s *JSONStorage) updateStatistics(pnl float64) {
 	stats := s.data.Statistics
 	stats.TotalTrades++
 	stats.TotalPnL += pnl
@@ -178,25 +188,25 @@ func (s *Storage) updateStatistics(pnl float64) {
 	}
 }
 
-func (s *Storage) GetStatistics() *Statistics {
+func (s *JSONStorage) GetStatistics() *Statistics {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.data.Statistics
 }
 
-func (s *Storage) GetDailyPnL(date string) float64 {
+func (s *JSONStorage) GetDailyPnL(date string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.data.DailyPnL[date]
 }
 
-func (s *Storage) GetHistory() []models.Position {
+func (s *JSONStorage) GetHistory() []models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.data.History
 }
 
-func (s *Storage) AddAdjustment(adj models.Adjustment) error {
+func (s *JSONStorage) AddAdjustment(adj models.Adjustment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -205,5 +215,5 @@ func (s *Storage) AddAdjustment(adj models.Adjustment) error {
 	}
 
 	s.data.CurrentPosition.Adjustments = append(s.data.CurrentPosition.Adjustments, adj)
-	return s.Save()
+	return s.saveUnsafe()
 }

@@ -10,6 +10,7 @@ broker:
   api_key: "YOUR_SANDBOX_API_KEY_HERE"  # Get from https://developer.tradier.com/
   api_endpoint: "https://sandbox.tradier.com/v1/"  # Sandbox endpoint
   account_id: "YOUR_ACCOUNT_ID_HERE"  # Get from Tradier dashboard
+  use_otoco: true  # Use OTOCO orders to preset exit at 50% profit
   
 strategy:
   symbol: "SPY"

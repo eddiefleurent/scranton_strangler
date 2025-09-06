@@ -56,9 +56,9 @@ func main() {
 	// Initialize broker client
 	bot.broker = broker.NewTradierClient(
 		cfg.Broker.APIKey,
-		cfg.Broker.APIEndpoint,
 		cfg.Broker.AccountID,
 		cfg.IsPaperTrading(),
+		cfg.Broker.UseOTOCO,
 	)
 
 	// Initialize strategy
@@ -213,7 +213,7 @@ func (b *Bot) executeEntry() {
 		return
 	}
 	
-	b.logger.Printf("Order placed successfully: %s", placedOrder.ID)
+	b.logger.Printf("Order placed successfully: %d", placedOrder.Order.ID)
 	
 	// Save position state
 	// TODO: Implement position persistence

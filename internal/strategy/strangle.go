@@ -10,7 +10,7 @@ import (
 )
 
 type StrangleStrategy struct {
-	broker       *broker.TradierClient
+	broker       broker.Broker
 	config       *StrategyConfig
 	currentPos   *models.Position
 }
@@ -26,16 +26,16 @@ type StrategyConfig struct {
 	MinCredit     float64 // $2.00
 }
 
-func NewStrangleStrategy(broker *broker.TradierClient, config *StrategyConfig) *StrangleStrategy {
+func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrategy {
 	return &StrangleStrategy{
-		broker: broker,
+		broker: b,
 		config: config,
 	}
 }
 
 func (s *StrangleStrategy) CheckEntryConditions() (bool, string) {
 	// Check if we already have a position
-	if s.currentPos != nil && s.currentPos.Status == "open" {
+	if s.currentPos != nil && s.currentPos.GetCurrentState() != models.StateIdle && s.currentPos.GetCurrentState() != models.StateClosed {
 		return false, "already have open position"
 	}
 	
@@ -63,18 +63,18 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	// Find expiration around 45 DTE
 	targetExp := s.findTargetExpiration(s.config.DTETarget)
 	
-	// Get option chain
-	chain, err := s.broker.GetOptionChain(s.config.Symbol, targetExp)
+	// Get option chain with Greeks
+	options, err := s.broker.GetOptionChain(s.config.Symbol, targetExp, true)
 	if err != nil {
 		return nil, err
 	}
 	
 	// Find strikes closest to target delta
-	putStrike := s.findStrikeByDelta(chain, -s.config.DeltaTarget, true)
-	callStrike := s.findStrikeByDelta(chain, s.config.DeltaTarget, false)
+	putStrike := s.findStrikeByDelta(options, -s.config.DeltaTarget, true)
+	callStrike := s.findStrikeByDelta(options, s.config.DeltaTarget, false)
 	
 	// Calculate expected credit
-	credit := s.calculateExpectedCredit(chain, putStrike, callStrike)
+	credit := s.calculateExpectedCredit(options, putStrike, callStrike)
 	
 	if credit < s.config.MinCredit {
 		return nil, fmt.Errorf("credit too low: %.2f < %.2f", credit, s.config.MinCredit)
@@ -113,39 +113,43 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 	return target.Format("2006-01-02")
 }
 
-func (s *StrangleStrategy) findStrikeByDelta(chain *broker.OptionChain, targetDelta float64, isPut bool) float64 {
+func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelta float64, isPut bool) float64 {
 	// Find strike closest to target delta
 	bestStrike := 0.0
 	bestDiff := math.MaxFloat64
 	
-	for _, strike := range chain.Strikes {
-		var delta float64
-		if isPut {
-			delta = strike.PutDelta
-		} else {
-			delta = strike.CallDelta
+	for _, option := range options {
+		// Only consider options of the correct type
+		if (isPut && option.OptionType != "put") || (!isPut && option.OptionType != "call") {
+			continue
 		}
 		
+		// Skip if no Greeks available
+		if option.Greeks == nil {
+			continue
+		}
+		
+		delta := option.Greeks.Delta
 		diff := math.Abs(delta - targetDelta)
 		if diff < bestDiff {
 			bestDiff = diff
-			bestStrike = strike.Strike
+			bestStrike = option.Strike
 		}
 	}
 	
 	return bestStrike
 }
 
-func (s *StrangleStrategy) calculateExpectedCredit(chain *broker.OptionChain, putStrike, callStrike float64) float64 {
+func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putStrike, callStrike float64) float64 {
 	putCredit := 0.0
 	callCredit := 0.0
 	
-	for _, strike := range chain.Strikes {
-		if strike.Strike == putStrike {
-			putCredit = (strike.PutBid + strike.PutAsk) / 2
+	for _, option := range options {
+		if option.Strike == putStrike && option.OptionType == "put" {
+			putCredit = (option.Bid + option.Ask) / 2
 		}
-		if strike.Strike == callStrike {
-			callCredit = (strike.CallBid + strike.CallAsk) / 2
+		if option.Strike == callStrike && option.OptionType == "call" {
+			callCredit = (option.Bid + option.Ask) / 2
 		}
 	}
 	
@@ -189,16 +193,15 @@ func (s *StrangleStrategy) CheckExitConditions() (bool, string) {
 
 func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 	// Get current option prices
-	quote, _ := s.broker.GetQuote(s.config.Symbol)
-	chain, _ := s.broker.GetOptionChain(s.config.Symbol, pos.Expiration.Format("2006-01-02"))
+	options, _ := s.broker.GetOptionChain(s.config.Symbol, pos.Expiration.Format("2006-01-02"), false)
 	
 	currentCost := 0.0
-	for _, strike := range chain.Strikes {
-		if strike.Strike == pos.PutStrike {
-			currentCost += (strike.PutBid + strike.PutAsk) / 2
+	for _, option := range options {
+		if option.Strike == pos.PutStrike && option.OptionType == "put" {
+			currentCost += (option.Bid + option.Ask) / 2
 		}
-		if strike.Strike == pos.CallStrike {
-			currentCost += (strike.CallBid + strike.CallAsk) / 2
+		if option.Strike == pos.CallStrike && option.OptionType == "call" {
+			currentCost += (option.Bid + option.Ask) / 2
 		}
 	}
 	

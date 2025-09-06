@@ -3,9 +3,11 @@
 ## Table of Contents
 1. [System Overview](#system-overview)
 2. [Architecture Design](#architecture-design)
-3. [Development Phases](#development-phases)
-4. [Implementation Details](#implementation-details)
-5. [Deployment & Operations](#deployment--operations)
+3. [Architecture Assessment](#architecture-assessment)
+4. [Development Phases](#development-phases)
+5. [Implementation Details](#implementation-details)
+6. [Critical Improvements Required](#critical-improvements-required)
+7. [Deployment & Operations](#deployment--operations)
 
 ---
 
@@ -18,6 +20,14 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 - **Fail Safe**: When uncertain, do nothing
 - **Paper First**: Prove it works before risking capital
 - **Progressive Enhancement**: Start simple, add complexity only after proving stability
+
+### Architecture Score: 6.5/10
+**Current State**: Solid foundation with critical improvements needed before production
+- ✅ Clean separation of concerns
+- ✅ Configuration-driven design  
+- ❌ Missing interface-based design
+- ❌ No test coverage
+- ❌ State management vulnerabilities
 
 ---
 
@@ -56,6 +66,31 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 └───────────────┘          └─────────────────┘
 ```
 
+### Layered Architecture View
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Application Layer                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │ Scheduler   │  │ Trading     │  │ Signal      │        │
+│  │ (main.go)   │  │ Loop        │  │ Handling    │        │
+│  └─────────────┘  └─────────────┘  └─────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                     Business Logic Layer                    │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │ Strategy    │  │ Risk        │  │ Position    │        │
+│  │ Engine      │  │ Management  │  │ Manager     │        │
+│  └─────────────┘  └─────────────┘  └─────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                   Infrastructure Layer                      │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │ Broker API  │  │ Storage     │  │ Config      │        │
+│  │ (Tradier)   │  │ (JSON)      │  │ (YAML)      │        │
+│  └─────────────┘  └─────────────┘  └─────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ### Component Responsibilities
 
 #### 1. Market Data Service
@@ -78,9 +113,11 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 
 #### 4. Order Executor
 - Translates signals to Tradier API calls
+- **OTOCO Orders**: Entry + 50% profit exit automatically
+- **OCO Orders**: Emergency exits and rolling scenarios
 - Handles multi-leg orders (strangles)
-- Manages partial fills
-- Implements retry logic
+- Manages partial fills and order status
+- Implements retry logic with exponential backoff
 
 #### 5. Position Manager
 - Maintains position state
@@ -125,39 +162,318 @@ Signal {
 
 ---
 
+## Architecture Assessment
+
+### Design Patterns Analysis
+
+#### Well-Implemented Patterns
+1. **Strategy Pattern** - Trading logic encapsulated in `strategy/strangle.go`
+2. **Adapter Pattern** - Broker API abstracted in `broker/tradier.go`
+3. **Repository Pattern** - Data persistence in `storage/storage.go`
+4. **Configuration Pattern** - Environment-aware config in `config/config.go`
+
+#### Anti-Patterns Identified
+1. **God Object (Partial)** - Bot struct in `main.go` manages too many concerns
+2. **Missing Interface Segregation** - TradierAPI is a large struct without interfaces
+3. **Hard Dependencies** - No dependency injection, making testing difficult
+
+### Dependency Analysis
+
+#### Current Issues
+```
+cmd/bot/main.go
+├── internal/broker (Concrete TradierClient)
+├── internal/config (Concrete Config)
+└── internal/strategy (Concrete StrangleStrategy)
+    └── internal/broker (Circular dependency risk)
+```
+
+#### Required Interface Design
+```go
+// Core interfaces needed for proper abstraction
+type Broker interface {
+    GetQuote(symbol string) (*Quote, error)
+    GetOptionChain(symbol, exp string) ([]Option, error)
+    PlaceStrangleOrder(params OrderParams) (*Order, error)
+    GetAccountBalance() (float64, error)
+}
+
+type Storage interface {
+    GetCurrentPosition() *Position
+    SetCurrentPosition(pos *Position) error
+    ClosePosition(pnl float64) error
+}
+
+type Strategy interface {
+    CheckEntryConditions() (bool, string)
+    CheckExitConditions() (bool, string)
+    FindStrangleStrikes() (*StrangleOrder, error)
+}
+
+type RiskManager interface {
+    ValidatePosition(pos *Position) error
+    CheckAllocationLimit(size float64) bool
+    CalculatePositionSize(credit float64) int
+}
+```
+
+### Critical Issues Summary
+
+| Issue | Impact | Priority |
+|-------|--------|----------|
+| No interface-based design | Testing impossible | Critical |
+| Zero test coverage | No confidence in calculations | Critical |
+| File-based state without ACID | Data corruption risk | Critical |
+| No retry/circuit breaker | API failures cascade | High |
+| Plain text credentials | Security vulnerability | High |
+| No structured logging | Debugging difficult | Medium |
+
+---
+
+## Order Types & Automation Strategy
+
+### OTOCO Orders (One-Triggers-One-Cancels-Other)
+**Primary Use**: Entry with automatic profit taking
+- **Entry Order**: Sell strangle for credit
+- **Exit Order**: Buy back at 50% profit (GTC)
+- **Benefit**: "Set and forget" profit taking
+- **Configuration**: `use_otoco: true` in config.yaml
+
+### OCO Orders (One-Cancels-Other) 
+**Use Cases**:
+1. **Second Down Rolling**: Close at 70% profit OR roll untested side
+2. **Third Down Management**: Take 25% profit OR continue to Fourth Down  
+3. **Fourth Down Stops**: Profit target OR 200% loss limit
+4. **Hard Stops**: 250% loss OR 5 DTE emergency close
+5. **Delta Management**: Close profitable leg OR roll when |delta| > 0.5
+
+### Advanced Order Types (Future Phases)
+
+#### Bracket Orders
+**Use Case**: Complete automation of entry, profit, and stop
+- **Entry**: Sell strangle at limit price
+- **Profit**: 50% target (GTC)
+- **Stop**: 250% loss limit (GTC)
+- **Benefit**: Single order handles entire lifecycle
+
+#### Conditional Orders  
+**Use Cases**:
+1. **Volatility Triggers**: Enter only if IVR > threshold
+2. **Price Triggers**: Roll only if SPY breaches specific levels  
+3. **Time Triggers**: Auto-close at 21 DTE regardless of P&L
+4. **Greek Triggers**: Adjust when delta > |0.5|
+
+#### Multi-Conditional OCO (MOCO)
+**Advanced Management**: Multiple exit conditions
+- **Example**: Close at 50% profit OR 21 DTE OR 200% loss OR delta > 1.0
+- **Benefit**: Comprehensive automation without monitoring
+
+### Regular Orders
+**Fallback**: When advanced orders not available
+- Standard multileg strangle orders
+- Individual leg adjustments  
+- Manual monitoring required
+
+### Automated Order Flow Decision Tree
+```
+Position Entry:
+  use_otoco=true? → OTOCO (entry + 50% exit)
+  use_bracket=true? → Bracket (entry + profit + stop)
+  Default → Regular strangle + monitoring
+
+Position Management:
+  First Down → Monitor via OTOCO exit order
+  Second Down → OCO (70% profit OR roll untested)  
+  Third Down → OCO (25% profit OR continue)
+  Fourth Down → OCO (any profit OR 200% stop)
+  
+Hard Stops (Immediate):
+  Loss > 250%? → Market close order
+  DTE < 5? → Market close order  
+  |Delta| > 1.0? → Market close order
+  Black swan? → Market close order
+
+Next Trade:
+  Position closed? → Wait 1 day, scan for new entry
+  Multiple losses? → Reduce position size 50%
+  System error? → Stop trading, manual review
+```
+
+### Strategy Alignment
+- **No Stop Losses**: OCO used for profit/management, not stops  
+- **50% Profit Target**: Automated via OTOCO exit orders
+- **Rolling Management**: OCO supports "football system" adjustments
+- **Manual Override**: Always available for black swan events
+
+---
+
 ## Development Phases
 
-### Phase 1: MVP (Weeks 1-4)
-**Goal**: Prove core functionality works
+### Phase 1: MVP with Critical Fixes (Weeks 1-4)
+**Goal**: Prove core functionality with proper architecture
+
+#### Architecture Requirements
+- ✅ Interface-based design for all components
+- ✅ Comprehensive unit test coverage (>80%)
+- ✅ State machine for position management
+- ✅ Retry logic with exponential backoff
+- ✅ Circuit breaker for API resilience
 
 #### Scope
-- **IN**: SPY only, basic entry/exit, 16Δ strikes, paper trading
-- **OUT**: Adjustments, multiple tickers, database, UI
+- **IN**: SPY only, basic entry/exit, 16Δ strikes, paper trading, testing infrastructure
+- **OUT**: Adjustments, multiple tickers, production database, UI
 
-#### Architecture (MVP)
+#### Enhanced MVP Architecture
 ```
 spy-strangle-bot/
-├── cmd/bot/main.go           # Entry point, scheduler
+├── cmd/bot/main.go           # Entry point with dependency injection
 ├── internal/
-│   ├── broker/tradier.go     # API client
-│   ├── strategy/strangle.go  # Core logic
-│   ├── models/position.go    # Data structures
-│   └── config/config.go      # Configuration
-├── config.yaml               # Settings
-└── positions.json            # State persistence
+│   ├── interfaces/           # All interface definitions
+│   │   ├── broker.go
+│   │   ├── storage.go
+│   │   └── strategy.go
+│   ├── broker/
+│   │   ├── tradier.go        # Implements Broker interface
+│   │   └── tradier_test.go
+│   ├── strategy/
+│   │   ├── strangle.go       # Implements Strategy interface
+│   │   └── strangle_test.go
+│   ├── storage/
+│   │   ├── json_storage.go   # Implements Storage interface
+│   │   └── storage_test.go
+│   ├── models/
+│   │   └── position.go
+│   ├── state/
+│   │   └── machine.go        # Position state machine
+│   └── config/
+│       └── config.go
+├── config.yaml
+├── positions.json            # Temporary, migrate to SQLite
+└── go.mod
+```
+
+#### State Machine Implementation
+```go
+type PositionStateMachine struct {
+    current     PositionState
+    transitions map[PositionState][]PositionState
+    storage     Storage
+    mu          sync.RWMutex
+}
+
+func (sm *PositionStateMachine) TransitionTo(newState PositionState) error {
+    sm.mu.Lock()
+    defer sm.mu.Unlock()
+    
+    if !sm.isValidTransition(sm.current, newState) {
+        return ErrInvalidStateTransition
+    }
+    
+    // Atomic update with rollback capability
+    if err := sm.storage.UpdateState(newState); err != nil {
+        return fmt.Errorf("failed to persist state: %w", err)
+    }
+    
+    sm.current = newState
+    return nil
+}
+```
+
+#### Resilience Patterns
+```go
+// Retry with exponential backoff
+func (b *ResilientBroker) GetQuoteWithRetry(symbol string) (*Quote, error) {
+    return retry.Do(
+        func() error {
+            return b.broker.GetQuote(symbol)
+        },
+        retry.Attempts(3),
+        retry.Delay(time.Second),
+        retry.DelayType(retry.BackOffDelay),
+    )
+}
+
+// Circuit breaker implementation
+type CircuitBreakerBroker struct {
+    broker  Broker
+    breaker *gobreaker.CircuitBreaker
+}
 ```
 
 #### Success Metrics
+- 100% unit test coverage for financial calculations
 - 30 days without crashes
 - 10+ completed trades
 - 70%+ win rate
 
 ---
 
-### Phase 2: Full Management System (Weeks 5-8)
-**Goal**: Implement complete adjustment system
+### Phase 2: Production Readiness (Weeks 5-8)
+**Goal**: Implement adjustments and production features
 
 #### New Components
+
+##### SQLite Storage Migration
+```sql
+-- SQLite schema for ACID properties
+CREATE TABLE positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('idle','scanning','entering','positioned','adjusting','closing')),
+    entry_date TIMESTAMP NOT NULL,
+    put_strike REAL NOT NULL,
+    call_strike REAL NOT NULL,
+    expiration DATE NOT NULL,
+    quantity INTEGER NOT NULL,
+    credit_received REAL NOT NULL,
+    current_value REAL,
+    realized_pnl REAL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id INTEGER REFERENCES positions(id),
+    adjustment_type TEXT NOT NULL,
+    executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+##### Observability Stack
+```go
+// Structured logging with zap
+logger, _ := zap.NewProduction()
+defer logger.Sync()
+
+logger.Info("executing strategy",
+    zap.String("symbol", symbol),
+    zap.Float64("ivr", ivr),
+    zap.Int("dte", dte),
+)
+
+// Prometheus metrics
+var (
+    ordersPlaced = prometheus.NewCounterVec(
+        prometheus.CounterOpts{
+            Name: "trading_orders_placed_total",
+        },
+        []string{"type", "status"},
+    )
+)
+```
+
+##### Security Enhancements
+```go
+// Encrypted credential storage
+type SecureConfig struct {
+    cipher cipher.Block
+}
+
+func (s *SecureConfig) GetAPIKey() (string, error) {
+    // Decrypt API key from secure storage
+}
+```
 
 ##### Adjustment Manager
 Implements the "Football System":
@@ -187,16 +503,52 @@ spy-strangle-bot/
 +│   │   ├── detector.go      # When to adjust
 +│   │   ├── executor.go      # How to adjust
 +│   │   └── tracker.go       # Adjustment history
-+│   ├── database/
-+│   │   └── sqlite.go        # Position history
-+│   └── analytics/
-+│       └── performance.go   # P&L attribution
++│   ├── storage/
++│   │   ├── sqlite.go        # SQLite implementation
++│   │   └── migrations/      # Database migrations
++│   ├── resilience/
++│   │   ├── retry.go         # Retry logic
++│   │   └── breaker.go       # Circuit breaker
++│   └── monitoring/
++│       ├── logger.go        # Structured logging
++│       └── metrics.go       # Prometheus metrics
 ```
 
 ---
 
 ### Phase 3: Multi-Asset & Optimization (Weeks 9-12)
-**Goal**: Scale beyond single ticker
+**Goal**: Scale beyond single ticker with production database
+
+#### PostgreSQL Migration
+```sql
+-- Production-ready PostgreSQL schema
+CREATE TYPE position_status AS ENUM (
+    'idle', 'scanning', 'entering', 
+    'positioned', 'adjusting', 'closing'
+);
+
+CREATE TABLE positions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    symbol VARCHAR(10) NOT NULL,
+    status position_status NOT NULL,
+    entry_date TIMESTAMPTZ NOT NULL,
+    put_strike DECIMAL(10,2) NOT NULL,
+    call_strike DECIMAL(10,2) NOT NULL,
+    expiration DATE NOT NULL,
+    quantity INTEGER NOT NULL,
+    credit_received DECIMAL(10,2) NOT NULL,
+    current_value DECIMAL(10,2),
+    realized_pnl DECIMAL(10,2),
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Performance indexes
+CREATE INDEX idx_positions_status ON positions(status);
+CREATE INDEX idx_positions_symbol ON positions(symbol);
+CREATE INDEX idx_positions_expiration ON positions(expiration);
+```
 
 #### Portfolio Management
 ```
@@ -223,8 +575,8 @@ if regime == "high_vol": use 30Δ
 
 ---
 
-### Phase 4: Production (Weeks 13-16)
-**Goal**: Live trading ready
+### Phase 4: Production Deployment (Weeks 13-16)
+**Goal**: Live trading ready with full monitoring
 
 #### Infrastructure Upgrades
 - PostgreSQL for trade history
@@ -263,6 +615,7 @@ broker:
   api_key: "${TRADIER_API_KEY}"  # From environment
   api_endpoint: "https://sandbox.tradier.com/v1/"
   account_id: "${TRADIER_ACCOUNT}"
+  use_otoco: true  # OTOCO orders for preset exits
   
 strategy:
   symbol: "SPY"
@@ -305,11 +658,35 @@ GET  /accounts/{id}/positions     # Get positions
 GET  /accounts/{id}/orders        # Check order status
 ```
 
-#### Rate Limiting
-- 120 requests/minute (sandbox)
-- 500 requests/minute (production)
-- Implement exponential backoff
-- Cache responses for 1 minute
+#### Rate Limiting Implementation
+```go
+type RateLimitedClient struct {
+    client     *http.Client
+    limiter    *rate.Limiter  // 120/min sandbox, 500/min prod
+    lastRequest time.Time
+    cache      *cache.Cache    // 1-minute TTL
+}
+
+func (c *RateLimitedClient) GetQuote(symbol string) (*Quote, error) {
+    // Check cache first
+    if cached, found := c.cache.Get(cacheKey(symbol)); found {
+        return cached.(*Quote), nil
+    }
+    
+    // Rate limit API call
+    if err := c.limiter.Wait(context.Background()); err != nil {
+        return nil, err
+    }
+    
+    quote, err := c.client.GetQuote(symbol)
+    if err != nil {
+        return nil, err
+    }
+    
+    c.cache.Set(cacheKey(symbol), quote, time.Minute)
+    return quote, nil
+}
+```
 
 ### Order Execution Flow
 
@@ -321,25 +698,72 @@ GET  /accounts/{id}/orders        # Check order status
    Yes ↓
 3. Build Order
        ↓
-4. Place Order
+4. Place Order (with retry)
        ↓
 5. Wait for Fill (max 5 min)
    Partial → Adjust or Cancel
    Filled → Update Position
        ↓
-6. Persist State
+6. Persist State (transactional)
 ```
 
 ### Error Handling Matrix
 
-| Error Type | Response | Recovery |
-|------------|----------|----------|
-| Network Timeout | Retry 3x with backoff | Skip cycle |
-| API Rate Limit | Wait and retry | Reduce frequency |
-| Invalid Order | Log error | Manual review |
-| Insufficient Funds | Alert | Halt trading |
-| Position Not Found | Reconcile | Rebuild state |
-| Critical Error | Shutdown | Alert operator |
+| Error Type | Response | Recovery | Implementation |
+|------------|----------|----------|----------------|
+| Network Timeout | Retry 3x with backoff | Skip cycle | Exponential backoff |
+| API Rate Limit | Wait and retry | Reduce frequency | Rate limiter |
+| Invalid Order | Log error | Manual review | Validation layer |
+| Insufficient Funds | Alert | Halt trading | Pre-flight check |
+| Position Not Found | Reconcile | Rebuild state | State recovery |
+| Critical Error | Shutdown | Alert operator | Circuit breaker |
+
+---
+
+## Critical Improvements Required
+
+### Immediate (MVP Blockers)
+1. **Interface-Based Design** ⚠️
+   - Define core interfaces (Broker, Storage, Strategy)
+   - Implement dependency injection
+   - Enable mock implementations
+
+2. **Testing Infrastructure** ⚠️
+   - Unit tests for all financial calculations
+   - Integration tests for broker API
+   - Mock data providers
+
+3. **State Management** ⚠️
+   - Implement position state machine
+   - Add transaction support
+   - Ensure consistency between memory and storage
+
+4. **Error Resilience** ⚠️
+   - Add retry logic with exponential backoff
+   - Implement circuit breaker pattern
+   - Categorize errors (transient vs permanent)
+
+### Short-term (Production Requirements)
+1. **Database Migration**
+   - Move from JSON to SQLite (Phase 2)
+   - Add ACID properties
+   - Implement migrations
+
+2. **Observability**
+   - Structured logging (zap/logrus)
+   - Metrics collection (Prometheus)
+   - Health check endpoints
+
+3. **Security**
+   - Encrypt credentials
+   - API request signing
+   - Audit logging
+
+### Long-term (Scalability)
+1. **Multi-Asset Support**
+2. **Event-Driven Architecture**
+3. **PostgreSQL Migration**
+4. **Web Dashboard**
 
 ---
 
@@ -347,14 +771,13 @@ GET  /accounts/{id}/orders        # Check order status
 
 ### Development Environment
 ```bash
-# Local development
+# Local development with tests
+go test ./... -v
 go run cmd/bot/main.go --config=config.dev.yaml
 
-# Run tests
-go test ./...
-
-# Build binary
-go build -o strangle-bot cmd/bot/main.go
+# Build with version info
+go build -ldflags "-X main.version=$(git describe --tags)" \
+    -o strangle-bot cmd/bot/main.go
 ```
 
 ### Production Deployment
@@ -372,6 +795,8 @@ WorkingDirectory=/opt/strangle-bot
 ExecStart=/opt/strangle-bot/strangle-bot
 Restart=on-failure
 RestartSec=10
+StandardOutput=append:/var/log/strangle-bot/output.log
+StandardError=append:/var/log/strangle-bot/error.log
 
 [Install]
 WantedBy=multi-user.target
@@ -400,6 +825,7 @@ CMD ["./strangle-bot"]
 - Win rate (rolling 30 days)
 - API calls per minute
 - Error rate
+- State transitions per hour
 
 #### Log Levels
 ```
@@ -415,12 +841,14 @@ FATAL: Bot shutting down
 - No heartbeat for 30 minutes
 - API errors >10 in 5 minutes
 - Unexpected position state
+- Invalid state transition attempted
 
 ### Backup & Recovery
 
 #### State Backup
-- Position file: Every update
-- Database: Daily backup
+- Position file: Every update (Phase 1)
+- SQLite: Continuous backup (Phase 2)
+- PostgreSQL: Daily backup with WAL (Phase 3)
 - Configuration: Version controlled
 
 #### Disaster Recovery
@@ -429,6 +857,7 @@ FATAL: Bot shutting down
 3. Restore from last known good state
 4. Validate positions match broker
 5. Resume in paper mode first
+6. Verify state machine consistency
 
 ---
 
@@ -460,7 +889,7 @@ Risk check pass?
   No → Skip
   Yes ↓
   
-PLACE ORDER
+PLACE ORDER (with retry)
 ```
 
 ### Exit Decision
@@ -483,3 +912,49 @@ Loss > 200% of credit?
   
 Continue monitoring
 ```
+
+### State Transition Rules
+```
+IDLE → SCANNING: Market open & no position
+SCANNING → ENTERING: Valid entry signal
+ENTERING → POSITIONED: Order filled
+POSITIONED → ADJUSTING: Adjustment trigger
+POSITIONED → CLOSING: Exit signal
+ADJUSTING → POSITIONED: Adjustment complete
+CLOSING → IDLE: Position closed
+ANY → IDLE: Error recovery
+```
+
+---
+
+## Architecture Roadmap
+
+### Week 1-2: Foundation
+- [ ] Create interface definitions
+- [ ] Implement dependency injection
+- [ ] Write unit tests for core logic
+- [ ] Add integration tests
+
+### Week 3-4: Resilience
+- [ ] Implement state machine
+- [ ] Add retry logic
+- [ ] Implement circuit breaker
+- [ ] Enhanced error handling
+
+### Week 5-6: Storage & Monitoring
+- [ ] Migrate to SQLite
+- [ ] Add structured logging
+- [ ] Implement metrics
+- [ ] Create health checks
+
+### Week 7-8: Security & Testing
+- [ ] Encrypt credentials
+- [ ] Add comprehensive tests
+- [ ] Performance testing
+- [ ] 30-day paper trading
+
+### Week 9+: Production & Scale
+- [ ] PostgreSQL migration
+- [ ] Multi-asset support
+- [ ] Web dashboard
+- [ ] Live trading preparation

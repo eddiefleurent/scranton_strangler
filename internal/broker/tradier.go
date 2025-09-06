@@ -299,6 +299,79 @@ func (t *TradierAPI) PlaceStrangleOrder(
 	return &response, nil
 }
 
+func (t *TradierAPI) PlaceStrangleOTOCO(
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	limitCredit float64,
+	profitTarget float64, // percentage as decimal (0.5 for 50%)
+	preview bool,
+) (*OrderResponse, error) {
+	
+	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
+	expDate, err := time.Parse("2006-01-02", expiration)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expiration format: %w", err)
+	}
+	expFormatted := expDate.Format("060102")
+	
+	// Build option symbols
+	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(putStrike*1000))
+	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(callStrike*1000))
+	
+	// Calculate exit price (50% of credit received)
+	exitPrice := limitCredit * (1 - profitTarget)
+	
+	// Build OTOCO form data
+	params := url.Values{}
+	params.Add("class", "otoco")
+	params.Add("duration", "gtc") // Good-till-cancelled for the overall order
+	
+	if preview {
+		params.Add("preview", "true")
+	}
+	
+	// Primary order: Open the strangle
+	params.Add("type[0]", "credit")
+	params.Add("duration[0]", "day")
+	params.Add("price[0]", fmt.Sprintf("%.2f", limitCredit))
+	
+	// Primary order Leg 0: Sell put
+	params.Add("option_symbol[0][0]", putSymbol)
+	params.Add("side[0][0]", "sell_to_open")
+	params.Add("quantity[0][0]", fmt.Sprintf("%d", quantity))
+	
+	// Primary order Leg 1: Sell call  
+	params.Add("option_symbol[0][1]", callSymbol)
+	params.Add("side[0][1]", "sell_to_open")
+	params.Add("quantity[0][1]", fmt.Sprintf("%d", quantity))
+	
+	// OTO Order 1: Close at profit target (50% of credit)
+	params.Add("type[1]", "debit")
+	params.Add("duration[1]", "gtc")
+	params.Add("price[1]", fmt.Sprintf("%.2f", exitPrice))
+	
+	// OTO Order 1 Leg 0: Buy back put
+	params.Add("option_symbol[1][0]", putSymbol)
+	params.Add("side[1][0]", "buy_to_close")
+	params.Add("quantity[1][0]", fmt.Sprintf("%d", quantity))
+	
+	// OTO Order 1 Leg 1: Buy back call
+	params.Add("option_symbol[1][1]", callSymbol)
+	params.Add("side[1][1]", "buy_to_close")
+	params.Add("quantity[1][1]", fmt.Sprintf("%d", quantity))
+	
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	
+	var response OrderResponse
+	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+		return nil, err
+	}
+	
+	return &response, nil
+}
+
 // Helper method for making HTTP requests
 func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, response interface{}) error {
 	var req *http.Request

@@ -73,9 +73,17 @@ spy-strangle-bot/
 The bot implements a mechanical short strangle strategy on SPY:
 
 1. **Entry**: Sell 16Δ put and call when IVR > 30
-2. **Exit**: Close at 50% profit or 21 DTE
+2. **Exit**: Close at 50% profit or 21 DTE (automatic with OTOCO orders)
 3. **Risk**: Max 35% account allocation
 4. **Management**: Progressive adjustments (Phase 2)
+
+### OTOCO Order Support
+
+The bot can use OTOCO (One-Triggers-One-Cancels-Other) orders for automatic profit taking:
+- When enabled via `use_otoco: true` in config
+- Places exit order immediately when opening position
+- Exit order stays active (GTC) until filled at 50% profit
+- No need to monitor positions for profit target
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
 

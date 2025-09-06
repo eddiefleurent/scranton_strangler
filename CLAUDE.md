@@ -63,8 +63,16 @@ scripts/test_tradier.go   # API connection testing utility
 - Implements exponential backoff for retries
 - Caches responses for 1 minute to minimize API calls
 
-### State Management
-Position state is persisted to `positions.json` after each update. States flow: `IDLE → SCANNING → ENTERING → POSITIONED → ADJUSTING/CLOSING`
+### State Management  
+Position state follows the Football System via state machine: `idle → open → first_down → second_down → third_down → fourth_down → closed`
+
+The state machine enforces:
+- Max 3 adjustments per position
+- Max 1 time roll per position  
+- Valid state transitions only
+- Automatic validation
+
+See `docs/STATE_MACHINE.md` for detailed documentation.
 
 ### Configuration
 Uses `config.yaml` for all settings. Copy from `config.yaml.example` and update with your Tradier credentials. Environment variables are supported via `${VAR_NAME}` syntax.
