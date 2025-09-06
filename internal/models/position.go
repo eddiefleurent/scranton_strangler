@@ -6,31 +6,29 @@ import (
 )
 
 type Position struct {
-	ID             string       `json:"id"`
-	Symbol         string       `json:"symbol"`
-	PutStrike      float64      `json:"put_strike"`
-	CallStrike     float64      `json:"call_strike"`
-	Expiration     time.Time    `json:"expiration"`
-	Quantity       int          `json:"quantity"`
-	CreditReceived float64      `json:"credit_received"`
-	EntryDate      time.Time    `json:"entry_date"`
-	EntryIVR       float64      `json:"entry_ivr"`
-	EntrySpot      float64      `json:"entry_spot"`
-	CurrentPnL     float64      `json:"current_pnl"`
-	DTE            int          `json:"dte"`
-	Adjustments    []Adjustment `json:"adjustments"`
-
-	// State machine for position management
-	StateMachine *StateMachine `json:"state_machine"`
+	Expiration     time.Time     `json:"expiration"`
+	EntryDate      time.Time     `json:"entry_date"`
+	StateMachine   *StateMachine `json:"state_machine"`
+	ID             string        `json:"id"`
+	Symbol         string        `json:"symbol"`
+	Adjustments    []Adjustment  `json:"adjustments"`
+	CreditReceived float64       `json:"credit_received"`
+	Quantity       int           `json:"quantity"`
+	EntryIVR       float64       `json:"entry_ivr"`
+	EntrySpot      float64       `json:"entry_spot"`
+	CurrentPnL     float64       `json:"current_pnl"`
+	DTE            int           `json:"dte"`
+	CallStrike     float64       `json:"call_strike"`
+	PutStrike      float64       `json:"put_strike"`
 }
 
 type Adjustment struct {
 	Date        time.Time `json:"date"`
-	Type        string    `json:"type"` // "roll_put", "roll_call", "straddle", "inverted"
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
 	OldStrike   float64   `json:"old_strike"`
 	NewStrike   float64   `json:"new_strike"`
 	Credit      float64   `json:"credit"`
-	Description string    `json:"description"`
 }
 
 func (p *Position) CalculateDTE() int {

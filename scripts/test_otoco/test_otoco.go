@@ -85,7 +85,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse selected expiration %s: %v", bestExpiration, err)
 	}
-	dte := int(expDate.Sub(time.Now()).Hours() / 24)
+	dte := int(time.Until(expDate).Hours() / 24)
 	fmt.Printf("   Selected expiration: %s (%d DTE)\n", bestExpiration, dte)
 
 	// 3. Get option chain with Greeks
@@ -150,7 +150,7 @@ func main() {
 		fmt.Println("   The order would:")
 		fmt.Println("   1. Open a strangle at the specified strikes")
 		fmt.Println("   2. Automatically place a GTC exit order at 50% profit")
-		fmt.Println("   3. Exit order remains active until filled or cancelled")
+		fmt.Println("   3. Exit order remains active until filled or canceled")
 	} else {
 		fmt.Printf("\n✅ OTOCO order placed! Order ID: %d\n", orderResp.Order.ID)
 		fmt.Println("   Exit order is now active and will close at 50% profit")

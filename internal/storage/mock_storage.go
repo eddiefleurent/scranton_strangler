@@ -8,16 +8,14 @@ import (
 
 // MockStorage implements StorageInterface for testing
 type MockStorage struct {
+	saveError       error
+	loadError       error
 	currentPosition *models.Position
-	history         []models.Position
 	dailyPnL        map[string]float64
 	statistics      *Statistics
-
-	// Mock control flags
-	saveError     error
-	loadError     error
-	saveCallCount int
-	loadCallCount int
+	history         []models.Position
+	saveCallCount   int
+	loadCallCount   int
 }
 
 // NewMockStorage creates a new mock storage for testing

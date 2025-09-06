@@ -2,17 +2,18 @@ package config
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
 	Environment EnvironmentConfig `yaml:"environment"`
 	Broker      BrokerConfig      `yaml:"broker"`
+	Schedule    ScheduleConfig    `yaml:"schedule"`
 	Strategy    StrategyConfig    `yaml:"strategy"`
 	Risk        RiskConfig        `yaml:"risk"`
-	Schedule    ScheduleConfig    `yaml:"schedule"`
 }
 
 type EnvironmentConfig struct {
@@ -30,16 +31,16 @@ type BrokerConfig struct {
 
 type StrategyConfig struct {
 	Symbol        string           `yaml:"symbol"`
-	AllocationPct float64          `yaml:"allocation_pct"`
 	Entry         EntryConfig      `yaml:"entry"`
 	Exit          ExitConfig       `yaml:"exit"`
 	Adjustments   AdjustmentConfig `yaml:"adjustments"`
+	AllocationPct float64          `yaml:"allocation_pct"`
 }
 
 type EntryConfig struct {
+	DTERange  []int   `yaml:"dte_range"`
 	MinIVR    float64 `yaml:"min_ivr"`
 	TargetDTE int     `yaml:"target_dte"`
-	DTERange  []int   `yaml:"dte_range"`
 	Delta     float64 `yaml:"delta"`
 	MinCredit float64 `yaml:"min_credit"`
 }
@@ -152,11 +153,11 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	todayET := now.In(loc)
 
 	startClock, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
-	endClock,   err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
+	endClock, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
 	if err1 != nil || err2 != nil {
 		// Safe defaults if misconfigured
-		startClock, _ = time.ParseInLocation("15:04", "09:45", loc)
-		endClock,   _ = time.ParseInLocation("15:04", "15:45", loc)
+		startClock, _ = time.ParseInLocation("15:04", "09:45", loc) //nolint:errcheck // hardcoded default
+		endClock, _ = time.ParseInLocation("15:04", "15:45", loc)   //nolint:errcheck // hardcoded default
 	}
 	start := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
 		startClock.Hour(), startClock.Minute(), 0, 0, loc)

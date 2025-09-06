@@ -115,7 +115,10 @@ func TestStateMachine_AdjustmentLimits(t *testing.T) {
 	}
 
 	for _, tr := range setupTransitions {
-		sm.Transition(tr.to, tr.condition)
+		err := sm.Transition(tr.to, tr.condition)
+		if err != nil {
+			t.Fatalf("Setup transition failed: %v", err)
+		}
 	}
 
 	// Test adjustment limits (max 3)
@@ -131,8 +134,8 @@ func TestStateMachine_AdjustmentLimits(t *testing.T) {
 		}
 
 		// Return to management state
-		sm.Transition(StateFirstDown, "adjustment_complete")
-		sm.Transition(StateSecondDown, "strike_challenged")
+		_ = sm.Transition(StateFirstDown, "adjustment_complete") //nolint:errcheck // test setup
+		_ = sm.Transition(StateSecondDown, "strike_challenged")  //nolint:errcheck // test setup
 	}
 
 	// Fourth adjustment should fail
@@ -299,7 +302,6 @@ func TestPosition_StateMachineIntegration(t *testing.T) {
 	if pos.GetCurrentState() != StateOpen {
 		t.Errorf("Position state should be StateOpen, got %s", pos.GetCurrentState())
 	}
-
 }
 
 func TestPosition_StateValidation(t *testing.T) {
@@ -372,13 +374,13 @@ func TestPosition_ManagementMethods(t *testing.T) {
 // Test emergency exit conditions at 200% loss threshold
 func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	sm := NewStateMachine()
-	
+
 	// Test below 200% loss - no emergency exit
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -6.50, 30) // 185.7% loss
 	if shouldExit {
 		t.Errorf("Should not emergency exit at 185.7%% loss, but got: %s", reason)
 	}
-	
+
 	// Test exactly at 200% loss - should trigger
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -7.00, 30) // 200% loss
 	if !shouldExit {
@@ -387,7 +389,7 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	if reason != "emergency exit: loss 200.0% >= 200% threshold" {
 		t.Errorf("Expected specific loss message, got: %s", reason)
 	}
-	
+
 	// Test above 200% loss - should trigger
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -8.00, 30) // 228.6% loss
 	if !shouldExit {
@@ -400,23 +402,23 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm := NewStateMachine()
 	sm.currentState = StateFourthDown
 	sm.SetFourthDownOption(OptionA)
-	
+
 	// Manipulate time to simulate passage of days
 	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
-	
+
 	// Test within 5-day limit - no emergency exit
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 4 days
 	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
-	
+
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
 	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour) // exactly 5 days ago
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 5 days
 	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
 	}
-	
+
 	// Test beyond 5-day limit - should trigger
 	sm.fourthDownStartTime = time.Now().Add(-6 * 24 * time.Hour) // 6 days ago
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 6 days
@@ -433,14 +435,14 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 	sm := NewStateMachine()
 	sm.currentState = StateFourthDown
 	sm.SetFourthDownOption(OptionB)
-	
+
 	// Test within 3-day limit - no emergency exit
-	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour) // 2 days ago
+	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)  // 2 days ago
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 2 days
 	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
-	
+
 	// Test beyond 3-day limit - should trigger
 	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 4 days
@@ -458,13 +460,13 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm.currentState = StateFourthDown
 	sm.SetFourthDownOption(OptionC)
 	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
-	
+
 	// Test above 21 DTE - no emergency exit
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 25) // 142.9% loss, 25 DTE
 	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
 		t.Errorf("Should not emergency exit at 25 DTE, but got: %s", reason)
 	}
-	
+
 	// Test exactly at 21 DTE - should trigger
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 21) // 142.9% loss, 21 DTE
 	if !shouldExit {
@@ -473,7 +475,7 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	if !contains(reason, "Option C reached 21 DTE limit") {
 		t.Errorf("Expected Option C DTE limit message, got: %s", reason)
 	}
-	
+
 	// Test below 21 DTE - should trigger
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 15) // 142.9% loss, 15 DTE
 	if !shouldExit {
@@ -484,29 +486,29 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 // Test punt functionality and single-punt enforcement
 func TestStateMachine_Punt_SingleUse(t *testing.T) {
 	sm := NewStateMachine()
-	
+
 	// Initially should be able to punt
 	if !sm.CanPunt() {
 		t.Error("Fresh state machine should allow punt")
 	}
-	
+
 	// Execute first punt
 	err := sm.ExecutePunt()
 	if err != nil {
 		t.Fatalf("First punt should succeed: %v", err)
 	}
-	
+
 	// After first punt, should not be able to punt again
 	if sm.CanPunt() {
 		t.Error("Should not be able to punt after first use (max 1 per trade)")
 	}
-	
+
 	// Second punt attempt should fail
 	err = sm.ExecutePunt()
 	if err == nil {
 		t.Error("Second punt should fail - only 1 allowed per original trade")
 	}
-	
+
 	// Test punt counter
 	if sm.puntCount != 1 {
 		t.Errorf("Punt count should be 1, got %d", sm.puntCount)
@@ -517,16 +519,16 @@ func TestStateMachine_Punt_SingleUse(t *testing.T) {
 func TestPosition_EmergencyExit_Integration(t *testing.T) {
 	expiration := time.Now().AddDate(0, 0, 30) // 30 DTE
 	pos := NewPosition("TEST-1", "SPY", 400.0, 420.0, expiration, 1)
-	
+
 	pos.CreditReceived = 3.50
 	pos.CurrentPnL = -5.00 // 142.9% loss
-	
+
 	// Below 200% loss - no emergency exit
 	shouldExit, reason := pos.ShouldEmergencyExit()
 	if shouldExit {
 		t.Errorf("Should not emergency exit at 142.9%% loss, but got: %s", reason)
 	}
-	
+
 	// At 200% loss - should trigger
 	pos.CurrentPnL = -7.00 // 200% loss
 	shouldExit, reason = pos.ShouldEmergencyExit()
@@ -539,29 +541,29 @@ func TestPosition_EmergencyExit_Integration(t *testing.T) {
 func TestPosition_FourthDownOptions(t *testing.T) {
 	expiration := time.Now().AddDate(0, 0, 30)
 	pos := NewPosition("TEST-1", "SPY", 400.0, 420.0, expiration, 1)
-	
+
 	// Test initial state
 	if pos.GetFourthDownOption() != "" {
 		t.Error("New position should not have Fourth Down option set")
 	}
-	
+
 	// Test setting Option A
 	pos.SetFourthDownOption(OptionA)
 	if pos.GetFourthDownOption() != OptionA {
 		t.Errorf("Expected Option A, got %s", pos.GetFourthDownOption())
 	}
-	
+
 	// Test punt capability
 	if !pos.CanPunt() {
 		t.Error("Fresh position should allow punt")
 	}
-	
+
 	// Execute punt
 	err := pos.ExecutePunt()
 	if err != nil {
 		t.Fatalf("Punt should succeed: %v", err)
 	}
-	
+
 	// After punt, should not be able to punt again
 	if pos.CanPunt() {
 		t.Error("Should not be able to punt after first use")
@@ -571,12 +573,12 @@ func TestPosition_FourthDownOptions(t *testing.T) {
 // Test state machine reset includes new Fourth Down fields
 func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	sm := NewStateMachine()
-	
+
 	// Set up Fourth Down state
 	sm.currentState = StateFourthDown
 	sm.SetFourthDownOption(OptionA)
 	sm.ExecutePunt()
-	
+
 	// Verify setup
 	if sm.GetFourthDownOption() != OptionA {
 		t.Error("Fourth Down option should be set before reset")
@@ -584,10 +586,10 @@ func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	if sm.CanPunt() {
 		t.Error("Should not be able to punt after using it")
 	}
-	
+
 	// Reset state machine
 	sm.Reset()
-	
+
 	// Verify Fourth Down fields are reset
 	if sm.GetFourthDownOption() != "" {
 		t.Errorf("Fourth Down option should be empty after reset, got %s", sm.GetFourthDownOption())

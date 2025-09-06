@@ -1,3 +1,4 @@
+// Package storage provides position and trading data persistence functionality.
 package storage
 
 import (
@@ -12,17 +13,17 @@ import (
 
 // JSONStorage implements StorageInterface using JSON file persistence
 type JSONStorage struct {
-	mu       sync.RWMutex
-	filepath string
 	data     *StorageData
+	filepath string
+	mu       sync.RWMutex
 }
 
 type StorageData struct {
+	LastUpdated     time.Time          `json:"last_updated"`
 	CurrentPosition *models.Position   `json:"current_position"`
-	History         []models.Position  `json:"history"`
 	DailyPnL        map[string]float64 `json:"daily_pnl"`
 	Statistics      *Statistics        `json:"statistics"`
-	LastUpdated     time.Time          `json:"last_updated"`
+	History         []models.Position  `json:"history"`
 }
 
 type Statistics struct {

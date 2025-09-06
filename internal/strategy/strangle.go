@@ -463,9 +463,9 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 
 type StrangleOrder struct {
 	Symbol       string
+	Expiration   string
 	PutStrike    float64
 	CallStrike   float64
-	Expiration   string
 	Credit       float64
 	Quantity     int
 	SpotPrice    float64

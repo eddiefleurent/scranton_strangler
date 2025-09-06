@@ -1,3 +1,4 @@
+// Package models provides data structures and state management for trading positions.
 package models
 
 import (
@@ -19,11 +20,11 @@ const (
 
 const (
 	// Core states
-	StateIdle      PositionState = "idle"       // No active position
-	StateSubmitted PositionState = "submitted"  // Order submitted, waiting for fill
-	StateOpen      PositionState = "open"       // Position opened, ready for management
-	StateClosed    PositionState = "closed"     // Position closed
-	StateError     PositionState = "error"      // Error state requiring intervention
+	StateIdle      PositionState = "idle"      // No active position
+	StateSubmitted PositionState = "submitted" // Order submitted, waiting for fill
+	StateOpen      PositionState = "open"      // Position opened, ready for management
+	StateClosed    PositionState = "closed"    // Position closed
+	StateError     PositionState = "error"     // Error state requiring intervention
 
 	// Football System management states
 	StateFirstDown  PositionState = "first_down"  // Normal theta decay monitoring
@@ -50,7 +51,7 @@ var ValidTransitions = []StateTransition{
 	{StateIdle, StateSubmitted, "order_placed", "Order submitted to broker"},
 	{StateIdle, StateFirstDown, "punt_executed", "Punting on position entry"},
 	{StateSubmitted, StateOpen, "order_filled", "Order filled successfully"},
-	{StateSubmitted, StateError, "order_failed", "Order failed or cancelled"},
+	{StateSubmitted, StateError, "order_failed", "Order failed or canceled"},
 	{StateSubmitted, StateClosed, "order_timeout", "Order timed out without fill"},
 	{StateOpen, StateFirstDown, "start_management", "Begin football system monitoring"},
 	{StateOpen, StateClosed, "position_closed", "Position closed directly (profit target hit, time limit, etc.)"},
@@ -89,17 +90,15 @@ var ValidTransitions = []StateTransition{
 
 // StateMachine manages position state transitions
 type StateMachine struct {
-	currentState    PositionState
-	previousState   PositionState
-	transitionTime  time.Time
-	transitionCount map[PositionState]int
-	maxAdjustments  int // Maximum number of adjustments allowed
-	maxTimeRolls    int // Maximum number of time rolls allowed
-
-	// Fourth Down management
-	fourthDownOption   FourthDownOption
-	fourthDownStartTime time.Time // When Fourth Down was entered
-	puntCount          int        // Number of punts used
+	transitionTime      time.Time
+	fourthDownStartTime time.Time
+	transitionCount     map[PositionState]int
+	currentState        PositionState
+	previousState       PositionState
+	fourthDownOption    FourthDownOption
+	maxAdjustments      int
+	maxTimeRolls        int
+	puntCount           int
 }
 
 // NewStateMachine creates a new state machine

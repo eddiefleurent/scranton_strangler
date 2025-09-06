@@ -8,8 +8,8 @@ import (
 func TestCalculateIVR(t *testing.T) {
 	tests := []struct {
 		name         string
-		currentIV    float64
 		historicalIV []float64
+		currentIV    float64
 		expected     float64
 	}{
 		{
@@ -70,10 +70,10 @@ func TestGetOptionByStrike(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		strike     float64
-		optionType string
 		expected   *Option
+		name       string
+		optionType string
+		strike     float64
 	}{
 		{
 			name:       "find put option",
@@ -113,9 +113,9 @@ func TestGetOptionByStrike(t *testing.T) {
 
 func TestDaysBetween(t *testing.T) {
 	tests := []struct {
-		name     string
 		from     time.Time
 		to       time.Time
+		name     string
 		expected int
 	}{
 		{

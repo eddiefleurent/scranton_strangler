@@ -22,8 +22,8 @@ func TestStorageInterface(t *testing.T) {
 		tmpFile := fmt.Sprintf("/tmp/test_positions_%d.json", time.Now().UnixNano())
 		// Clean up after test
 		defer func() {
-			os.Remove(tmpFile)
-			os.Remove(tmpFile + ".tmp") // Clean up temp files too
+			_ = os.Remove(tmpFile)          //nolint:errcheck // test cleanup
+			_ = os.Remove(tmpFile + ".tmp") //nolint:errcheck // test cleanup
 		}()
 
 		storage, err := NewJSONStorage(tmpFile)
@@ -162,8 +162,14 @@ func TestMockStorageSpecificFeatures(t *testing.T) {
 
 	// Test call counting
 	mock.SetSaveError(nil) // Reset error
-	_ = mock.Save()
-	_ = mock.Save()
+	err = mock.Save()
+	if err != nil {
+		t.Errorf("Unexpected save error: %v", err)
+	}
+	err = mock.Save()
+	if err != nil {
+		t.Errorf("Unexpected save error: %v", err)
+	}
 
 	if mock.GetSaveCallCount() != 3 { // 2 new + 1 from error test
 		t.Errorf("Expected 3 save calls, got %d", mock.GetSaveCallCount())

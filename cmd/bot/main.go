@@ -376,8 +376,8 @@ func (b *Bot) executeExit(reason strategy.ExitReason) {
 // pollOrderStatus polls the broker for order status until filled or timeout
 func (b *Bot) pollOrderStatus(positionID string, orderID int) {
 	const (
-		pollInterval = 5 * time.Second  // Check every 5 seconds
-		timeout      = 5 * time.Minute  // Give up after 5 minutes
+		pollInterval = 5 * time.Second // Check every 5 seconds
+		timeout      = 5 * time.Minute // Give up after 5 minutes
 	)
 
 	b.logger.Printf("Starting order status polling for position %s, order %d", positionID, orderID)
@@ -409,7 +409,7 @@ func (b *Bot) pollOrderStatus(positionID string, orderID int) {
 				b.logger.Printf("Order filled for position %s", positionID)
 				b.handleOrderFilled(positionID)
 				return
-			case "cancelled", "rejected":
+			case "canceled", "rejected":
 				b.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
 				b.handleOrderFailed(positionID, orderStatus.Order.Status)
 				return

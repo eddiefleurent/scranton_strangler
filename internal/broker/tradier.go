@@ -13,12 +13,12 @@ import (
 
 // TradierAPI - Accurate implementation based on actual API docs
 type TradierAPI struct {
+	client     *http.Client
 	apiKey     string
 	baseURL    string
 	accountID  string
-	client     *http.Client
-	sandbox    bool
 	rateLimits RateLimits
+	sandbox    bool
 }
 
 // Rate limits per environment
@@ -62,6 +62,7 @@ func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
 
 // Handle single-object vs array responses from Tradier
 type singleOrArray[T any] []T
+
 func (s *singleOrArray[T]) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 || string(b) == "null" {
 		return nil
@@ -85,12 +86,12 @@ type OptionChainResponse struct {
 }
 
 type Option struct {
-	Symbol         string  `json:"symbol"`      // e.g., "SPY241220P00450000"
-	Description    string  `json:"description"` // e.g., "SPY Dec 20 2024 $450.00 Put"
-	Strike         float64 `json:"strike"`      // Strike price
-	OptionType     string  `json:"option_type"` // "put" or "call"
+	Greeks         *Greeks `json:"greeks,omitempty"`
+	Symbol         string  `json:"symbol"`
+	Description    string  `json:"description"`
+	OptionType     string  `json:"option_type"`
 	ExpirationDate string  `json:"expiration_date"`
-	ExpirationDay  int     `json:"expiration_day"`
+	Underlying     string  `json:"underlying"`
 	Bid            float64 `json:"bid"`
 	Ask            float64 `json:"ask"`
 	Last           float64 `json:"last"`
@@ -98,11 +99,12 @@ type Option struct {
 	AskSize        int     `json:"ask_size"`
 	Volume         int64   `json:"volume"`
 	OpenInterest   int64   `json:"open_interest"`
-	Underlying     string  `json:"underlying"`
-	Greeks         *Greeks `json:"greeks,omitempty"`
+	ExpirationDay  int     `json:"expiration_day"`
+	Strike         float64 `json:"strike"`
 }
 
 type Greeks struct {
+	UpdatedAt string  `json:"updated_at"`
 	Delta     float64 `json:"delta"`
 	Gamma     float64 `json:"gamma"`
 	Theta     float64 `json:"theta"`
@@ -113,7 +115,6 @@ type Greeks struct {
 	MidIV     float64 `json:"mid_iv"`
 	AskIV     float64 `json:"ask_iv"`
 	SmvVol    float64 `json:"smv_vol"`
-	UpdatedAt string  `json:"updated_at"`
 }
 
 // Positions response - matches API exactly
@@ -124,11 +125,11 @@ type PositionsResponse struct {
 }
 
 type PositionItem struct {
-	CostBasis    float64   `json:"cost_basis"`
 	DateAcquired time.Time `json:"date_acquired"`
+	Symbol       string    `json:"symbol"`
+	CostBasis    float64   `json:"cost_basis"`
 	ID           int       `json:"id"`
-	Quantity     float64   `json:"quantity"` // Negative for short positions
-	Symbol       string    `json:"symbol"`   // Will be option symbol for options
+	Quantity     float64   `json:"quantity"`
 }
 
 // Quotes response
@@ -143,24 +144,24 @@ type QuoteItem struct {
 	Description      string  `json:"description"`
 	Exch             string  `json:"exch"`
 	Type             string  `json:"type"`
-	Last             float64 `json:"last"`
-	Change           float64 `json:"change"`
-	ChangePercentage float64 `json:"change_percentage"`
-	Volume           int64   `json:"volume"`
+	AskExch          string  `json:"askexch"`
+	BidExch          string  `json:"bidexch"`
+	TradeDate        int64   `json:"trade_date"`
+	Low              float64 `json:"low"`
 	AverageVolume    int64   `json:"average_volume"`
 	LastVolume       int64   `json:"last_volume"`
-	TradeDate        int64   `json:"trade_date"`
+	ChangePercentage float64 `json:"change_percentage"`
 	Open             float64 `json:"open"`
 	High             float64 `json:"high"`
-	Low              float64 `json:"low"`
+	Volume           int64   `json:"volume"`
 	Close            float64 `json:"close"`
 	PrevClose        float64 `json:"prevclose"`
 	Bid              float64 `json:"bid"`
 	BidSize          int     `json:"bidsize"`
-	BidExch          string  `json:"bidexch"`
+	Change           float64 `json:"change"`
 	Ask              float64 `json:"ask"`
 	AskSize          int     `json:"asksize"`
-	AskExch          string  `json:"askexch"`
+	Last             float64 `json:"last"`
 }
 
 // Expirations response
@@ -187,22 +188,22 @@ type BalanceResponse struct {
 // Order response
 type OrderResponse struct {
 	Order struct {
-		ID                int     `json:"id"`
+		CreateDate        string  `json:"create_date"`
 		Type              string  `json:"type"`
 		Symbol            string  `json:"symbol"`
 		Side              string  `json:"side"`
-		Quantity          float64 `json:"quantity"`
+		Class             string  `json:"class"`
 		Status            string  `json:"status"`
 		Duration          string  `json:"duration"`
-		Price             float64 `json:"price"`
+		TransactionDate   string  `json:"transaction_date"`
 		AvgFillPrice      float64 `json:"avg_fill_price"`
 		ExecQuantity      float64 `json:"exec_quantity"`
 		LastFillPrice     float64 `json:"last_fill_price"`
 		LastFillQuantity  float64 `json:"last_fill_quantity"`
 		RemainingQuantity float64 `json:"remaining_quantity"`
-		CreateDate        string  `json:"create_date"`
-		TransactionDate   string  `json:"transaction_date"`
-		Class             string  `json:"class"`
+		ID                int     `json:"id"`
+		Price             float64 `json:"price"`
+		Quantity          float64 `json:"quantity"`
 	} `json:"order"`
 }
 
@@ -285,7 +286,6 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	preview bool,
 	buyToClose bool,
 ) (*OrderResponse, error) {
-
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
@@ -356,7 +356,7 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 func (t *TradierAPI) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
 
-	req, err := http.NewRequest("GET", endpoint, nil)
+	req, err := http.NewRequest("GET", endpoint, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -417,7 +417,6 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	profitTarget float64, // percentage as decimal (0.5 for 50%)
 	preview bool,
 ) (*OrderResponse, error) {
-
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
@@ -435,7 +434,7 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	// Build OTOCO form data
 	params := url.Values{}
 	params.Add("class", "otoco")
-	params.Add("duration", "gtc") // Good-till-cancelled for the overall order
+	params.Add("duration", "gtc") // Good-till-canceled for the overall order
 
 	if preview {
 		params.Add("preview", "true")
@@ -493,7 +492,7 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 		}
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	} else {
-		req, err = http.NewRequest(method, endpoint, nil)
+		req, err = http.NewRequest(method, endpoint, http.NoBody)
 		if err != nil {
 			return err
 		}
@@ -568,7 +567,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 		callSymbol = bestCall.Symbol
 	}
 
-	return
+	return putStrike, callStrike, putSymbol, callSymbol
 }
 
 // CalculateStrangleCredit calculates expected credit from put and call

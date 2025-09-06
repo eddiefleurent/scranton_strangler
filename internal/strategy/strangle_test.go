@@ -146,10 +146,10 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
 		position       *models.Position
-		expectedExit   bool
+		name           string
 		expectedReason string
+		expectedExit   bool
 	}{
 		{
 			name:           "no position",
@@ -377,8 +377,8 @@ func containsInMiddle(s, substr string) bool {
 
 // Mock Broker for testing
 type mockBroker struct {
+	optionPrices map[string]map[float64]map[string]float64
 	balance      float64
-	optionPrices map[string]map[float64]map[string]float64 // [expiration][strike][type] -> mid price
 }
 
 // Compile-time interface compliance check
@@ -473,22 +473,22 @@ func (m *mockBroker) CloseStranglePosition(symbol string, putStrike, callStrike 
 func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{
 		Order: struct {
-			ID                int     `json:"id"`
+			CreateDate        string  `json:"create_date"`
 			Type              string  `json:"type"`
 			Symbol            string  `json:"symbol"`
 			Side              string  `json:"side"`
-			Quantity          float64 `json:"quantity"`
+			Class             string  `json:"class"`
 			Status            string  `json:"status"`
 			Duration          string  `json:"duration"`
-			Price             float64 `json:"price"`
+			TransactionDate   string  `json:"transaction_date"`
 			AvgFillPrice      float64 `json:"avg_fill_price"`
 			ExecQuantity      float64 `json:"exec_quantity"`
 			LastFillPrice     float64 `json:"last_fill_price"`
 			LastFillQuantity  float64 `json:"last_fill_quantity"`
 			RemainingQuantity float64 `json:"remaining_quantity"`
-			CreateDate        string  `json:"create_date"`
-			TransactionDate   string  `json:"transaction_date"`
-			Class             string  `json:"class"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
 		}{
 			ID:     orderID,
 			Status: "filled",

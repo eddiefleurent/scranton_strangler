@@ -36,7 +36,7 @@ func main() {
 	}
 
 	// Initialize client (sandbox mode)
-	client := broker.NewTradierClient(apiKey, accountID, true, /* useOTOCO */ false)
+	client := broker.NewTradierClient(apiKey, accountID, true /* useOTOCO */, false)
 	fmt.Printf("✓ Initialized Tradier client (Sandbox mode)\n")
 	fmt.Printf("  API Key: %s...%s\n", apiKey[:8], apiKey[len(apiKey)-4:])
 	if accountID != "" {
