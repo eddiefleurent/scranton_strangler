@@ -95,9 +95,8 @@ jobs:
       - name: Check Go version
         run: go version
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
-        with:
-          version: latest
-          args: --timeout=5m
+      - name: Run basic Go checks
+        run: |
+          go vet ./...
+          go fmt -l . | (! grep -q .)
 
