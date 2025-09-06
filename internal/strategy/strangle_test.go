@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eddie/spy-strangle-bot/internal/broker"
-	"github.com/eddie/spy-strangle-bot/internal/models"
+	"github.com/eddie/scranton_strangler/internal/broker"
+	"github.com/eddie/scranton_strangler/internal/models"
 )
 
 func TestStrangleStrategy_calculatePositionSize(t *testing.T) {

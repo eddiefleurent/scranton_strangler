@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	"github.com/eddie/spy-strangle-bot/internal/models"
+	"github.com/eddie/scranton_strangler/internal/models"
 )
 
 // MockStorage implements StorageInterface for testing
@@ -38,13 +38,13 @@ func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
 	return nil
 }
 
-func (m *MockStorage) ClosePosition(finalPnL float64) error {
+func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 	if m.currentPosition == nil {
 		return fmt.Errorf("no position to close")
 	}
 
 	// Transition state to closed
-	if err := m.currentPosition.TransitionState(models.StateClosed, "position_closed"); err != nil {
+	if err := m.currentPosition.TransitionState(models.StateClosed, reason); err != nil {
 		return fmt.Errorf("failed to transition position to closed state: %w", err)
 	}
 
@@ -132,7 +132,7 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 		} else {
 			m.statistics.AverageWin = (m.statistics.AverageWin*float64(m.statistics.WinningTrades-1) + pnl) / float64(m.statistics.WinningTrades)
 		}
-	} else {
+	} else if pnl < 0 {
 		m.statistics.LosingTrades++
 		if m.statistics.LosingTrades == 1 {
 			m.statistics.AverageLoss = pnl
@@ -140,10 +140,12 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + pnl) / float64(m.statistics.LosingTrades)
 		}
 	}
+	// pnl == 0 is treated as breakeven - don't increment wins or losses
 
-	// Calculate win rate
-	if m.statistics.TotalTrades > 0 {
-		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(m.statistics.TotalTrades) * 100
+	// Calculate win rate based only on wins and losses (exclude breakevens)
+	totalDecidedTrades := m.statistics.WinningTrades + m.statistics.LosingTrades
+	if totalDecidedTrades > 0 {
+		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(totalDecidedTrades) * 100
 	}
 }
 

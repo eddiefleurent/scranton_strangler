@@ -1,4 +1,4 @@
-module github.com/eddie/spy-strangle-bot
+module github.com/eddie/scranton_strangler
 
 go 1.25.1
 

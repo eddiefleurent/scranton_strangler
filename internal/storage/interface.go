@@ -1,13 +1,13 @@
 package storage
 
-import "github.com/eddie/spy-strangle-bot/internal/models"
+import "github.com/eddie/scranton_strangler/internal/models"
 
 // StorageInterface defines the contract for position and trade data persistence
 type StorageInterface interface {
 	// Position management
 	GetCurrentPosition() *models.Position
 	SetCurrentPosition(pos *models.Position) error
-	ClosePosition(finalPnL float64) error
+	ClosePosition(finalPnL float64, reason string) error
 	AddAdjustment(adj models.Adjustment) error
 
 	// Data persistence

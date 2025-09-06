@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/eddie/spy-strangle-bot/internal/broker"
-	"github.com/eddie/spy-strangle-bot/internal/config"
-	"github.com/eddie/spy-strangle-bot/internal/models"
-	"github.com/eddie/spy-strangle-bot/internal/storage"
-	"github.com/eddie/spy-strangle-bot/internal/strategy"
+	"github.com/eddie/scranton_strangler/internal/broker"
+	"github.com/eddie/scranton_strangler/internal/config"
+	"github.com/eddie/scranton_strangler/internal/models"
+	"github.com/eddie/scranton_strangler/internal/storage"
+	"github.com/eddie/scranton_strangler/internal/strategy"
 )
 
 type Bot struct {
@@ -360,7 +360,7 @@ func (b *Bot) executeExit(reason strategy.ExitReason) {
 		actualPnL, (actualPnL/position.CreditReceived)*100)
 
 	// Close position in storage
-	if err := b.storage.ClosePosition(actualPnL); err != nil {
+	if err := b.storage.ClosePosition(actualPnL, string(reason)); err != nil {
 		b.logger.Printf("Failed to close position in storage: %v", err)
 		return
 	}

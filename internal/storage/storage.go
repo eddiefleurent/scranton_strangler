@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eddie/spy-strangle-bot/internal/models"
+	"github.com/eddie/scranton_strangler/internal/models"
 )
 
 // JSONStorage implements StorageInterface using JSON file persistence
@@ -113,7 +113,7 @@ func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
 	return s.saveUnsafe()
 }
 
-func (s *JSONStorage) ClosePosition(finalPnL float64) error {
+func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -123,7 +123,7 @@ func (s *JSONStorage) ClosePosition(finalPnL float64) error {
 
 	// Update position status
 	// Position state will be managed by the state machine, not a string field
-	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, "position_closed"); err != nil {
+	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, reason); err != nil {
 		return fmt.Errorf("failed to transition position to closed state: %w", err)
 	}
 	s.data.CurrentPosition.CurrentPnL = finalPnL

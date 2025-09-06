@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eddie/spy-strangle-bot/internal/models"
+	"github.com/eddie/scranton_strangler/internal/models"
 )
 
 // TestStorageInterface tests the storage interface with both implementations
@@ -109,7 +109,7 @@ func testStorageInterface(t *testing.T, storage StorageInterface) {
 
 	// Test closing position
 	finalPnL := 1.75 // 50% profit
-	err = storage.ClosePosition(finalPnL)
+	err = storage.ClosePosition(finalPnL, "position_closed")
 	if err != nil {
 		t.Fatalf("Failed to close position: %v", err)
 	}
