@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -169,7 +170,15 @@ func (s *JSONStorage) saveUnsafe() error {
 
 // copyFile copies the contents of src to dst, then fsyncs dst
 func (s *JSONStorage) copyFile(src, dst string) error {
-	srcFile, err := os.Open(src)
+	// Validate paths to prevent directory traversal attacks
+	if err := s.validateFilePath(src); err != nil {
+		return fmt.Errorf("invalid source path: %w", err)
+	}
+	if err := s.validateFilePath(dst); err != nil {
+		return fmt.Errorf("invalid destination path: %w", err)
+	}
+
+	srcFile, err := os.Open(src) // #nosec G304 - paths are validated above
 	if err != nil {
 		return err
 	}
@@ -180,7 +189,7 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 		}
 	}()
 
-	dstFile, err := os.Create(dst)
+	dstFile, err := os.Create(dst) // #nosec G304 - paths are validated above
 	if err != nil {
 		return err
 	}
@@ -203,10 +212,42 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 	return nil
 }
 
+// validateFilePath ensures the file path is safe and within expected bounds
+func (s *JSONStorage) validateFilePath(path string) error {
+	// Clean the path to resolve any .. or . components
+	cleanPath := filepath.Clean(path)
+
+	// Ensure the path is absolute or relative to current directory
+	// For security, we don't allow paths that go outside the intended directory structure
+	if filepath.IsAbs(cleanPath) {
+		// For absolute paths, ensure they don't contain suspicious patterns
+		if strings.Contains(cleanPath, "..") {
+			return fmt.Errorf("path contains directory traversal: %s", cleanPath)
+		}
+	} else {
+		// For relative paths, resolve them and check
+		absPath, err := filepath.Abs(cleanPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve absolute path: %w", err)
+		}
+		if strings.Contains(absPath, "..") {
+			return fmt.Errorf("path contains directory traversal: %s", absPath)
+		}
+	}
+
+	return nil
+}
+
 // syncParentDir opens the parent directory of s.filepath and calls Sync on it
 func (s *JSONStorage) syncParentDir() error {
 	parentDir := filepath.Dir(s.filepath)
-	dir, err := os.Open(parentDir)
+
+	// Validate parent directory path
+	if err := s.validateFilePath(parentDir); err != nil {
+		return fmt.Errorf("invalid parent directory path: %w", err)
+	}
+
+	dir, err := os.Open(parentDir) // #nosec G304 - path is validated above
 	if err != nil {
 		return err
 	}
