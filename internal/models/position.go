@@ -168,46 +168,41 @@ func (p *Position) GetStateDescription() string {
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
-// TODO: Implement emergency exit logic
-// func (p *Position) ShouldEmergencyExit() (bool, string) {
-// 	if p.StateMachine == nil {
-// 		return false, ""
-// 	}
-// 	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, p.CalculateDTE())
-// }
+func (p *Position) ShouldEmergencyExit() (bool, string) {
+	if p.StateMachine == nil {
+		return false, ""
+	}
+	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, float64(p.CalculateDTE()))
+}
 
 // SetFourthDownOption sets the Fourth Down strategy option
-// TODO: Implement Fourth Down options
-// func (p *Position) SetFourthDownOption(option FourthDownOption) {
-// 	if p.StateMachine == nil {
-// 		p.StateMachine = NewStateMachine()
-// 	}
-// 	p.StateMachine.SetFourthDownOption(option)
-// }
+func (p *Position) SetFourthDownOption(option FourthDownOption) {
+	if p.StateMachine == nil {
+		p.StateMachine = NewStateMachine()
+	}
+	p.StateMachine.SetFourthDownOption(option)
+}
 
 // GetFourthDownOption returns the selected Fourth Down strategy
-// TODO: Implement Fourth Down options
-// func (p *Position) GetFourthDownOption() FourthDownOption {
-// 	if p.StateMachine == nil {
-// 		return ""
-// 	}
-// 	return p.StateMachine.GetFourthDownOption()
-// }
+func (p *Position) GetFourthDownOption() FourthDownOption {
+	if p.StateMachine == nil {
+		return ""
+	}
+	return p.StateMachine.GetFourthDownOption()
+}
 
 // CanPunt returns true if punt is still allowed
-// TODO: Implement punt functionality
-// func (p *Position) CanPunt() bool {
-// 	if p.StateMachine == nil {
-// 		return true
-// 	}
-// 	return p.StateMachine.CanPunt()
-// }
+func (p *Position) CanPunt() bool {
+	if p.StateMachine == nil {
+		return true
+	}
+	return p.StateMachine.CanPunt()
+}
 
 // ExecutePunt performs punt operation
-// TODO: Implement punt functionality
-// func (p *Position) ExecutePunt() error {
-// 	if p.StateMachine == nil {
-// 		p.StateMachine = NewStateMachine()
-// 	}
-// 	return p.StateMachine.ExecutePunt()
-// }
+func (p *Position) ExecutePunt() error {
+	if p.StateMachine == nil {
+		p.StateMachine = NewStateMachine()
+	}
+	return p.StateMachine.ExecutePunt()
+}

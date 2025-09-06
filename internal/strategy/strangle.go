@@ -447,15 +447,18 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 	currentCost := 0.0
 	for _, option := range options {
 		if option.Strike == pos.PutStrike && option.OptionType == "put" {
-			currentCost += (option.Bid + option.Ask) / 2
+			currentCost += (option.Bid + option.Ask) / 2 * float64(pos.Quantity) * 100
 		}
 		if option.Strike == pos.CallStrike && option.OptionType == "call" {
-			currentCost += (option.Bid + option.Ask) / 2
+			currentCost += (option.Bid + option.Ask) / 2 * float64(pos.Quantity) * 100
 		}
 	}
 
-	// P&L = credit received - current cost to close
-	return pos.CreditReceived - currentCost
+	// Get aggregated credit received (per-contract credit * quantity * 100)
+	aggregatedCreditReceived := pos.CreditReceived * float64(pos.Quantity) * 100
+
+	// P&L = aggregated credit received - aggregated current cost
+	return aggregatedCreditReceived - currentCost
 }
 
 type StrangleOrder struct {

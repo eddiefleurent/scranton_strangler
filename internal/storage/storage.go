@@ -112,7 +112,39 @@ func (s *JSONStorage) saveUnsafe() error {
 func (s *JSONStorage) GetCurrentPosition() *models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.data.CurrentPosition
+
+	if s.data.CurrentPosition == nil {
+		return nil
+	}
+
+	// Create a new Position and copy all primitive fields
+	pos := &models.Position{
+		ID:             s.data.CurrentPosition.ID,
+		Symbol:         s.data.CurrentPosition.Symbol,
+		PutStrike:      s.data.CurrentPosition.PutStrike,
+		CallStrike:     s.data.CurrentPosition.CallStrike,
+		Expiration:     s.data.CurrentPosition.Expiration,
+		Quantity:       s.data.CurrentPosition.Quantity,
+		CreditReceived: s.data.CurrentPosition.CreditReceived,
+		EntryDate:      s.data.CurrentPosition.EntryDate,
+		EntryIVR:       s.data.CurrentPosition.EntryIVR,
+		EntrySpot:      s.data.CurrentPosition.EntrySpot,
+		CurrentPnL:     s.data.CurrentPosition.CurrentPnL,
+		DTE:            s.data.CurrentPosition.DTE,
+	}
+
+	// Deep copy Adjustments slice
+	if len(s.data.CurrentPosition.Adjustments) > 0 {
+		pos.Adjustments = make([]models.Adjustment, len(s.data.CurrentPosition.Adjustments))
+		copy(pos.Adjustments, s.data.CurrentPosition.Adjustments)
+	}
+
+	// Deep copy StateMachine
+	if s.data.CurrentPosition.StateMachine != nil {
+		pos.StateMachine = s.data.CurrentPosition.StateMachine.Copy()
+	}
+
+	return pos
 }
 
 func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {

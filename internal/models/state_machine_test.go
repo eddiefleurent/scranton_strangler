@@ -36,8 +36,8 @@ func TestStateMachine_BasicTransitions(t *testing.T) {
 func TestStateMachine_InvalidTransitions(t *testing.T) {
 	sm := NewStateMachine()
 
-	// Test invalid transition: Idle -> FirstDown (skipping intermediate states)
-	err := sm.Transition(StateFirstDown, "invalid")
+	// Test invalid transition: Idle -> FourthDown (no direct path)
+	err := sm.Transition(StateFourthDown, "invalid")
 	if err == nil {
 		t.Error("Invalid transition should fail")
 	}
