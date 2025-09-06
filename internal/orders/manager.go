@@ -110,6 +110,10 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 				continue
 			}
 
+			if orderStatus.Order.ID == 0 {
+				m.logger.Printf("Order payload missing for %d", orderID)
+				continue
+			}
 			if orderStatus.Order.Status == "" {
 				m.logger.Printf("Order %d has empty status field, cannot determine status", orderID)
 				continue
@@ -148,12 +152,11 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 
 	if isEntryOrder {
 		targetState = models.StateOpen
-		transitionReason = "entry_order_filled"
+		transitionReason = "order_filled"
 	} else {
-		// For exit orders, transition to a special state that indicates
-		// the exit order is filled but needs completion (P&L calculation, etc.)
+		// For exit orders, transition to closed state with proper reason mapping
 		targetState = models.StateClosed
-		transitionReason = "exit_order_filled_pending_completion"
+		transitionReason = m.exitConditionFromReason(position.ExitReason)
 
 		// Parse exit reason from stored value
 		exitReason := strategy.ExitReason(position.ExitReason)
@@ -203,11 +206,11 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		// and clear the exit order ID
 		position.ExitOrderID = ""
 		position.ExitReason = ""
-		if err := position.TransitionState(models.StateOpen, fmt.Sprintf("exit_order_%s", reason)); err != nil {
+		if err := position.TransitionState(models.StateOpen, "adjustment_failed"); err != nil {
 			m.logger.Printf("Failed to revert position %s state: %v", positionID, err)
 		}
 	} else {
-		if err := position.TransitionState(models.StateError, fmt.Sprintf("order_%s", reason)); err != nil {
+		if err := position.TransitionState(models.StateError, "order_failed"); err != nil {
 			m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
 			return
 		}
@@ -232,8 +235,8 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		return
 	}
 
-	if err := position.TransitionState(models.StateError, "order_timeout"); err != nil {
-		m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
+	if err := position.TransitionState(models.StateClosed, "order_timeout"); err != nil {
+		m.logger.Printf("Failed to transition position %s to closed: %v", positionID, err)
 		return
 	}
 
@@ -242,5 +245,19 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		return
 	}
 
-	m.logger.Printf("Position %s marked as error due to order timeout", positionID)
+	m.logger.Printf("Position %s closed due to order timeout", positionID)
+}
+
+// exitConditionFromReason maps stored exit reasons to canonical transition reasons
+func (m *Manager) exitConditionFromReason(exitReason string) string {
+	switch exitReason {
+	case "profit_target", "time", "manual":
+		return "exit_conditions"
+	case "escalate":
+		return "emergency_exit"
+	case "stop_loss", "error":
+		return "hard_stop"
+	default:
+		return "exit_conditions" // Default fallback
+	}
 }

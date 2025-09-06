@@ -44,9 +44,12 @@ const (
 	ExitReasonEscalate ExitReason = "escalate"
 	// ExitReasonStopLoss indicates exit due to stop loss
 	ExitReasonStopLoss ExitReason = "stop_loss"
-	ExitReasonManual   ExitReason = "manual"
-	ExitReasonError    ExitReason = "error"
-	ExitReasonNone     ExitReason = "none"
+	// ExitReasonManual indicates manual exit
+	ExitReasonManual ExitReason = "manual"
+	// ExitReasonError indicates exit due to error
+	ExitReasonError ExitReason = "error"
+	// ExitReasonNone indicates no exit reason
+	ExitReasonNone ExitReason = "none"
 )
 
 // NewStrangleStrategy creates a new strangle strategy instance.

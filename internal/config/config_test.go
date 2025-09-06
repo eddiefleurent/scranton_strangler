@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -209,5 +210,110 @@ extra_unknown_key: true
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected error for unknown key")
+	}
+}
+
+func TestConfig_IsWithinTradingHours(t *testing.T) {
+	tests := []struct {
+		name     string
+		timeStr  string
+		expected bool
+	}{
+		{
+			name:     "during trading hours",
+			timeStr:  "2024-01-08T10:00:00-05:00", // Monday 10:00 AM ET
+			expected: true,
+		},
+		{
+			name:     "before trading hours",
+			timeStr:  "2024-01-08T09:00:00-05:00", // Monday 9:00 AM ET
+			expected: false,
+		},
+		{
+			name:     "after trading hours",
+			timeStr:  "2024-01-08T16:00:00-05:00", // Monday 4:00 PM ET
+			expected: false,
+		},
+		{
+			name:     "weekend",
+			timeStr:  "2024-01-06T10:00:00-05:00", // Saturday 10:00 AM ET
+			expected: false,
+		},
+	}
+
+	config := &Config{
+		Schedule: ScheduleConfig{
+			TradingStart: "09:45",
+			TradingEnd:   "15:45",
+			Timezone:     "America/New_York",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testTime, err := time.Parse(time.RFC3339, tt.timeStr)
+			if err != nil {
+				t.Fatalf("failed to parse test time: %v", err)
+			}
+
+			result := config.IsWithinTradingHours(testTime)
+			if result != tt.expected {
+				t.Errorf("IsWithinTradingHours() = %v, expected %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfig_AfterHoursCheck(t *testing.T) {
+	tests := []struct {
+		name            string
+		afterHoursCheck bool
+		timeStr         string
+		expectSkip      bool
+	}{
+		{
+			name:            "regular hours - after hours check disabled",
+			afterHoursCheck: false,
+			timeStr:         "2024-01-08T10:00:00-05:00", // Monday 10:00 AM ET
+			expectSkip:      false,
+		},
+		{
+			name:            "after hours - after hours check disabled",
+			afterHoursCheck: false,
+			timeStr:         "2024-01-08T16:00:00-05:00", // Monday 4:00 PM ET
+			expectSkip:      true,
+		},
+		{
+			name:            "after hours - after hours check enabled",
+			afterHoursCheck: true,
+			timeStr:         "2024-01-08T16:00:00-05:00", // Monday 4:00 PM ET
+			expectSkip:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Schedule: ScheduleConfig{
+					TradingStart:    "09:45",
+					TradingEnd:      "15:45",
+					Timezone:        "America/New_York",
+					AfterHoursCheck: tt.afterHoursCheck,
+				},
+			}
+
+			testTime, err := time.Parse(time.RFC3339, tt.timeStr)
+			if err != nil {
+				t.Fatalf("failed to parse test time: %v", err)
+			}
+
+			isWithinHours := config.IsWithinTradingHours(testTime)
+			shouldSkip := !isWithinHours && !config.Schedule.AfterHoursCheck
+
+			if shouldSkip != tt.expectSkip {
+				t.Errorf("shouldSkip = %v, expected %v (isWithinHours: %v, afterHoursCheck: %v)",
+					shouldSkip, tt.expectSkip, isWithinHours, config.Schedule.AfterHoursCheck)
+			}
+		})
 	}
 }

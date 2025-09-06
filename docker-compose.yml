@@ -9,7 +9,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./config.yaml:/config.yaml:ro
-      - ./positions.json:/positions.json:rw
+      - ./data:/data:rw
       - ./logs:/logs:rw
     environment:
       - CONFIG_PATH=/config.yaml

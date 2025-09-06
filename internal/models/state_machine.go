@@ -31,17 +31,21 @@ const (
 	// StateClosed indicates position closed
 	StateClosed PositionState = "closed"
 	// StateError indicates error state requiring intervention
-	StateError  PositionState = "error"
+	StateError PositionState = "error"
 
 	// StateFirstDown indicates normal theta decay monitoring
-	StateFirstDown  PositionState = "first_down"
-	StateSecondDown PositionState = "second_down" // Strike challenged (within 5 points)
-	StateThirdDown  PositionState = "third_down"  // Strike breached, consider adjustments
-	StateFourthDown PositionState = "fourth_down" // Critical decision point
+	StateFirstDown PositionState = "first_down"
+	// StateSecondDown represents when strike is challenged (within 5 points)
+	StateSecondDown PositionState = "second_down"
+	// StateThirdDown represents when strike is breached, consider adjustments
+	StateThirdDown PositionState = "third_down"
+	// StateFourthDown represents critical decision point
+	StateFourthDown PositionState = "fourth_down"
 
 	// StateAdjusting indicates executing position adjustment
 	StateAdjusting PositionState = "adjusting"
-	StateRolling   PositionState = "rolling" // Rolling to new expiration
+	// StateRolling indicates rolling to new expiration
+	StateRolling PositionState = "rolling"
 )
 
 // StateTransition defines valid state transitions
@@ -79,6 +83,8 @@ var ValidTransitions = []StateTransition{
 	{StateSecondDown, StateClosed, "exit_conditions", "Exit conditions met"},
 	{StateThirdDown, StateClosed, "hard_stop", "Hard stop triggered"},
 	{StateFourthDown, StateClosed, "emergency_exit", "Emergency exit required"},
+	{StateAdjusting, StateClosed, "hard_stop", "Hard stop triggered during adjustment"},
+	{StateRolling, StateClosed, "force_close", "Force close during time roll"},
 
 	// Adjustment transitions
 	{StateSecondDown, StateAdjusting, "roll_untested", "Rolling untested side"},

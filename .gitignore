@@ -45,6 +45,8 @@ logs/
 # Position data
 positions.json
 positions_backup.json
+data/positions.json
+data/positions_backup.json
 
 # Database
 *.db

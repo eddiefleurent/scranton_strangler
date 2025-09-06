@@ -164,10 +164,15 @@ func (b *Bot) runTradingCycle() {
 	now := time.Now()
 
 	// Check if within trading hours
-	if !b.config.IsWithinTradingHours(now) {
-		b.logger.Printf("Outside trading hours (%s - %s), skipping cycle",
+	isWithinHours := b.config.IsWithinTradingHours(now)
+	if !isWithinHours {
+		if !b.config.Schedule.AfterHoursCheck {
+			b.logger.Printf("Outside trading hours (%s - %s), skipping cycle",
+				b.config.Schedule.TradingStart, b.config.Schedule.TradingEnd)
+			return
+		}
+		b.logger.Printf("Outside trading hours (%s - %s), running after-hours check",
 			b.config.Schedule.TradingStart, b.config.Schedule.TradingEnd)
-		return
 	}
 
 	b.logger.Println("Starting trading cycle...")
@@ -187,19 +192,23 @@ func (b *Bot) runTradingCycle() {
 			b.logger.Println("No exit conditions met, continuing to monitor")
 		}
 
-		// Check for adjustments (Phase 2)
-		if b.config.Strategy.Adjustments.Enabled {
+		// Check for adjustments (Phase 2) - only during regular hours
+		if b.config.Strategy.Adjustments.Enabled && isWithinHours {
 			b.checkAdjustments()
 		}
 	} else {
-		// Check entry conditions
-		b.logger.Println("No position, checking entry conditions...")
-		canEnter, reason := b.strategy.CheckEntryConditions()
-		if canEnter {
-			b.logger.Printf("Entry signal: %s", reason)
-			b.executeEntry()
+		// Check entry conditions - only during regular trading hours
+		if isWithinHours {
+			b.logger.Println("No position, checking entry conditions...")
+			canEnter, reason := b.strategy.CheckEntryConditions()
+			if canEnter {
+				b.logger.Printf("Entry signal: %s", reason)
+				b.executeEntry()
+			} else {
+				b.logger.Printf("Entry conditions not met: %s", reason)
+			}
 		} else {
-			b.logger.Printf("Entry conditions not met: %s", reason)
+			b.logger.Println("After-hours: Skipping entry checks, only monitoring existing positions")
 		}
 	}
 

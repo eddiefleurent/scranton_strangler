@@ -643,7 +643,7 @@ risk:
   
 schedule:
   market_check_interval: "15m"
-  after_hours_check: false
+  after_hours_check: false  # Enable after-hours position monitoring
 ```
 
 ### API Integration
@@ -657,6 +657,23 @@ POST /accounts/{id}/orders        # Place orders
 GET  /accounts/{id}/positions     # Get positions
 GET  /accounts/{id}/orders        # Check order status
 ```
+
+### After-Hours Functionality
+
+The bot supports optional after-hours position monitoring via the `after_hours_check` configuration flag:
+
+- **Default Behavior**: When `false`, the bot only runs during regular trading hours (09:45-15:45 ET, Monday-Friday)
+- **After-Hours Mode**: When `true`, the bot continues monitoring existing positions even outside regular hours
+- **Functionality During After-Hours**:
+  - Monitors existing positions for exit conditions (stop losses, profit targets)
+  - **Does NOT** attempt new position entries
+  - **Does NOT** perform position adjustments (Phase 2 feature)
+  - Logs after-hours activity for transparency
+
+#### Use Cases
+- Risk management for overnight positions
+- Monitoring positions during extended hours trading
+- Emergency exit capabilities outside normal hours
 
 #### Rate Limiting Implementation
 ```go

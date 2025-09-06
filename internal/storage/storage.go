@@ -45,17 +45,22 @@ type Statistics struct {
 }
 
 // NewJSONStorage creates a new JSON-based storage implementation
-func NewJSONStorage(filepath string) (*JSONStorage, error) {
+func NewJSONStorage(filePath string) (*JSONStorage, error) {
 	s := &JSONStorage{
-		filepath: filepath,
+		filepath: filePath,
 		data: &StorageData{
 			DailyPnL:   make(map[string]float64),
 			Statistics: &Statistics{},
 		},
 	}
 
+	// Create parent directory if it doesn't exist
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return nil, fmt.Errorf("creating parent directory: %w", err)
+	}
+
 	// Load existing data if file exists; fail on unexpected errors
-	if _, err := os.Stat(filepath); err == nil {
+	if _, err := os.Stat(filePath); err == nil {
 		if loadErr := s.Load(); loadErr != nil {
 			return nil, fmt.Errorf("loading storage: %w", loadErr)
 		}
@@ -218,25 +223,31 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 
 // validateFilePath ensures the file path is safe and within expected bounds
 func (s *JSONStorage) validateFilePath(path string) error {
-	// Clean the path to resolve any .. or . components
-	cleanPath := filepath.Clean(path)
+	// Get the storage root directory (directory containing the storage file)
+	storageRoot := filepath.Dir(s.filepath)
 
-	// Ensure the path is absolute or relative to current directory
-	// For security, we don't allow paths that go outside the intended directory structure
-	if filepath.IsAbs(cleanPath) {
-		// For absolute paths, ensure they don't contain suspicious patterns
-		if strings.Contains(cleanPath, "..") {
-			return fmt.Errorf("path contains directory traversal: %s", cleanPath)
-		}
-	} else {
-		// For relative paths, resolve them and check
-		absPath, err := filepath.Abs(cleanPath)
-		if err != nil {
-			return fmt.Errorf("failed to resolve absolute path: %w", err)
-		}
-		if strings.Contains(absPath, "..") {
-			return fmt.Errorf("path contains directory traversal: %s", absPath)
-		}
+	// Clean and resolve the storage root to absolute path
+	storageRootAbs, err := filepath.Abs(filepath.Clean(storageRoot))
+	if err != nil {
+		return fmt.Errorf("failed to resolve storage root: %w", err)
+	}
+
+	// Clean and resolve the target path to absolute path
+	targetAbs, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return fmt.Errorf("failed to resolve target path: %w", err)
+	}
+
+	// Compute the relative path from storage root to target
+	relPath, err := filepath.Rel(storageRootAbs, targetAbs)
+	if err != nil {
+		return fmt.Errorf("failed to compute relative path: %w", err)
+	}
+
+	// Check if the relative path escapes the storage directory
+	// Reject if relative path equals ".." or starts with ".." + separator
+	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("path escapes storage directory: %s (resolved to: %s)", path, targetAbs)
 	}
 
 	return nil
@@ -292,6 +303,10 @@ func (s *JSONStorage) GetCurrentPosition() *models.Position {
 		EntrySpot:      s.data.CurrentPosition.EntrySpot,
 		CurrentPnL:     s.data.CurrentPosition.CurrentPnL,
 		DTE:            s.data.CurrentPosition.DTE,
+		EntryOrderID:   s.data.CurrentPosition.EntryOrderID,
+		ExitOrderID:    s.data.CurrentPosition.ExitOrderID,
+		ExitReason:     s.data.CurrentPosition.ExitReason,
+		ExitDate:       s.data.CurrentPosition.ExitDate,
 	}
 
 	// Deep copy Adjustments slice
@@ -334,7 +349,7 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	s.data.CurrentPosition.CurrentPnL = finalPnL
 
 	// Add to history
-	s.data.History = append(s.data.History, *s.data.CurrentPosition)
+	s.data.History = append(s.data.History, *clonePosition(s.data.CurrentPosition))
 
 	// Update statistics
 	s.updateStatistics(finalPnL)
@@ -458,6 +473,10 @@ func clonePosition(pos *models.Position) *models.Position {
 		EntrySpot:      pos.EntrySpot,
 		CurrentPnL:     pos.CurrentPnL,
 		DTE:            pos.DTE,
+		EntryOrderID:   pos.EntryOrderID,
+		ExitOrderID:    pos.ExitOrderID,
+		ExitReason:     pos.ExitReason,
+		ExitDate:       pos.ExitDate,
 	}
 
 	// Deep copy Adjustments slice

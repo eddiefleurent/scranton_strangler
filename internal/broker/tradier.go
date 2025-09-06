@@ -163,7 +163,7 @@ type PositionItem struct {
 // QuotesResponse represents the quotes response from the Tradier API.
 type QuotesResponse struct {
 	Quotes struct {
-		Quote QuoteItem `json:"quote"`
+		Quote singleOrArray[QuoteItem] `json:"quote"`
 	} `json:"quotes"`
 }
 
@@ -247,7 +247,13 @@ func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 		return nil, err
 	}
 
-	return &response.Quotes.Quote, nil
+	// Handle both single quote and array of quotes
+	quotes := response.Quotes.Quote
+	if len(quotes) == 0 {
+		return nil, fmt.Errorf("no quote found for symbol: %s", symbol)
+	}
+
+	return &quotes[0], nil
 }
 
 // GetExpirations retrieves available expiration dates for options on a symbol.
@@ -325,6 +331,12 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	if limitPrice <= 0 {
 		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
 			map[bool]string{true: "debit", false: "credit"}[buyToClose], limitPrice)
+	}
+
+	// Validate quantity for orders
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid quantity for %s order: %d, quantity must be greater than zero",
+			map[bool]string{true: "debit", false: "credit"}[buyToClose], quantity)
 	}
 
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
