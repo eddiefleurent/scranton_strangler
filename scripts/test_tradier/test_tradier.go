@@ -83,16 +83,27 @@ func main() {
 		var selectedDTE int
 
 		fmt.Println("\n  Next 10 expirations (with DTE):")
-		for i := 0; i < 10 && i < len(expirations); i++ {
+		displayCount := 0
+		for i := 0; i < len(expirations) && displayCount < 10; i++ {
 			expDate, err := time.Parse("2006-01-02", expirations[i])
 			if err != nil {
 				fmt.Printf("Error parsing date %s: %v\n", expirations[i], err)
 				continue
 			}
-			dte := int(time.Until(expDate).Hours() / 24)
-			fmt.Printf("  %d. %s (DTE: %d)\n", i+1, expirations[i], dte)
 
-			// Select closest to 45 DTE
+			// Parse date at midnight UTC to avoid timezone issues
+			expDate = time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, time.UTC)
+			dte := int(time.Until(expDate).Hours() / 24)
+
+			// Skip past or negative DTE expirations
+			if dte < 0 {
+				continue
+			}
+
+			displayCount++
+			fmt.Printf("  %d. %s (DTE: %d)\n", displayCount, expirations[i], dte)
+
+			// Select closest to 45 DTE (only consider non-negative futures)
 			if selectedExp == "" || abs(dte-targetDTE) < abs(selectedDTE-targetDTE) {
 				selectedExp = expirations[i]
 				selectedDTE = dte

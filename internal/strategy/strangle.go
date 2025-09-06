@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
-	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
@@ -25,7 +24,8 @@ type StrategyConfig struct {
 	AllocationPct    float64 // 0.35 for 35%
 	MinIVR           float64 // 30
 	MinCredit        float64 // $2.00
-	StopLossMultiple float64 // 2.0 for 200% loss
+	EscalateLossPct  float64 // e.g., 2.0 (200% loss triggers escalation)
+	StopLossPct      float64 // e.g., 2.5 (250% loss triggers hard stop)
 }
 
 // ExitReason represents the reason for exiting a position
@@ -376,7 +376,14 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 		}
 
 		delta := option.Greeks.Delta
-		diff := math.Abs(delta - targetDelta)
+		var diff float64
+		if isPut {
+			// For puts, compare absolute delta to absolute target delta
+			diff = math.Abs(math.Abs(delta) - math.Abs(targetDelta))
+		} else {
+			// For calls, compare delta directly
+			diff = math.Abs(delta - targetDelta)
+		}
 		if diff < bestDiff {
 			bestDiff = diff
 			bestStrike = option.Strike
@@ -441,23 +448,27 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		return true, ExitReasonProfitTarget
 	}
 
-	// Check escalate loss threshold (200% loss) - prepare for action
-	if profitPct <= -2.0 {
+	// Check escalate loss threshold - prepare for action
+	escalateThreshold := s.config.EscalateLossPct
+	if escalateThreshold <= 0 {
+		escalateThreshold = 2.0 // Default to 200% loss
+	}
+	if profitPct <= -escalateThreshold {
 		// First check if we've reached the stop loss threshold
-		sl := s.config.StopLossMultiple
+		sl := s.config.StopLossPct
 		if sl <= 0 {
 			sl = 2.5
 		} // Default to 250% to match old behavior
 		if profitPct <= -sl {
 			return true, ExitReasonStopLoss
 		}
-		// Otherwise trigger escalate action at 200% loss
+		// Otherwise trigger escalate action
 		return true, ExitReasonEscalate
 	}
 
-	// Check DTE using constant
+	// Check DTE using strategy config
 	currentDTE := position.CalculateDTE()
-	if currentDTE <= config.MaxDTE {
+	if currentDTE <= s.config.MaxDTE {
 		return true, ExitReasonTime
 	}
 

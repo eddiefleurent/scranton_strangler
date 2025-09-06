@@ -131,6 +131,25 @@ func (c *Config) Validate() error {
 	if c.Strategy.Entry.Delta <= 0 || c.Strategy.Entry.Delta > 50 {
 		return fmt.Errorf("strategy.entry.delta must be between 0 and 50")
 	}
+	// DTE range must be [min,max] with positive ints and min <= max
+	if len(c.Strategy.Entry.DTERange) != 2 ||
+		c.Strategy.Entry.DTERange[0] <= 0 ||
+		c.Strategy.Entry.DTERange[1] <= 0 ||
+		c.Strategy.Entry.DTERange[0] > c.Strategy.Entry.DTERange[1] {
+		return fmt.Errorf("strategy.entry.dte_range must be [min,max] with positive values and min <= max")
+	}
+	if c.Strategy.Entry.TargetDTE <= 0 {
+		return fmt.Errorf("strategy.entry.target_dte must be > 0")
+	}
+	{
+		min, max := c.Strategy.Entry.DTERange[0], c.Strategy.Entry.DTERange[1]
+		if c.Strategy.Entry.TargetDTE < min || c.Strategy.Entry.TargetDTE > max {
+			return fmt.Errorf("strategy.entry.target_dte (%d) must be within dte_range [%d,%d]", c.Strategy.Entry.TargetDTE, min, max)
+		}
+	}
+	if c.Strategy.Entry.MinCredit <= 0 {
+		return fmt.Errorf("strategy.entry.min_credit must be > 0")
+	}
 
 	// Risk validation
 	if c.Risk.MaxContracts <= 0 {
@@ -138,6 +157,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Risk.MaxDailyLoss <= 0 {
 		return fmt.Errorf("risk.max_daily_loss must be > 0")
+	}
+	if c.Risk.MaxPositionLoss <= 0 {
+		return fmt.Errorf("risk.max_position_loss must be > 0")
 	}
 
 	return nil

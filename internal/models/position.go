@@ -44,10 +44,11 @@ func (p *Position) GetTotalCredit() float64 {
 }
 
 func (p *Position) ProfitPercent() float64 {
-	if p.CreditReceived == 0 {
+	totalCredit := p.GetTotalCredit() * float64(p.Quantity) * 100
+	if totalCredit == 0 {
 		return 0
 	}
-	return (p.CurrentPnL / p.CreditReceived) * 100
+	return (p.CurrentPnL / totalCredit) * 100
 }
 
 // NewPosition creates a new position with initialized state machine

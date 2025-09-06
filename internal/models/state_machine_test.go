@@ -441,15 +441,15 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
 
 	// Test within 5-day limit - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 4 days
-	if shouldExit && reason != emergencyExitMessage {
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, 3.499, 30) // negligible loss, 4 days
+	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
 	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour) // exactly 5 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 5 days
-	if shouldExit && reason != emergencyExitMessage {
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, 3.499, 30) // negligible loss, 5 days
+	if shouldExit {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
 	}
 
