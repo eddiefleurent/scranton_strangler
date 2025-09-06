@@ -16,8 +16,6 @@ linters:
     - gochecknoinits
     - goconst
     - gocyclo
-    - gofmt
-    - goimports
     - goprintffuncname
     - gosec
     - gosimple
@@ -33,99 +31,102 @@ linters:
     - unconvert
     - unparam
     - whitespace
+  
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    
+    gocyclo:
+      min-complexity: 40
+    
+    misspell:
+      locale: US
+    
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - wrapperFunc
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+    
+    funlen:
+      lines: 100
+      statements: 60
+    
+    goimports:
+      local-prefixes: github.com/eddiefleurent/scranton_strangler
+    
+    gosec:
+      excludes:
+        - G301  # Poor file permissions
+        - G304  # Potential file inclusion
+    
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+          arguments:
+            - disableStutteringCheck
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
+formatters:
+  enable:
+    - gofmt
+    - goimports
   
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  
-  gocyclo:
-    min-complexity: 40
-  
-  misspell:
-    locale: US
-  
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - wrapperFunc
-      - dupImport
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-  
-  funlen:
-    lines: 100
-    statements: 60
-  
-  gofmt:
-    simplify: true
-  
-  goimports:
-    local-prefixes: github.com/eddiefleurent/scranton_strangler
+  settings:
+    gofmt:
+      simplify: true
 
 issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - funlen
-        - gocyclo
-    
-    - path: cmd/
-      linters:
-        - gochecknoinits
-    
-    - path: scripts/
-      linters:
-        - gocyclo
-        - funlen
-        
-    - path: internal/config/config_test\.go
-      linters:
-        - gosec
-    
-    - path: internal/config/config\.go
-      linters:
-        - gosec  # G304 is a false positive, configPath is validated
-    
-    - path: internal/storage/mock_storage\.go
-      linters:
-        - gosec
-    
-    - path: internal/storage/storage\.go
-      linters:
-        - gosec  # G301 is acceptable for directory permissions
-        - revive  # StorageData stuttering is acceptable
-    
-    - path: internal/storage/storage_test\.go
-      linters:
-        - gosec
-    
-    - path: internal/storage/interface\.go
-      text: "stutters"
-      linters:
-        - revive
-    
-    - path: internal/mock/mock_data\.go  
-      text: "stutters"
-      linters:
-        - revive
-    
-    - path: internal/strategy/strangle\.go
-      text: "stutters"
-      linters:
-        - revive
-  
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+  
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - funlen
+          - gocyclo
+      
+      - path: cmd/
+        linters:
+          - gochecknoinits
+      
+      - path: scripts/
+        linters:
+          - gocyclo
+          - funlen
+      
+      - path: internal/config/config_test\.go
+        linters:
+          - gosec
+      
+      - path: internal/config/config\.go
+        linters:
+          - gosec
+      
+      - path: internal/storage/
+        linters:
+          - gosec
+          - revive
+      
+      - path: internal/mock/
+        linters:
+          - revive
+      
+      - path: internal/strategy/
+        linters:
+          - revive
