@@ -62,3 +62,4 @@ coverage.html
 *.cover
 *.coverprofile
 bot
+gosec-results.sarif

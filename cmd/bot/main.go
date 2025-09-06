@@ -6,28 +6,30 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/big"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
+	"github.com/eddiefleurent/scranton_strangler/internal/orders"
+	"github.com/eddiefleurent/scranton_strangler/internal/retry"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 )
 
 type Bot struct {
-	config   *config.Config
-	broker   broker.Broker
-	strategy *strategy.StrangleStrategy
-	storage  storage.StorageInterface
-	logger   *log.Logger
-	stop     chan struct{}
-	ctx      context.Context // Main bot context for operations
+	config       *config.Config
+	broker       broker.Broker
+	strategy     *strategy.StrangleStrategy
+	storage      storage.StorageInterface
+	logger       *log.Logger
+	stop         chan struct{}
+	ctx          context.Context // Main bot context for operations
+	orderManager *orders.Manager
+	retryClient  *retry.Client
 }
 
 func main() {
@@ -88,6 +90,12 @@ func main() {
 		MinCredit:     cfg.Strategy.Entry.MinCredit,
 	}
 	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig)
+
+	// Initialize order manager
+	bot.orderManager = orders.NewManager(bot.broker, bot.storage, logger, bot.stop)
+
+	// Initialize retry client
+	bot.retryClient = retry.NewClient(bot.broker, logger)
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -297,126 +305,7 @@ func (b *Bot) executeEntry() {
 		position.ID, position.CreditReceived, position.DTE)
 
 	// Start order status polling in background
-	go b.pollOrderStatus(position.ID, placedOrder.Order.ID)
-}
-
-// closePositionWithRetry attempts to close a position with timeout and retry logic
-func (b *Bot) closePositionWithRetry(
-	ctx context.Context,
-	position *models.Position,
-	maxDebit float64,
-	maxRetries int,
-) (*broker.OrderResponse, error) {
-	const (
-		initialBackoff = 1 * time.Second
-		maxBackoff     = 30 * time.Second
-		timeout        = 2 * time.Minute
-	)
-
-	closeCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var lastErr error
-	backoff := initialBackoff
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		select {
-		case <-closeCtx.Done():
-			return nil, fmt.Errorf("close operation timed out after %v: %w", timeout, closeCtx.Err())
-		default:
-		}
-
-		// Check if context is canceled
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("operation canceled: %w", ctx.Err())
-		}
-
-		b.logger.Printf("Close attempt %d/%d for position %s", attempt+1, maxRetries+1, position.ID)
-
-		closeOrder, err := b.broker.CloseStranglePosition(
-			position.Symbol,
-			position.PutStrike,
-			position.CallStrike,
-			position.Expiration.Format("2006-01-02"),
-			position.Quantity,
-			maxDebit,
-		)
-
-		if err == nil {
-			b.logger.Printf("Close order placed successfully on attempt %d: %d", attempt+1, closeOrder.Order.ID)
-			return closeOrder, nil
-		}
-
-		lastErr = err
-		b.logger.Printf("Close attempt %d failed: %v", attempt+1, err)
-
-		// Check if error is transient (network, rate limit, temporary server error)
-		if b.isTransientError(err) && attempt < maxRetries {
-			b.logger.Printf("Transient error detected, retrying in %v", backoff)
-			select {
-			case <-time.After(backoff):
-				// Exponential backoff with jitter
-				backoff = time.Duration(float64(backoff) * 1.5)
-				if backoff > maxBackoff {
-					backoff = maxBackoff
-				}
-				// Add some jitter to avoid thundering herd
-				maxJitter := int64(backoff / 4)
-				if maxJitter > 0 {
-					jitterVal, err := rand.Int(rand.Reader, big.NewInt(maxJitter))
-					if err != nil {
-						log.Printf("Failed to generate jitter: %v", err)
-					} else {
-						jitter := time.Duration(jitterVal.Int64())
-						backoff += jitter
-					}
-				}
-			case <-closeCtx.Done():
-				return nil, fmt.Errorf("close operation timed out during backoff: %w", closeCtx.Err())
-			case <-ctx.Done():
-				return nil, fmt.Errorf("operation canceled during backoff: %w", ctx.Err())
-			}
-		} else {
-			// Non-transient error or max retries reached
-			break
-		}
-	}
-
-	return nil, fmt.Errorf("failed to close position after %d attempts: %w", maxRetries+1, lastErr)
-}
-
-// isTransientError determines if an error is likely transient and worth retrying
-func (b *Bot) isTransientError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := strings.ToLower(err.Error())
-
-	// Common transient error patterns
-	transientPatterns := []string{
-		"timeout",
-		"connection refused",
-		"connection reset",
-		"temporary failure",
-		"server error",
-		"rate limit",
-		"429", // HTTP 429 Too Many Requests
-		"502", // HTTP 502 Bad Gateway
-		"503", // HTTP 503 Service Unavailable
-		"504", // HTTP 504 Gateway Timeout
-		"network",
-		"dns",
-		"tcp",
-	}
-
-	for _, pattern := range transientPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-
-	return false
+	go b.orderManager.PollOrderStatus(position.ID, placedOrder.Order.ID)
 }
 
 func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
@@ -436,11 +325,14 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 
 	maxDebit := b.calculateMaxDebit(position, reason)
 
-	_, err := b.placeCloseOrder(ctx, position, maxDebit)
+	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
+	closeOrder, err := b.retryClient.ClosePositionWithRetry(ctx, position, maxDebit)
 	if err != nil {
+		b.logger.Printf("Failed to place close order after retries: %v", err)
 		return
 	}
 
+	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
 	b.completePositionClose(position, reason)
 }
 
@@ -486,23 +378,6 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 	}
 }
 
-func (b *Bot) placeCloseOrder(
-	ctx context.Context,
-	position *models.Position,
-	maxDebit float64,
-) (*broker.OrderResponse, error) {
-	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
-
-	closeOrder, err := b.closePositionWithRetry(ctx, position, maxDebit, 3)
-	if err != nil {
-		b.logger.Printf("Failed to place close order after retries: %v", err)
-		return nil, err
-	}
-
-	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
-	return closeOrder, nil
-}
-
 func (b *Bot) completePositionClose(
 	position *models.Position,
 	reason strategy.ExitReason,
@@ -541,122 +416,6 @@ func (b *Bot) logPnL(position *models.Position, actualPnL float64) {
 	}
 	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
 		actualPnL, (actualPnL/denom)*100)
-}
-
-// pollOrderStatus polls the broker for order status until filled or timeout
-func (b *Bot) pollOrderStatus(positionID string, orderID int) {
-	const (
-		pollInterval = 5 * time.Second // Check every 5 seconds
-		timeout      = 5 * time.Minute // Give up after 5 minutes
-	)
-
-	b.logger.Printf("Starting order status polling for position %s, order %d", positionID, orderID)
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			b.logger.Printf("Order polling timeout for position %s", positionID)
-			b.handleOrderTimeout(positionID)
-			return
-		case <-b.stop:
-			b.logger.Printf("Shutdown signal received during order polling for position %s", positionID)
-			return
-		case <-ticker.C:
-			// Check order status
-			orderStatus, err := b.broker.GetOrderStatus(orderID)
-			if err != nil {
-				b.logger.Printf("Error checking order status for %s: %v", positionID, err)
-				continue
-			}
-
-			b.logger.Printf("Order %d status: %s", orderID, orderStatus.Order.Status)
-
-			switch orderStatus.Order.Status {
-			case "filled":
-				b.logger.Printf("Order filled for position %s", positionID)
-				b.handleOrderFilled(positionID)
-				return
-			case "canceled", "rejected":
-				b.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
-				b.handleOrderFailed(positionID, orderStatus.Order.Status)
-				return
-			case "pending", "open", "partial":
-				// Continue polling
-				continue
-			default:
-				b.logger.Printf("Unknown order status for position %s: %s", positionID, orderStatus.Order.Status)
-			}
-		}
-	}
-}
-
-// handleOrderFilled transitions position to Open state when order is confirmed filled
-func (b *Bot) handleOrderFilled(positionID string) {
-	position := b.storage.GetCurrentPosition()
-	if position == nil || position.ID != positionID {
-		b.logger.Printf("Position %s not found or mismatched", positionID)
-		return
-	}
-
-	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
-		b.logger.Printf("Failed to transition position %s to open: %v", positionID, err)
-		return
-	}
-
-	if err := b.storage.SetCurrentPosition(position); err != nil {
-		b.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
-		return
-	}
-
-	b.logger.Printf("Position %s successfully transitioned to open state", positionID)
-}
-
-// handleOrderFailed transitions position to error state when order fails
-func (b *Bot) handleOrderFailed(positionID string, reason string) {
-	position := b.storage.GetCurrentPosition()
-	if position == nil || position.ID != positionID {
-		b.logger.Printf("Position %s not found or mismatched", positionID)
-		return
-	}
-
-	if err := position.TransitionState(models.StateError, fmt.Sprintf("order_%s", reason)); err != nil {
-		b.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
-		return
-	}
-
-	if err := b.storage.SetCurrentPosition(position); err != nil {
-		b.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
-		return
-	}
-
-	b.logger.Printf("Position %s marked as error due to order failure: %s", positionID, reason)
-}
-
-// handleOrderTimeout transitions position to closed state when order times out
-func (b *Bot) handleOrderTimeout(positionID string) {
-	position := b.storage.GetCurrentPosition()
-	if position == nil || position.ID != positionID {
-		b.logger.Printf("Position %s not found or mismatched", positionID)
-		return
-	}
-
-	if err := position.TransitionState(models.StateError, "order_timeout"); err != nil {
-		b.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
-		return
-	}
-
-	if err := b.storage.SetCurrentPosition(position); err != nil {
-		b.logger.Printf("Failed to save position %s after timeout: %v", positionID, err)
-		return
-	}
-
-	b.logger.Printf("Position %s marked as error due to order timeout", positionID)
 }
 
 func (b *Bot) checkAdjustments() {
