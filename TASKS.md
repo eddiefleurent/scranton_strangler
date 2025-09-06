@@ -1,31 +1,5 @@
 # SPY Strangle Bot - MVP Tasks
 
-## 📈 **Latest Progress Update**
-
-### ✅ **Advanced Trading Features Completed**
-**Date**: September 6, 2025 (Session 2)
-**Status**: **Week 1 Core Foundation Complete** - Ready for API Testing
-
-**New Features Added:**
-- 📊 **Real IVR Calculator** - Proper IV Rank calculation using live ATM option data (20-day historical)
-- 💰 **Live P&L Tracking** - Real-time position P&L from current option quotes  
-- 🔄 **Buy-to-Close Orders** - Complete order execution for closing strangle positions
-- 🎯 **Dynamic Profit Targets** - Real-time 50% profit target detection with live quotes
-- 📈 **Enhanced Exit Logic** - Intelligent debit pricing based on exit reason
-- 🔍 **Position Monitoring** - Live P&L updates during trading cycles
-
-**Technical Quality:**
-- ✅ Proper option chain integration with Greeks data
-- ✅ Robust error handling with fallback mechanisms  
-- ✅ Real-time market data integration
-- ✅ Professional logging with detailed calculations
-- ✅ Multi-leg order support (buy-to-close strangles)
-
-**Week 1 Status**: **COMPLETE** ✅ - All core foundation requirements met
-**Next Milestone**: Paper trading validation with live API credentials
-
----
-
 ## Core MVP Features (Must Have)
 
 ### 1. Basic Trading Loop
@@ -34,9 +8,10 @@
   - [x] Get SPY quotes 
   - [x] Get SPY option chains
   - [x] OTOCO order placement
+  - [x] Buy-to-close order placement
   - [ ] Test with paper trading account
 - [x] **Entry Logic**  
-  - [x] Calculate IVR > 30 (simple 20-day lookback) - *real IV rank calculation implemented*
+  - [x] Calculate IVR > 30 (simple 20-day lookback)
   - [x] Find 45 DTE expiration (±5 days acceptable)
   - [x] Select 16 delta strikes (or closest available)
   - [x] Check minimum $2.00 credit requirement
@@ -44,7 +19,7 @@
 - [x] **Exit Logic**
   - [x] OTOCO handles 50% profit automatically
   - [x] Manual 21 DTE check (close regardless of P&L)
-  - [x] Emergency stop at 250% loss - *implemented in storage layer*
+  - [x] Emergency stop at 250% loss
 - [x] **Position Tracking**
   - [x] Save positions to JSON file
   - [x] Load positions on startup  
@@ -57,37 +32,57 @@
   - [x] Enforce 35% allocation limit
   - [x] Prevent overlapping positions (one at a time for MVP)
 - [x] **Hard Stops**
-  - [x] Close at 250% of credit received - *logic implemented*
-  - [x] Close at 5 DTE (assignment risk) - *logic implemented*
-  - [x] Close on any API/system error - *graceful error handling*
+  - [x] Close at 250% of credit received
+  - [x] Close at 5 DTE (assignment risk)
+  - [x] Close on any API/system error
 
 ### 3. Scheduler & Logging  
 - [x] **Cron Job Setup**
   - [x] Run every 15 minutes during market hours
-  - [x] Skip weekends and holidays - *market hours checking*
+  - [x] Skip weekends and holidays
   - [x] Graceful shutdown handling
 - [x] **Basic Logging**
   - [x] Entry/exit signals with reasoning
-  - [x] API errors and retries - *implemented in broker layer*
+  - [x] API errors and retries
   - [x] Position P&L updates
-  - [x] Daily summary logs - *trade statistics tracking*
+  - [x] Daily summary logs
 
 ## Testing & Validation
 
 ### 4. Paper Trading Validation
+- [ ] **API Setup & Connection**
+  - [ ] Get Tradier sandbox API key
+  - [ ] Test basic API connectivity
+  - [ ] Verify account balance retrieval
+  - [ ] Test option chain data access
 - [ ] **Test Entry Conditions**
   - [ ] Verify IVR calculation accuracy
   - [ ] Confirm strike selection logic  
   - [ ] Test position sizing math
   - [ ] Validate OTOCO order placement
 - [ ] **Test Exit Conditions**
-  - [ ] 50% profit target via OTOCO
+  - [ ] 50% profit target detection
   - [ ] 21 DTE manual close
+  - [ ] Buy-to-close order execution
   - [ ] Emergency stops trigger correctly
 - [ ] **End-to-End Testing**
   - [ ] Complete 3 successful paper trades
   - [ ] No critical bugs in 1 week of running
   - [ ] All logs make sense and are useful
+
+### 5. Bug Fixes & Polish
+- [ ] **Historical IV Data Storage**
+  - [ ] Replace mock historical IV with real data collection
+  - [ ] Store daily IV readings for accurate IVR calculation
+  - [ ] Implement rolling 20-day IV history
+- [ ] **Order Fill Verification** 
+  - [ ] Wait for order fills before updating position state
+  - [ ] Handle partial fills correctly
+  - [ ] Implement order status checking
+- [ ] **Error Recovery**
+  - [ ] Handle API downtime gracefully
+  - [ ] Recover from network interruptions
+  - [ ] Validate position state on startup
 
 ## Post-MVP Enhancements (Later)
 
