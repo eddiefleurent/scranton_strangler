@@ -112,7 +112,10 @@ func main() {
 	fmt.Printf("   Call Strike: $%.0f (%s)\n", callStrike, callSymbol)
 
 	// 5. Calculate expected credit
-	credit := broker.CalculateStrangleCredit(options, putStrike, callStrike)
+	credit, err := broker.CalculateStrangleCredit(options, putStrike, callStrike)
+	if err != nil {
+		log.Fatalf("Error calculating strangle credit: %v", err)
+	}
 	fmt.Printf("   Expected Credit: $%.2f per contract\n", credit)
 	if credit <= 0 {
 		log.Fatal("Expected credit is non-positive; aborting")

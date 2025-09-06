@@ -39,7 +39,7 @@ type Statistics struct {
 	WinRate            float64 `json:"win_rate"`
 	TotalPnL           float64 `json:"total_pnl"`
 	AverageWin         float64 `json:"average_win"`
-	AverageLoss        float64 `json:"average_loss"`        // Average loss magnitude (positive)
+	AverageLoss        float64 `json:"average_loss"`          // Average loss magnitude (positive)
 	MaxSingleTradeLoss float64 `json:"max_single_trade_loss"` // Largest single trade loss (negative)
 	CurrentStreak      int     `json:"current_streak"`
 }

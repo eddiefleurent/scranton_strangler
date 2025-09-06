@@ -136,8 +136,12 @@ func main() {
 					fmt.Printf("  CALL: $%.2f (%s)\n", callStrike, callSymbol)
 
 					// Calculate credit
-					credit := broker.CalculateStrangleCredit(options, putStrike, callStrike)
-					fmt.Printf("  Expected Credit: $%.2f per contract\n", credit)
+					credit, err := broker.CalculateStrangleCredit(options, putStrike, callStrike)
+					if err != nil {
+						fmt.Printf("  Error calculating credit: %v\n", err)
+					} else {
+						fmt.Printf("  Expected Credit: $%.2f per contract\n", credit)
+					}
 
 					// Show details for selected strikes
 					fmt.Printf("\n  Option Details:\n")

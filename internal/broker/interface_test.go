@@ -1,8 +1,13 @@
 package broker
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/sony/gobreaker"
 )
 
 func TestCalculateIVR(t *testing.T) {
@@ -447,5 +452,298 @@ func TestOptionTypeFromSymbol(t *testing.T) {
 				t.Errorf("optionTypeFromSymbol(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+// MockBroker for testing CircuitBreakerBroker
+type MockBroker struct {
+	callCount  int
+	shouldFail bool
+	failAfter  int
+}
+
+func (m *MockBroker) GetAccountBalance() (float64, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return 0, errors.New("mock broker error")
+	}
+	return 1000.0, nil
+}
+
+func (m *MockBroker) GetPositions() ([]PositionItem, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return []PositionItem{}, nil
+}
+
+func (m *MockBroker) GetQuote(symbol string) (*QuoteItem, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return &QuoteItem{Symbol: symbol, Last: 100.0}, nil
+}
+
+func (m *MockBroker) GetExpirations(symbol string) ([]string, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return []string{"2024-12-20"}, nil
+}
+
+func (m *MockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return []Option{}, nil
+}
+
+func (m *MockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, limitPrice float64, preview bool) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 123
+	return resp, nil
+}
+
+func (m *MockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, credit, profitTarget float64) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 123
+	return resp, nil
+}
+
+func (m *MockBroker) GetOrderStatus(orderID int) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = orderID
+	return resp, nil
+}
+
+func (m *MockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = orderID
+	return resp, nil
+}
+
+func (m *MockBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, maxDebit float64) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 123
+	return resp, nil
+}
+
+func (m *MockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int,
+	maxPrice float64) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 123
+	return resp, nil
+}
+
+func TestNewCircuitBreakerBroker(t *testing.T) {
+	mockBroker := &MockBroker{}
+	cb := NewCircuitBreakerBroker(mockBroker)
+
+	if cb == nil {
+		t.Fatal("NewCircuitBreakerBroker returned nil")
+	}
+	if cb.broker != mockBroker {
+		t.Error("CircuitBreakerBroker.broker not set correctly")
+	}
+	if cb.breaker == nil {
+		t.Error("CircuitBreakerBroker.breaker not initialized")
+	}
+}
+
+func TestCircuitBreakerBroker_SuccessfulCalls(t *testing.T) {
+	mockBroker := &MockBroker{shouldFail: false}
+	cb := NewCircuitBreakerBroker(mockBroker)
+
+	// Test successful GetAccountBalance
+	balance, err := cb.GetAccountBalance()
+	if err != nil {
+		t.Errorf("GetAccountBalance failed: %v", err)
+	}
+	if balance != 1000.0 {
+		t.Errorf("GetAccountBalance returned %v, want 1000.0", balance)
+	}
+
+	// Test successful GetQuote
+	quote, err := cb.GetQuote("SPY")
+	if err != nil {
+		t.Errorf("GetQuote failed: %v", err)
+	}
+	if quote.Symbol != "SPY" {
+		t.Errorf("GetQuote returned symbol %s, want SPY", quote.Symbol)
+	}
+}
+
+func TestCircuitBreakerBroker_FailureScenarios(t *testing.T) {
+	mockBroker := &MockBroker{shouldFail: true, failAfter: 3}
+	cb := NewCircuitBreakerBroker(mockBroker)
+
+	// Make several calls to trip the breaker
+	for i := 0; i < 8; i++ {
+		_, err := cb.GetAccountBalance()
+		if i < 3 {
+			// First 3 calls should succeed
+			if err != nil {
+				t.Errorf("Call %d should succeed but failed: %v", i+1, err)
+			}
+		} else {
+			// Subsequent calls should fail
+			if err == nil {
+				t.Errorf("Call %d should fail but succeeded", i+1)
+			}
+		}
+	}
+
+	// Check that breaker is open
+	if cb.breaker.State() != gobreaker.StateOpen {
+		t.Errorf("Circuit breaker should be open, but state is %s", cb.breaker.State())
+	}
+}
+
+func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
+	mockBroker := &MockBroker{shouldFail: true, failAfter: 3}
+	// Use fast settings for testing to avoid 30-second delays
+	fastSettings := CircuitBreakerSettings{
+		MaxRequests:  3,
+		Interval:     1 * time.Second,
+		Timeout:      2 * time.Second, // Fast recovery for tests
+		MinRequests:  5,
+		FailureRatio: 0.6,
+	}
+	cb := NewCircuitBreakerBrokerWithSettings(mockBroker, fastSettings)
+
+	// Trip the breaker
+	for i := 0; i < 8; i++ {
+		_, _ = cb.GetAccountBalance() // Ignore errors during breaker tripping
+	}
+
+	// Verify breaker is open
+	if cb.breaker.State() != gobreaker.StateOpen {
+		t.Fatalf("Circuit breaker should be open, but state is %s", cb.breaker.State())
+	}
+
+	// Wait for timeout (2 seconds in test config) - REQUIRED for circuit breaker recovery test
+	time.Sleep(2100 * time.Millisecond) // Slightly longer than 2s to ensure timeout
+
+	// Breaker should be half-open now, allow limited requests
+	mockBroker.shouldFail = false // Make broker succeed again
+
+	// First call in half-open state should succeed
+	balance, err := cb.GetAccountBalance()
+	if err != nil {
+		t.Errorf("Recovery call should succeed but failed: %v", err)
+	}
+	if balance != 1000.0 {
+		t.Errorf("Recovery call returned %v, want 1000.0", balance)
+	}
+
+	// Make a few more calls to ensure state transition completes
+	for i := 0; i < 3; i++ {
+		balance, err := cb.GetAccountBalance()
+		if err != nil {
+			t.Errorf("Call %d after recovery should succeed but failed: %v", i+1, err)
+		}
+		if balance != 1000.0 {
+			t.Errorf("Call %d after recovery returned %v, want 1000.0", i+1, balance)
+		}
+	}
+
+	// Breaker should be closed again after successful calls
+	if cb.breaker.State() != gobreaker.StateClosed {
+		t.Errorf("Circuit breaker should be closed after recovery, but state is %s", cb.breaker.State())
+	}
+}
+
+func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
+	mockBroker := &MockBroker{shouldFail: false}
+	cb := NewCircuitBreakerBroker(mockBroker)
+
+	tests := []struct {
+		name string
+		fn   func() error
+	}{
+		{"GetAccountBalance", func() error { _, err := cb.GetAccountBalance(); return err }},
+		{"GetPositions", func() error { _, err := cb.GetPositions(); return err }},
+		{"GetQuote", func() error { _, err := cb.GetQuote("SPY"); return err }},
+		{"GetExpirations", func() error { _, err := cb.GetExpirations("SPY"); return err }},
+		{"GetOptionChain", func() error { _, err := cb.GetOptionChain("SPY", "2024-12-20", false); return err }},
+		{"PlaceStrangleOrder", func() error {
+			_, err := cb.PlaceStrangleOrder("SPY", 400, 420, "2024-12-20", 1, 2.0, false)
+			return err
+		}},
+		{"PlaceStrangleOTOCO", func() error {
+			_, err := cb.PlaceStrangleOTOCO("SPY", 400, 420, "2024-12-20", 1, 2.0, 0.5)
+			return err
+		}},
+		{"GetOrderStatus", func() error { _, err := cb.GetOrderStatus(123); return err }},
+		{"GetOrderStatusCtx", func() error { _, err := cb.GetOrderStatusCtx(context.Background(), 123); return err }},
+		{"CloseStranglePosition", func() error {
+			_, err := cb.CloseStranglePosition("SPY", 400, 420, "2024-12-20", 1, 5.0)
+			return err
+		}},
+		{"PlaceBuyToCloseOrder", func() error {
+			_, err := cb.PlaceBuyToCloseOrder("SPY241220P00400000", 1, 5.0)
+			return err
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.fn()
+			if err != nil {
+				t.Errorf("%s failed: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
+	mockBroker := &MockBroker{shouldFail: true, failAfter: 0}
+	cb := NewCircuitBreakerBroker(mockBroker)
+
+	// Trip the breaker immediately
+	for i := 0; i < 8; i++ {
+		_, _ = cb.GetAccountBalance() // Ignore errors during breaker tripping
+	}
+
+	// Next call should return circuit breaker error
+	_, err := cb.GetAccountBalance()
+	if err == nil {
+		t.Error("Expected circuit breaker error but got nil")
+	}
+
+	// Error should contain circuit breaker open message
+	if !strings.Contains(err.Error(), "circuit breaker is open") {
+		t.Errorf("Expected circuit breaker open error but got: %v", err)
 	}
 }

@@ -30,6 +30,9 @@ func secureFloat64() float64 {
 
 // secureInt63n generates a cryptographically secure random int64 between 0 and n-1
 func secureInt63n(n int64) int64 {
+	if n <= 0 {
+		return 0
+	}
 	maxVal := big.NewInt(n)
 	r, err := rand.Int(rand.Reader, maxVal)
 	if err != nil {
@@ -181,13 +184,14 @@ func (m *DataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, c
 			continue
 		}
 
-		if option.OptionType == "put" {
+		switch option.OptionType {
+		case "put":
 			putDiff := math.Abs(math.Abs(option.Greeks.Delta) - targetDelta)
 			if putDiff < bestPutDiff {
 				bestPutDiff = putDiff
 				bestPutStrike = option.Strike
 			}
-		} else if option.OptionType == "call" {
+		case "call":
 			callDiff := math.Abs(option.Greeks.Delta - targetDelta)
 			if callDiff < bestCallDiff {
 				bestCallDiff = callDiff

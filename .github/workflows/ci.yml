@@ -63,7 +63,7 @@ jobs:
         run: go version
 
       - name: Install Gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.22.8
+        run: go install github.com/securego/gosec/v2/cmd/gosec@v2.24.0
 
       - name: Run Gosec (tolerate findings)
         continue-on-error: true
@@ -72,7 +72,7 @@ jobs:
           gosec -fmt sarif -out gosec-results.sarif ./...
       
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: gosec-results.sarif
@@ -98,6 +98,6 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.4.0
+          version: latest
           args: --timeout=5m
 

@@ -177,15 +177,18 @@ go run test_tradier.go --sandbox=false   # Use production (careful!)
 
 ### Prerequisites
 ```bash
-# One-time setup: Install golangci-lint
+# One-time setup: Install golangci-lint (recommended method using install script)
+curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
+
+# Alternative: Install via go install (binary installation is preferred)
 go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 ```
 
 ### GitHub Actions
 The project uses GitHub Actions for CI/CD with the following jobs:
 - **Test**: Unit tests with race detection and coverage reporting
-- **Lint**: Code quality checks with golangci-lint (timeout: 5m)
-- **Security Scan**: Vulnerability scanning with gosec and SARIF upload
+- **Lint**: Code quality checks with golangci-lint (timeout: 5m) using latest version
+- **Security Scan**: Vulnerability scanning with gosec v2.24.0 and SARIF upload
 
 Triggers:
 - Push to `main` or `feature/*` branches

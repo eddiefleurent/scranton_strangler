@@ -393,11 +393,23 @@ func (b *ResilientBroker) GetQuoteWithRetry(symbol string) (*Quote, error) {
     )
 }
 
-// Circuit breaker implementation
+// Circuit breaker implementation - IMPLEMENTED ✅
 type CircuitBreakerBroker struct {
     broker  Broker
     breaker *gobreaker.CircuitBreaker
 }
+
+// CircuitBreakerSettings configures circuit breaker behavior
+type CircuitBreakerSettings struct {
+    MaxRequests  uint32        // Max requests when half-open
+    Interval     time.Duration // Reset counts interval
+    Timeout      time.Duration // Open circuit duration
+    MinRequests  uint32        // Min requests before tripping
+    FailureRatio float64       // Failure ratio threshold
+}
+
+// Production settings: 60s interval, 30s timeout
+// Test settings: 1s interval, 2s timeout (for fast CI)
 ```
 
 #### Success Metrics

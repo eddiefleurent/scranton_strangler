@@ -6,6 +6,8 @@ import (
 	"log"
 	"math"
 	"time"
+
+	"github.com/sony/gobreaker"
 )
 
 // Broker defines the interface for interacting with a brokerage
@@ -106,7 +108,7 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 // CloseStranglePosition closes an existing strangle position with a buy-to-close order
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64) (*OrderResponse, error) {
-	return t.TradierAPI.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
+	return t.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
 		expiration, quantity, maxDebit)
 }
 
@@ -178,4 +180,177 @@ func DaysBetween(from, to time.Time) int {
 		return -d
 	}
 	return d
+}
+
+// CircuitBreakerBroker wraps a Broker with circuit breaker functionality
+type CircuitBreakerBroker struct {
+	broker  Broker
+	breaker *gobreaker.CircuitBreaker
+}
+
+// NewCircuitBreakerBroker creates a new CircuitBreakerBroker with sensible defaults
+func NewCircuitBreakerBroker(broker Broker) *CircuitBreakerBroker {
+	return NewCircuitBreakerBrokerWithSettings(broker, CircuitBreakerSettings{
+		MaxRequests:  3,                // Allow 3 requests when half-open
+		Interval:     60 * time.Second, // Reset counts every minute
+		Timeout:      30 * time.Second, // Open circuit for 30 seconds
+		MinRequests:  5,                // Minimum requests before tripping
+		FailureRatio: 0.6,              // Trip if 60% failure rate
+	})
+}
+
+// CircuitBreakerSettings configures circuit breaker behavior
+type CircuitBreakerSettings struct {
+	MaxRequests  uint32        // Max requests when half-open
+	Interval     time.Duration // Reset counts interval
+	Timeout      time.Duration // Open circuit duration
+	MinRequests  uint32        // Min requests before tripping
+	FailureRatio float64       // Failure ratio threshold
+}
+
+// NewCircuitBreakerBrokerWithSettings creates a CircuitBreakerBroker with custom settings
+func NewCircuitBreakerBrokerWithSettings(broker Broker, settings CircuitBreakerSettings) *CircuitBreakerBroker {
+	gbSettings := gobreaker.Settings{
+		Name:        "BrokerCircuitBreaker",
+		MaxRequests: settings.MaxRequests,
+		Interval:    settings.Interval,
+		Timeout:     settings.Timeout,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+			return counts.Requests >= settings.MinRequests && failureRatio >= settings.FailureRatio
+		},
+		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			log.Printf("Circuit breaker %s state changed from %s to %s", name, from, to)
+		},
+	}
+
+	return &CircuitBreakerBroker{
+		broker:  broker,
+		breaker: gobreaker.NewCircuitBreaker(gbSettings),
+	}
+}
+
+// GetAccountBalance wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetAccountBalance() (float64, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetAccountBalance()
+	})
+	if err != nil {
+		return 0, err
+	}
+	return result.(float64), nil
+}
+
+// GetPositions wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetPositions() ([]PositionItem, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetPositions()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.([]PositionItem), nil
+}
+
+// GetQuote wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetQuote(symbol string) (*QuoteItem, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetQuote(symbol)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*QuoteItem), nil
+}
+
+// GetExpirations wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetExpirations(symbol string) ([]string, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetExpirations(symbol)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.([]string), nil
+}
+
+// GetOptionChain wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetOptionChain(symbol, expiration, withGreeks)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.([]Option), nil
+}
+
+// PlaceStrangleOrder wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, limitPrice float64, preview bool) (*OrderResponse, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OrderResponse), nil
+}
+
+// PlaceStrangleOTOCO wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, credit, profitTarget float64) (*OrderResponse, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, credit, profitTarget)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OrderResponse), nil
+}
+
+// GetOrderStatus wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetOrderStatus(orderID int) (*OrderResponse, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetOrderStatus(orderID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OrderResponse), nil
+}
+
+// GetOrderStatusCtx wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.GetOrderStatusCtx(ctx, orderID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OrderResponse), nil
+}
+
+// CloseStranglePosition wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, maxDebit float64) (*OrderResponse, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.CloseStranglePosition(symbol, putStrike, callStrike, expiration, quantity, maxDebit)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OrderResponse), nil
+}
+
+// PlaceBuyToCloseOrder wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int,
+	maxPrice float64) (*OrderResponse, error) {
+	result, err := c.breaker.Execute(func() (interface{}, error) {
+		return c.broker.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result.(*OrderResponse), nil
 }

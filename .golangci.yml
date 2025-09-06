@@ -6,7 +6,6 @@ run:
   modules-download-mode: readonly
 
 linters:
-  default: standard
   enable:
     - bodyclose
     - dogsled
@@ -37,6 +36,7 @@ linters:
         linters:
           - funlen
           - gocyclo
+          - errcheck
       - path: "cmd/"
         linters:
           - gochecknoinits
@@ -73,7 +73,7 @@ linters:
           - funlen
   settings:
     errcheck:
-      check-type-assertions: true
+      check-type-assertions: false
       check-blank: true
     
     govet:

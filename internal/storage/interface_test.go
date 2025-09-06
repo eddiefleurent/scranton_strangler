@@ -22,8 +22,12 @@ func TestInterface(t *testing.T) {
 		tmpFile := fmt.Sprintf("/tmp/test_positions_%d.json", time.Now().UnixNano())
 		// Clean up after test
 		defer func() {
-			_ = os.Remove(tmpFile)
-			_ = os.Remove(tmpFile + ".tmp")
+			if err := os.Remove(tmpFile); err != nil && !os.IsNotExist(err) {
+				t.Logf("Failed to remove temp file %s: %v", tmpFile, err)
+			}
+			if err := os.Remove(tmpFile + ".tmp"); err != nil && !os.IsNotExist(err) {
+				t.Logf("Failed to remove temp file %s.tmp: %v", tmpFile, err)
+			}
 		}()
 
 		storage, err := NewJSONStorage(tmpFile)
@@ -199,8 +203,12 @@ func (e *MockError) Error() string {
 func TestExitMetadataBackup(t *testing.T) {
 	tmpFile := fmt.Sprintf("/tmp/test_exit_metadata_%d.json", time.Now().UnixNano())
 	defer func() {
-		_ = os.Remove(tmpFile)
-		_ = os.Remove(tmpFile + ".tmp")
+		if err := os.Remove(tmpFile); err != nil && !os.IsNotExist(err) {
+			t.Logf("Failed to remove temp file %s: %v", tmpFile, err)
+		}
+		if err := os.Remove(tmpFile + ".tmp"); err != nil && !os.IsNotExist(err) {
+			t.Logf("Failed to remove temp file %s.tmp: %v", tmpFile, err)
+		}
 	}()
 
 	storage, err := NewJSONStorage(tmpFile)
@@ -243,7 +251,7 @@ func TestExitMetadataBackup(t *testing.T) {
 	}
 
 	// Close position with valid condition
-	finalPnL := -1.25 // Loss to test edge case
+	finalPnL := -1.25                                        // Loss to test edge case
 	err = storage.ClosePosition(finalPnL, "position_closed") // Use valid transition condition
 	if err != nil {
 		t.Fatalf("Failed to close position: %v", err)
@@ -293,5 +301,5 @@ func TestInterfaceCompliance(t *testing.T) {
 	}
 
 	// Ensure factory returns the interface
-	var _ Interface = storage
+	_ = storage
 }

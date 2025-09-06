@@ -554,7 +554,8 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 			continue
 		}
 
-		if opt.OptionType == optionTypePut {
+		switch opt.OptionType {
+		case optionTypePut:
 			// Put deltas are negative, so we use absolute value
 			delta := opt.Greeks.Delta
 			if delta < 0 {
@@ -566,7 +567,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 				bestPutDiff = diff
 				bestPut = opt
 			}
-		} else if opt.OptionType == optionTypeCall {
+		case optionTypeCall:
 			// Call deltas are positive
 			diff := abs(opt.Greeks.Delta - targetDelta)
 			if diff < bestCallDiff {
@@ -589,7 +590,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 }
 
 // CalculateStrangleCredit calculates expected credit from put and call
-func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) float64 {
+func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (float64, error) {
 	var putCredit, callCredit float64
 
 	for _, opt := range options {
@@ -603,7 +604,12 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) fl
 		}
 	}
 
-	return putCredit + callCredit
+	if putCredit == 0 || callCredit == 0 {
+		return 0, fmt.Errorf("missing strikes: putCredit=%.2f callCredit=%.2f for strikes put=%.2f call=%.2f",
+			putCredit, callCredit, putStrike, callStrike)
+	}
+
+	return putCredit + callCredit, nil
 }
 
 // CheckStranglePosition checks if we have an open strangle position

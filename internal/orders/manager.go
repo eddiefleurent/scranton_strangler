@@ -15,6 +15,13 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 )
 
+// State transition reasons
+const (
+	exitConditions = "exit_conditions"
+	hardStop       = "hard_stop"
+	forceClose     = "force_close"
+)
+
 // Config contains configuration for the order manager.
 type Config struct {
 	PollInterval time.Duration
@@ -240,8 +247,8 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 
 	var transitionReason string
 	if isExitOrder {
-		// For exit order timeouts, use the stored exit reason to determine transition condition
-		transitionReason = m.exitConditionFromReason(position.ExitReason)
+		// For exit order timeouts, determine transition reason based on current state
+		transitionReason = m.timeoutTransitionReason(position.GetCurrentState())
 	} else {
 		// For entry order timeouts, use the standard timeout reason
 		transitionReason = "order_timeout"
@@ -264,12 +271,33 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 func (m *Manager) exitConditionFromReason(exitReason string) string {
 	switch exitReason {
 	case "profit_target", "time", "manual":
-		return "exit_conditions"
+		return exitConditions
 	case "escalate":
 		return "emergency_exit"
 	case "stop_loss", "error":
-		return "hard_stop"
+		return hardStop
 	default:
-		return "exit_conditions" // Default fallback
+		return exitConditions // Default fallback
+	}
+}
+
+// timeoutTransitionReason returns the appropriate transition reason for order timeouts
+// based on the current state, ensuring it matches ValidTransitions
+func (m *Manager) timeoutTransitionReason(currentState models.PositionState) string {
+	switch currentState {
+	case models.StateAdjusting:
+		return hardStop // StateAdjusting -> StateClosed requires "hard_stop"
+	case models.StateRolling:
+		return forceClose // StateRolling -> StateClosed requires "force_close"
+	case models.StateFirstDown, models.StateSecondDown:
+		return exitConditions // These states allow "exit_conditions" -> StateClosed
+	case models.StateThirdDown:
+		return hardStop // StateThirdDown -> StateClosed requires "hard_stop"
+	case models.StateFourthDown:
+		return "emergency_exit" // StateFourthDown -> StateClosed requires "emergency_exit"
+	case models.StateError:
+		return forceClose // StateError -> StateClosed requires "force_close"
+	default:
+		return forceClose // Default fallback for any other states
 	}
 }
