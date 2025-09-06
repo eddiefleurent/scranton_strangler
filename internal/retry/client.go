@@ -39,6 +39,25 @@ func NewClient(broker broker.Broker, logger *log.Logger, config ...Config) *Clie
 		cfg = config[0]
 	}
 
+	// Default nil logger to log.Default()
+	if logger == nil {
+		logger = log.Default()
+	}
+
+	// Validate and sanitize config fields
+	if cfg.MaxRetries < 0 {
+		cfg.MaxRetries = DefaultConfig.MaxRetries
+	}
+	if cfg.InitialBackoff <= 0 {
+		cfg.InitialBackoff = DefaultConfig.InitialBackoff
+	}
+	if cfg.MaxBackoff <= 0 {
+		cfg.MaxBackoff = DefaultConfig.MaxBackoff
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = DefaultConfig.Timeout
+	}
+
 	return &Client{
 		broker: broker,
 		logger: logger,
@@ -51,6 +70,12 @@ func (c *Client) ClosePositionWithRetry(
 	position *models.Position,
 	maxDebit float64,
 ) (*broker.OrderResponse, error) {
+	// Add nil guard for position argument
+	if position == nil {
+		c.logger.Printf("ClosePositionWithRetry called with nil position")
+		return nil, fmt.Errorf("nil position provided to ClosePositionWithRetry")
+	}
+
 	closeCtx, cancel := context.WithTimeout(ctx, c.config.Timeout)
 	defer cancel()
 

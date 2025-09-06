@@ -5,6 +5,7 @@ config.yaml
 
 # Binary
 /strangle-bot
+/bot
 /cmd/bot/strangle-bot
 /scripts/test_otoco/test_otoco
 /scripts/test_tradier/test_tradier
@@ -61,5 +62,4 @@ coverage.out
 coverage.html
 *.cover
 *.coverprofile
-bot
 gosec-results.sarif

@@ -80,14 +80,17 @@ func main() {
 
 	// Initialize strategy
 	strategyConfig := &strategy.StrategyConfig{
-		Symbol:        cfg.Strategy.Symbol,
-		DTETarget:     cfg.Strategy.Entry.TargetDTE,
-		DeltaTarget:   cfg.Strategy.Entry.Delta / 100, // Convert from percentage
-		ProfitTarget:  cfg.Strategy.Exit.ProfitTarget,
-		MaxDTE:        cfg.Strategy.Exit.MaxDTE,
-		AllocationPct: cfg.Strategy.AllocationPct,
-		MinIVR:        cfg.Strategy.Entry.MinIVR,
-		MinCredit:     cfg.Strategy.Entry.MinCredit,
+		Symbol:              cfg.Strategy.Symbol,
+		DTETarget:           cfg.Strategy.Entry.TargetDTE,
+		DeltaTarget:         cfg.Strategy.Entry.Delta / 100, // Convert from percentage
+		ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
+		MaxDTE:              cfg.Strategy.Exit.MaxDTE,
+		AllocationPct:       cfg.Strategy.AllocationPct,
+		MinIVR:              cfg.Strategy.Entry.MinIVR,
+		MinCredit:           cfg.Strategy.Entry.MinCredit,
+		EscalateLossPct:     cfg.Strategy.EscalateLossPct,
+		StopLossPct:         cfg.Strategy.Exit.StopLossPct,
+		UseMockHistoricalIV: cfg.Strategy.UseMockHistoricalIV,
 	}
 	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig)
 
@@ -372,7 +375,7 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 		if cvErr == nil {
 			return currentVal / (float64(position.Quantity) * 100)
 		}
-		return position.CreditReceived * config.StopLossPct
+		return position.CreditReceived * b.config.Strategy.Exit.StopLossPct
 	default:
 		return position.CreditReceived * 1.0
 	}

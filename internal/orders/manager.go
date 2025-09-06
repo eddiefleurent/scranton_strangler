@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -41,6 +42,19 @@ func NewManager(
 		cfg = config[0]
 	}
 
+	// Guard against nil logger
+	if logger == nil {
+		logger = log.New(os.Stderr, "orders: ", log.LstdFlags)
+	}
+
+	// Validate and clamp config values
+	if cfg.PollInterval <= 0 {
+		cfg.PollInterval = DefaultConfig.PollInterval
+	}
+	if cfg.Timeout <= 0 {
+		cfg.Timeout = DefaultConfig.Timeout
+	}
+
 	return &Manager{
 		broker:  broker,
 		storage: storage,
@@ -69,8 +83,16 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int) {
 			m.logger.Printf("Shutdown signal received during order polling for position %s", positionID)
 			return
 		case <-ticker.C:
+			// Create a child context with short timeout for the GetOrderStatus call
+			statusCtx, statusCancel := context.WithTimeout(ctx, 5*time.Second)
 			orderStatus, err := m.broker.GetOrderStatus(orderID)
+			statusCancel() // Cancel the child context immediately after the call
+
 			if err != nil {
+				if statusCtx.Err() == context.DeadlineExceeded {
+					m.logger.Printf("GetOrderStatus timeout for position %s, order %d", positionID, orderID)
+					continue // Continue the loop on timeout so ticker keeps running
+				}
 				m.logger.Printf("Error checking order status for %s: %v", positionID, err)
 				continue
 			}
@@ -82,11 +104,11 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int) {
 				m.logger.Printf("Order filled for position %s", positionID)
 				m.handleOrderFilled(positionID)
 				return
-			case "canceled", "rejected":
+			case "canceled", "rejected", "expired":
 				m.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
 				m.handleOrderFailed(positionID, orderStatus.Order.Status)
 				return
-			case "pending", "open", "partial":
+			case "pending", "open", "partial", "partially_filled":
 				continue
 			default:
 				m.logger.Printf("Unknown order status for position %s: %s", positionID, orderStatus.Order.Status)

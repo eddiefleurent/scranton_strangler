@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	yaml "gopkg.in/yaml.v3"
 )
 
 // Risk Management Constants
@@ -50,6 +50,7 @@ type StrategyConfig struct {
 	Exit                ExitConfig       `yaml:"exit"`
 	Adjustments         AdjustmentConfig `yaml:"adjustments"`
 	AllocationPct       float64          `yaml:"allocation_pct"`
+	EscalateLossPct     float64          `yaml:"escalate_loss_pct"`
 	UseMockHistoricalIV bool             `yaml:"use_mock_historical_iv"`
 }
 
@@ -64,6 +65,7 @@ type EntryConfig struct {
 type ExitConfig struct {
 	ProfitTarget float64 `yaml:"profit_target"`
 	MaxDTE       int     `yaml:"max_dte"`
+	StopLossPct  float64 `yaml:"stop_loss_pct"`
 }
 
 type AdjustmentConfig struct {

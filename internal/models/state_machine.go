@@ -340,8 +340,12 @@ func (sm *StateMachine) ExecutePunt() error {
 		return fmt.Errorf("punt not allowed: already used")
 	}
 
+	err := sm.Transition(StateFirstDown, "punt_executed")
+	if err != nil {
+		return err
+	}
 	sm.puntCount++
-	return sm.Transition(StateFirstDown, "punt_executed")
+	return nil
 }
 
 // Copy creates a deep copy of the StateMachine

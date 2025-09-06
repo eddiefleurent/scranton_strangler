@@ -12,7 +12,8 @@ import (
 
 type MockDataProvider struct {
 	currentPrice float64
-	ivr          float64
+	ivr          float64 // IV rank (percentile)
+	midIV        float64 // Actual IV level for pricing
 }
 
 // secureFloat64 generates a cryptographically secure random float64 between 0 and 1
@@ -39,7 +40,8 @@ func secureInt63n(n int64) int64 {
 func NewMockDataProvider() *MockDataProvider {
 	return &MockDataProvider{
 		currentPrice: 450.0 + secureFloat64()*10, // SPY around 450-460
-		ivr:          35.0 + secureFloat64()*20,  // IVR between 35-55
+		ivr:          35.0 + secureFloat64()*20,  // IVR between 35-55 (rank)
+		midIV:        12.0 + secureFloat64()*18,  // MidIV between 12-30% (actual volatility)
 	}
 }
 
@@ -98,7 +100,7 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 
 		// Calculate option prices (simplified Black-Scholes approximation)
 		timeValue := math.Max(0, float64(dte)/365.0) // Ensure timeValue is never negative
-		vol := m.ivr / 100.0
+		vol := m.midIV / 100.0                       // Use midIV for actual volatility level
 		putPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(putDelta))
 		callPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(callDelta))
 
@@ -138,13 +140,13 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 		if withGreeks {
 			putOption.Greeks = &broker.Greeks{
 				Delta: putDelta,
-				MidIV: vol,
+				MidIV: m.midIV / 100.0, // Use actual midIV level
 				Theta: -0.05 * vol,
 				Vega:  0.10 * vol,
 			}
 			callOption.Greeks = &broker.Greeks{
 				Delta: callDelta,
-				MidIV: vol,
+				MidIV: m.midIV / 100.0, // Use actual midIV level
 				Theta: -0.05 * vol,
 				Vega:  0.10 * vol,
 			}
