@@ -1,360 +1,175 @@
-# Next Steps & Tasks
+# SPY Strangle Bot - MVP Tasks
 
-## Architecture Improvements (Based on Review)
+## Core MVP Features (Must Have)
 
-### Phase 1: Critical MVP Fixes (Week 1-2)
-- [ ] **Interface-Based Design**
-  - [x] Create Broker interface abstraction
-  - [ ] Create Storage interface abstraction  
-  - [ ] Create Strategy interface abstraction
-  - [ ] Implement dependency injection
-  - [x] Enable mock implementations for testing
-- [ ] **Add Comprehensive Testing**
-  - [x] Unit tests for financial calculations
-  - [ ] Unit tests for Greek calculations
-  - [x] Unit tests for position sizing
-  - [ ] Integration tests for Tradier API
-  - [x] Test coverage for strategy logic
-- [x] **Implement State Machine**
-  - [x] Define valid state transitions
-  - [x] Add position state validation
-  - [x] Ensure memory/storage consistency
-  - [x] Add transaction support
-- [ ] **Add Resilience Patterns**
-  - [ ] Implement retry logic with exponential backoff
-  - [ ] Add circuit breaker for API failures
-  - [ ] Implement rate limiting (120 req/min sandbox)
-  - [ ] Categorize errors (transient vs permanent)
-
-### Phase 2: Production Readiness (Week 3-4)
-- [ ] **Migrate to SQLite**
-  - [ ] Design database schema
-  - [ ] Implement ACID properties
-  - [ ] Add migration scripts
-  - [ ] Update storage layer
-- [ ] **Add Observability**
-  - [ ] Structured logging (zap/logrus)
-  - [ ] Metrics collection (Prometheus)
-  - [ ] Health check endpoints
-  - [ ] Performance monitoring
-- [ ] **Enhance Security**
-  - [ ] Encrypt API credentials
-  - [ ] Add credential validation at startup
-  - [ ] Implement secure configuration
-  - [ ] Add audit logging
-
-### Phase 3: Scalability & Enhancement (Future)
-- [ ] **Multi-Asset Support**
-  - [ ] Generalize strategy engine
-  - [ ] Portfolio management
-  - [ ] Asset allocation logic
-- [ ] **Event-Driven Architecture**
-  - [ ] Event sourcing for audit trail
-  - [ ] Async order processing
-  - [ ] Message queue integration
-- [ ] **Production Database**
-  - [ ] Migrate to PostgreSQL
-  - [ ] Add database indexes
-  - [ ] Implement connection pooling
-- [ ] **Web Dashboard**
-  - [ ] Real-time monitoring UI
-  - [ ] Performance analytics
-  - [ ] Manual override controls
-
-## Immediate Setup Tasks
-
-### 1. Tradier Account Setup
-- [ ] Create Tradier developer account
-- [ ] Get sandbox API credentials
-- [ ] Test API access with curl
-- [ ] Document rate limits
-- [ ] Understand margin requirements for short options
-
-### 2. Development Environment
-- [ ] Set up Go 1.21+
-- [ ] Create config.yaml with sandbox credentials
-- [ ] Set up git repository
-- [ ] Create .gitignore (exclude config.yaml)
-- [ ] Set up logging framework
-
-### 3. Core Implementation Tasks
-
-#### Week 1: Foundation
-- [ ] Implement Tradier API client
-  - [x] Authentication
-  - [x] Get quotes
-  - [x] Get option chains
-  - [x] Parse Greeks from response
-  - [x] OTOCO order implementation
-  - [ ] OCO order implementation
-  - [ ] Bracket order implementation (future)
-- [ ] Build IVR calculator
-  - [ ] Fetch historical volatility data
-  - [ ] Calculate current IV rank
-  - [ ] Cache calculations
-- [ ] Create position model
-  - [ ] JSON serialization
-  - [ ] State management
-  - [ ] P&L calculation
-
-#### Week 2: Strategy Logic & Automated Management
-- [ ] Implement entry scanner
-  - [ ] Check IVR > 30
-  - [ ] Find 45 DTE expiration
-  - [ ] Select 16 delta strikes
-  - [ ] Calculate position size
-  - [x] OTOCO order placement for automated exits
-- [ ] Build exit detector
-  - [x] Monitor 50% profit target (automated via OTOCO)
-  - [ ] Check 21 DTE limit
+### 1. Basic Trading Loop
+- [ ] **Tradier API Integration**
+  - [x] Authentication working
+  - [x] Get SPY quotes 
+  - [x] Get SPY option chains
+  - [x] OTOCO order placement
+  - [ ] Test with paper trading account
+- [ ] **Entry Logic**  
+  - [ ] Calculate IVR > 30 (simple 20-day lookback)
+  - [ ] Find 45 DTE expiration (±5 days acceptable)
+  - [ ] Select 16 delta strikes (or closest available)
+  - [ ] Check minimum $2.00 credit requirement
+  - [ ] Verify position sizing (max 35% allocation)
+- [ ] **Exit Logic**
+  - [x] OTOCO handles 50% profit automatically
+  - [ ] Manual 21 DTE check (close regardless of P&L)
+  - [ ] Emergency stop at 250% loss
+- [ ] **Position Tracking**
+  - [ ] Save positions to JSON file
+  - [ ] Load positions on startup  
   - [ ] Calculate current P&L
-  - [ ] Implement hard stop conditions
-- [ ] **Automated Management System ("Football System")**
-  - [ ] First Down monitoring (theta decay)
-  - [ ] Second Down detection (strike challenged within 5 points)
-  - [ ] Third Down management (strike breached)
-  - [ ] Fourth Down decision logic (Field Goal/Go For It/Punt)
-  - [ ] Strike adjustment counter (max 3 per cycle)
-  - [ ] Time roll limiter (max 1 punt per trade)
-- [ ] Create order builder
-  - [ ] Multi-leg order construction
-  - [ ] Limit price calculation
-  - [ ] Order validation
+  - [ ] Track days to expiration
 
-#### Week 3: Execution
-- [ ] Implement order placement
-  - [ ] Submit orders to Tradier
-  - [ ] Handle partial fills
-  - [ ] Retry logic
-- [ ] Build position monitor
-  - [ ] Poll positions every 15 min
-  - [ ] Update P&L
-  - [ ] Check exit conditions
-- [ ] **Advanced Order Management**
-  - [ ] OCO orders for Second Down rolling
-  - [ ] OCO orders for Third Down straddle management  
-  - [ ] OCO orders for Fourth Down critical stops
-  - [ ] Emergency OCO for hard stops (250% loss, 5 DTE, etc.)
-- [ ] **Hard Stop Implementation**
-  - [ ] Maximum loss stop (250% of credit)
-  - [ ] Time stop (5 DTE assignment risk)
-  - [ ] Delta stop (position delta > |1.0|)  
-  - [ ] Management stop (completed Fourth Down)
-  - [ ] Black swan stop (SPY moves >8% daily)
-  - [ ] Liquidity stop (bid-ask spread >$0.50)
+### 2. Basic Risk Management
+- [ ] **Position Sizing**
+  - [ ] Calculate max position size based on account value
+  - [ ] Enforce 35% allocation limit
+  - [ ] Prevent overlapping positions (one at a time for MVP)
+- [ ] **Hard Stops**
+  - [ ] Close at 250% of credit received
+  - [ ] Close at 5 DTE (assignment risk)
+  - [ ] Close on any API/system error
 
-#### Week 4: Testing & Refinement
-- [ ] Complete integration testing
-- [ ] Add comprehensive logging
-- [ ] Handle edge cases
-- [ ] Performance optimization
-- [ ] Start 30-day paper trading
+### 3. Scheduler & Logging  
+- [ ] **Cron Job Setup**
+  - [ ] Run every 15 minutes during market hours
+  - [ ] Skip weekends and holidays
+  - [ ] Graceful shutdown handling
+- [ ] **Basic Logging**
+  - [ ] Entry/exit signals with reasoning
+  - [ ] API errors and retries
+  - [ ] Position P&L updates
+  - [ ] Daily summary logs
 
-## Testing Checklist
+## Testing & Validation
 
-### Unit Tests
-- [ ] IVR calculation
-- [ ] Strike selection logic
-- [ ] Position sizing math
-- [ ] P&L calculations
-- [ ] Exit condition detection
+### 4. Paper Trading Validation
+- [ ] **Test Entry Conditions**
+  - [ ] Verify IVR calculation accuracy
+  - [ ] Confirm strike selection logic  
+  - [ ] Test position sizing math
+  - [ ] Validate OTOCO order placement
+- [ ] **Test Exit Conditions**
+  - [ ] 50% profit target via OTOCO
+  - [ ] 21 DTE manual close
+  - [ ] Emergency stops trigger correctly
+- [ ] **End-to-End Testing**
+  - [ ] Complete 3 successful paper trades
+  - [ ] No critical bugs in 1 week of running
+  - [ ] All logs make sense and are useful
 
-### Integration Tests
-- [ ] API connection handling
-- [ ] Order placement flow
-- [ ] Position update cycle
-- [ ] State persistence
-- [ ] Error recovery
+## Post-MVP Enhancements (Later)
 
-### Paper Trading Validation
-- [ ] Entry fills at expected prices
-- [ ] Exit triggers work correctly
-- [ ] Adjustments execute properly
-- [ ] Risk limits enforced
-- [ ] Logs are comprehensive
+### Phase 2: Reliability & Monitoring
+- [ ] Better error handling with retries
+- [ ] SQLite for position storage
+- [ ] Structured logging with levels
+- [ ] Email/Slack alerts on trades
+- [ ] Basic web dashboard for monitoring
 
-## Configuration Tasks
-- [x] Create config.yaml template
-- [ ] Document all parameters
-- [ ] Add config validation
-- [ ] Environment variable support
-- [ ] Separate paper/live configs
-- [x] **OTOCO/OCO Order Configuration**
-  - [x] `use_otoco` flag for automated exits
-  - [ ] `management_style` setting (conservative/aggressive/off)
-  - [ ] Hard stop thresholds configuration
-  - [ ] Time limits for each "down" phase
-  - [ ] Delta thresholds for position management
-
-## Operational Tasks
-- [ ] Set up systemd service (Linux)
-- [ ] Create start/stop scripts
-- [ ] Add health check endpoint
-- [ ] Implement graceful shutdown
-- [ ] Set up log rotation
-
-## Monitoring Setup
-- [ ] Daily P&L summary
-- [ ] Position status dashboard
-- [ ] API call tracking
-- [ ] Error rate monitoring
-- [ ] Performance metrics
-
-## Documentation Tasks
-- [ ] API integration guide
-- [ ] Deployment instructions
-- [ ] Troubleshooting guide
-- [ ] Strategy parameter tuning
-- [ ] Emergency procedures
-
-## Risk Management Implementation
-- [ ] Position size calculator
-- [ ] Buying power tracker
-- [ ] Max allocation enforcer
-- [x] **Automated Loss Management**
-  - [x] Hard stop conditions defined (250% loss, 5 DTE, etc.)
-  - [ ] Emergency stop logic implementation
-  - [ ] Position delta monitoring (|1.0| threshold)
-  - [ ] Black swan detection (>8% daily moves)
-  - [ ] Liquidity monitoring (bid-ask spreads)
-- [ ] **Management Sequence Tracking**
-  - [ ] "Down" state tracking (First → Fourth)
-  - [ ] Adjustment counter (max 3 strike rolls)
-  - [ ] Punt counter (max 1 time roll)
-  - [ ] Recovery time limits per phase
-
-## Advanced Order Types Implementation
-
-### Phase 1: Core Orders (MVP)
-- [x] **OTOCO Orders** - Entry with automatic 50% profit exit
-  - [x] Tradier API implementation (`PlaceStrangleOTOCO`)
-  - [x] Configuration support (`use_otoco: true`)
-  - [x] Testing script (`scripts/test_otoco.go`)
-
-### Phase 2: Management Orders  
-- [ ] **OCO Orders** - Management and stop scenarios
-  - [ ] Second Down: Close at 70% profit OR roll untested side
-  - [ ] Third Down: Take 25% profit OR continue to Fourth Down
-  - [ ] Fourth Down: Any profit OR 200% loss stop
-  - [ ] Emergency: Hard stops (250% loss, 5 DTE, delta risk)
-- [ ] **Conditional Orders** - Trigger-based management
-  - [ ] IVR-based entry triggers
-  - [ ] Price level roll triggers
-  - [ ] Greek-based adjustment triggers
-  - [ ] Time-based exit triggers
-
-### Phase 3: Advanced Automation (Future)
-- [ ] **Bracket Orders** - Complete lifecycle automation
-- [ ] **Multi-Conditional OCO** - Complex exit logic
-- [ ] **Dynamic Order Adjustment** - Real-time parameter updates
-
-## Future Considerations (Not MVP)
-- [ ] Database schema design
-- [ ] Web dashboard mockup
-- [ ] Alert system design
-- [ ] Multi-strategy architecture
+### Phase 3: Strategy Enhancements  
+- [ ] "Football System" adjustments
+- [ ] Multiple position management
+- [ ] Different DTE/delta configurations
+- [ ] Multi-ticker support (QQQ, IWM)
 - [ ] Backtesting framework
 
----
+## Implementation Priority (Week by Week)
 
-## Daily Development Routine
+### Week 1: Core Foundation
+- [ ] **Get Paper Trading Working**
+  - [ ] Verify Tradier sandbox credentials
+  - [ ] Test OTOCO order with $1 credit strangle
+  - [ ] Confirm orders appear in Tradier dashboard
+- [ ] **Build IVR Calculator**
+  - [ ] Simple 20-day historical volatility lookup
+  - [ ] Current IV from option chain
+  - [ ] Basic IVR = (current IV - 20d avg) / 20d avg  
+- [ ] **Position Management**
+  - [ ] Simple JSON file storage
+  - [ ] Load/save position state on startup/shutdown
+  - [ ] Calculate P&L from current quotes
 
-### Morning
-1. Review overnight logs
-2. Check paper trading positions
-3. Note any issues or improvements
-4. Plan day's coding tasks
+### Week 2: Trading Logic  
+- [ ] **Entry Scanner**
+  - [ ] Check market hours (9:30 AM - 4:00 PM ET)
+  - [ ] Calculate IVR and check > 30
+  - [ ] Find closest expiration to 45 DTE
+  - [ ] Get 16 delta strikes (or nearest available)
+  - [ ] Validate minimum $2.00 credit
+  - [ ] Place OTOCO order if all conditions met
+- [ ] **Exit Monitor**
+  - [ ] Check existing positions every 15 minutes  
+  - [ ] Calculate days to expiration
+  - [ ] Close position at 21 DTE (market order)
+  - [ ] Emergency close at 250% loss
 
-### Coding Sessions
-1. Write tests first
-2. Implement feature
-3. Test locally
-4. Update documentation
-5. Commit with clear message
+### Week 3: Polish & Test
+- [ ] **Error Handling**
+  - [ ] Retry API calls 3x with backoff
+  - [ ] Log all errors with context
+  - [ ] Graceful shutdown on critical errors
+- [ ] **End-to-End Testing**
+  - [ ] Run bot for 1 week without manual intervention
+  - [ ] Complete at least 1 full trade cycle
+  - [ ] Verify all logs are useful for debugging
 
-### End of Day
-1. Deploy to paper trading
-2. Verify deployment success
-3. Document progress
-4. Update task list
+## Success Criteria for MVP
 
----
+### MVP Definition: Working Paper Trading Bot
+A bot that can automatically:
+1. Enter SPY short strangles when IVR > 30
+2. Exit at 50% profit (via OTOCO) or 21 DTE  
+3. Apply emergency stops (250% loss, 5 DTE)
+4. Run unattended for 1 week without issues
+5. Complete 3 successful trade cycles
 
-## Success Criteria for MVP Launch
+### Must Have for Launch
+- [ ] Tradier API integration working in sandbox
+- [ ] IVR calculation (simple 20-day method)
+- [ ] Entry logic: find strikes, check credit, place OTOCO
+- [ ] Exit logic: 21 DTE monitor, emergency stops
+- [ ] JSON position persistence
+- [ ] Basic error handling with retries
+- [ ] Market hours checking
+- [ ] Position sizing (max 35% allocation)
 
-### Must Have
-- [x] Clear architecture design
-- [x] Architecture review completed
-- [x] **OTOCO order implementation for automated exits**
-- [x] **Automated management rules defined (Football System)**
-- [x] **Hard stop conditions specified (250% loss, etc.)**
-- [ ] **Interface-based design implemented**
-- [ ] **Unit test coverage > 80%**
-- [ ] **State machine for positions**
-- [ ] **Retry logic & error handling**
-- [ ] Tradier API integration working
-- [ ] Entry logic implemented
-- [ ] Exit logic implemented (OTOCO automation)
-- [ ] **Automated management system implemented**
-- [ ] Position tracking working
-- [ ] Risk limits enforced
-- [ ] 7 days without crashes
-- [ ] 5 successful paper trades
-
-### Nice to Have
-- [ ] SQLite storage (instead of JSON)
-- [ ] Structured logging
-- [ ] Basic adjustments working
-- [ ] Performance analytics
-- [ ] Slack/Discord alerts
-- [ ] Web dashboard
-
-### Won't Have (MVP)
-- Multiple tickers
-- Complex adjustments
-- Backtesting
-- Live trading
-- PostgreSQL (use SQLite for MVP)
-
----
-
-## Questions to Answer
-
-### Technical
-1. How to calculate IVR without expensive data feed?
-2. Best way to handle after-hours position updates?
-3. How to detect and handle partial fills?
-4. Optimal polling frequency vs API limits?
-
-### Strategy
-1. When to use 30Δ vs 16Δ?
-2. How aggressive on adjustments?
-3. Credit requirements in low IV?
-4. Position sizing in high IV?
-
-### Operational
-1. Deployment location (VPS vs local)?
-2. Backup strategy for outages?
-3. How to handle API downtime?
-4. Monitoring without being glued to screen?
+### Success Metrics
+- [ ] 3 completed paper trades (entry to exit)
+- [ ] No unhandled crashes for 1 week
+- [ ] All trades respect risk limits
+- [ ] Logs provide clear audit trail
+- [ ] Can restart bot and resume correctly
 
 ---
 
-## Resources & References
+## Removed Complexity (Post-MVP)
 
-### Documentation
-- [Tradier API Docs](https://documentation.tradier.com/brokerage-api)
-- [Options Greeks Guide](https://www.optionseducation.org/advancedconcepts/greeks)
-- Strategy document: `docs/SPY_SHORT_STRANGLE_MASTER_STRATEGY.md`
-- Architecture review: `docs/ARCHITECTURE_REVIEW.md`
+### Unnecessary for MVP
+- ❌ Interface abstractions (Broker/Strategy/Storage)
+- ❌ Complex state machines (Football System) 
+- ❌ Advanced order types (OCO, Bracket)
+- ❌ Multiple position management
+- ❌ SQLite/PostgreSQL database
+- ❌ Comprehensive test coverage (>80%)
+- ❌ Circuit breakers and observability  
+- ❌ Web dashboards and monitoring
+- ❌ Multi-asset support
+- ❌ Backtesting framework
 
-### Tools
-- Postman for API testing
-- JSON validator for responses
-- Options profit calculator
-- IV rank data sources
-
-### Communities
-- /r/thetagang for strategy discussion
-- Tastytrade research papers
-- Option Alpha backtests
+### Keep It Simple
+- ✅ Direct struct implementations  
+- ✅ Simple state: OPEN/CLOSED positions
+- ✅ OTOCO orders only
+- ✅ One position at a time
+- ✅ JSON file storage
+- ✅ Basic tests for math functions
+- ✅ Simple retry logic with exponential backoff
+- ✅ Console logging with timestamps
+- ✅ SPY only
+- ✅ Forward testing only
