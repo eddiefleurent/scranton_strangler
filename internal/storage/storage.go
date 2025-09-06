@@ -55,7 +55,7 @@ func NewJSONStorage(filePath string) (*JSONStorage, error) {
 	}
 
 	// Create parent directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o750); err != nil {
 		return nil, fmt.Errorf("creating parent directory: %w", err)
 	}
 
