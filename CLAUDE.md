@@ -41,8 +41,9 @@ go test -race -covermode=atomic -coverprofile=coverage.out ./...
 go build -o strangle-bot cmd/bot/main.go
 ./strangle-bot --help
 
-# Run linting
-golangci-lint run --timeout=5m
+# Run linting (local development only)
+go vet ./...
+go fmt ./...
 ```
 
 ## Architecture Overview
