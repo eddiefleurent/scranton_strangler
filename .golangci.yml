@@ -19,11 +19,8 @@ linters-settings:
     simplify: true
   
   goimports:
-    local-prefixes: github.com/eddie/spy-strangle-bot
-  
-  golint:
-    min-confidence: 0.8
-  
+    local-prefixes: github.com/eddie/scranton_strangler
+
   misspell:
     locale: US
   

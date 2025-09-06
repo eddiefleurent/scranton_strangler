@@ -157,7 +157,7 @@ func TestDaysBetween(t *testing.T) {
 
 func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 	// Test that TradierClient forwards profitTarget correctly when useOTOCO is true
-	client := NewTradierClient("test", "test", true, true) // sandbox=true, useOTOCO=true
+	client := NewTradierClient("test", "test", true, true, 0.5) // sandbox=true, useOTOCO=true, profitTarget=50%
 
 	// We can't actually make API calls in unit tests, but we can verify the method signature
 	// and that it doesn't panic with the new parameter

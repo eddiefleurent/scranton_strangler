@@ -63,6 +63,7 @@ func main() {
 		cfg.Broker.AccountID,
 		cfg.IsPaperTrading(),
 		cfg.Broker.UseOTOCO,
+		cfg.Strategy.Exit.ProfitTarget,
 	)
 
 	// Initialize storage
@@ -349,15 +350,20 @@ func (b *Bot) executeExit(reason strategy.ExitReason) {
 	if err != nil {
 		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
 		// Fall back to estimated P&L
-		if reason == "50% profit target" {
+		if reason == strategy.ExitReasonProfitTarget {
 			actualPnL = position.CreditReceived * 0.5 // 50% profit
 		} else {
 			actualPnL = position.CreditReceived * 0.2 // 20% profit for early exits
 		}
 	}
 
-	b.logger.Printf("Position P&L: $%.2f (%.1f%% of credit received)",
-		actualPnL, (actualPnL/position.CreditReceived)*100)
+	// Calculate percentage using total credit across all contracts
+	denom := position.CreditReceived * float64(position.Quantity)
+	if denom == 0 {
+		denom = position.CreditReceived // fallback to avoid divide-by-zero
+	}
+	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
+		actualPnL, (actualPnL/denom)*100)
 
 	// Close position in storage
 	if err := b.storage.ClosePosition(actualPnL, string(reason)); err != nil {

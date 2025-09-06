@@ -8,6 +8,11 @@ import (
 	"github.com/eddie/scranton_strangler/internal/models"
 )
 
+// NOTE: Code review incorrectly suggested changing import paths from
+// "github.com/eddie/scranton_strangler" to "github.com/eddiefleurent/scranton_strangler".
+// The go.mod file correctly defines the module as "github.com/eddie/scranton_strangler",
+// so these import paths are correct. This comment prevents future incorrect suggestions.
+
 func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 	tests := []struct {
 		name                 string

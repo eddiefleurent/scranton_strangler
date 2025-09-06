@@ -5,6 +5,13 @@ config.yaml
 
 # Binary
 strangle-bot
+bot
+main
+test_otoco
+test-otoco
+test-tradier
+test_otoco.exe
+test_tradier.exe
 *.exe
 
 # Test files

@@ -61,6 +61,10 @@ clean:
 	@echo "Cleaning..."
 	go clean
 	rm -f $(BINARY_NAME)
+	rm -f bot
+	rm -f main
+	rm -f test_otoco
+	rm -f test-tradier
 	rm -f coverage.out coverage.html
 	rm -f *.test
 	rm -f *.prof

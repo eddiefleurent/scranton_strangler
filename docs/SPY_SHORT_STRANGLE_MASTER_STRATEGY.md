@@ -224,7 +224,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 - **Normal Loss**: 50-100% of credit collected
 - **Bad Loss**: 200% of credit (manageable)
 - **Worst Case**: 500-700% of credit (black swan)
-- **Protect Against**: Never let loss exceed 300% without action
+- **Protect Against**: Never let loss exceed 250% without action
 
 ---
 
