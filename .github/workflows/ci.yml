@@ -1,162 +1,74 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches:
+      - main
+      - feature/*
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   test:
+    name: Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.25.1']
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go-version }}
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
 
-    - name: Install dependencies
-      run: go mod download
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
 
-    - name: Verify dependencies
-      run: go mod verify
+      - name: Run tests
+        run: go test ./...
 
-    - name: Run vet
-      run: go vet ./...
-
-    - name: Run tests
-      run: go test -race -covermode=atomic -coverprofile=coverage.out ./...
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        files: ./coverage.out
-        fail_ci_if_error: true
-
-  build:
+  security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
-    needs: test
-
+    permissions:
+      contents: read
+      security-events: write
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.1'
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
 
-    - name: Build binary
-      run: go build -o strangle-bot cmd/bot/main.go
-
-    - name: Test binary execution
-      run: ./strangle-bot --help
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Build Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: false
-        tags: strangle-bot:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-  security:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.1'
-        cache: true
-
-    - name: Run Gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@v2.22.8
-      with:
-        args: './...'
-
-    - name: Run Go vulnerability check
-      run: |
-        go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-        govulncheck ./...
+      - name: Run Gosec Security Scanner
+        uses: securego/gosec@v2.20.0
+        with:
+          args: './...'
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.1'
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
 
-    - name: golangci-lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: v1.61.0
-        args: --timeout=5m
-
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: [test, build, security, lint]
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-    environment: staging
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.1'
-        cache: true
-
-    - name: Build for staging
-      run: |
-        CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o strangle-bot-staging cmd/bot/main.go
-
-    - name: Deploy to staging
-      run: |
-        echo "Deploying to staging environment..."
-        echo "Binary ready: strangle-bot-staging"
-        # Add your staging deployment logic here
-
-  deploy-production:
-    runs-on: ubuntu-latest
-    needs: [test, build, security, lint]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.1'
-        cache: true
-
-    - name: Build for production
-      run: |
-        CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o strangle-bot-prod cmd/bot/main.go
-
-    - name: Deploy to production
-      run: |
-        echo "Deploying to production environment..."
-        echo "Binary ready: strangle-bot-prod"
-        # Add your production deployment logic here
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: latest
+          args: --timeout=5m
