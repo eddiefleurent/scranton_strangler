@@ -142,7 +142,11 @@ func main() {
 	}
 
 	fmt.Println("\n6. Order Response:")
-	respJSON, _ := json.MarshalIndent(orderResp, "   ", "  ")
+	respJSON, err := json.MarshalIndent(orderResp, "   ", "  ")
+	if err != nil {
+		fmt.Printf("Error marshaling response: %v\n", err)
+		return
+	}
 	fmt.Println(string(respJSON))
 
 	if preview {

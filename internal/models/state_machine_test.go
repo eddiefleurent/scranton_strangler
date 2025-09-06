@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+// Test constants for repeated strings
+const (
+	emergencyExitMessage = "emergency exit: loss 142.9% >= 200% threshold"
+)
+
 func TestStateMachine_BasicTransitions(t *testing.T) {
 	sm := NewStateMachine()
 
@@ -212,11 +217,11 @@ func TestStateMachine_Reset(t *testing.T) {
 	sm := NewStateMachine()
 
 	// Make several transitions (simplified)
-	sm.Transition(StateSubmitted, "order_placed")
-	sm.Transition(StateOpen, "order_filled")
-	sm.Transition(StateFirstDown, "start_management")
-	sm.Transition(StateSecondDown, "strike_challenged")
-	sm.Transition(StateAdjusting, "roll_untested")
+	_ = sm.Transition(StateSubmitted, "order_placed")
+	_ = sm.Transition(StateOpen, "order_filled")
+	_ = sm.Transition(StateFirstDown, "start_management")
+	_ = sm.Transition(StateSecondDown, "strike_challenged")
+	_ = sm.Transition(StateAdjusting, "roll_untested")
 
 	// Verify state is not idle
 	if sm.GetCurrentState() == StateIdle {
@@ -343,9 +348,9 @@ func TestPosition_StateValidation(t *testing.T) {
 	pos.CreditReceived = 3.50
 
 	// Transition to management state (simplified)
-	pos.TransitionState(StateSubmitted, "order_placed")
-	pos.TransitionState(StateOpen, "order_filled")
-	pos.TransitionState(StateFirstDown, "start_management")
+	_ = pos.TransitionState(StateSubmitted, "order_placed")
+	_ = pos.TransitionState(StateOpen, "order_filled")
+	_ = pos.TransitionState(StateFirstDown, "start_management")
 
 	err = pos.ValidateState()
 	if err != nil {
@@ -374,9 +379,9 @@ func TestPosition_ManagementMethods(t *testing.T) {
 	}
 
 	// Transition to management state (simplified)
-	pos.TransitionState(StateSubmitted, "order_placed")
-	pos.TransitionState(StateOpen, "order_filled")
-	pos.TransitionState(StateFirstDown, "start_management")
+	_ = pos.TransitionState(StateSubmitted, "order_placed")
+	_ = pos.TransitionState(StateOpen, "order_filled")
+	_ = pos.TransitionState(StateFirstDown, "start_management")
 
 	if !pos.IsInManagement() {
 		t.Error("Position should be in management after FirstDown")
@@ -433,14 +438,14 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 
 	// Test within 5-day limit - no emergency exit
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 4 days
-	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
+	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
 	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour) // exactly 5 days ago
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 5 days
-	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
+	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
 	}
 
@@ -464,7 +469,7 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 	// Test within 3-day limit - no emergency exit
 	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)  // 2 days ago
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 2 days
-	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
+	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
 
@@ -488,7 +493,7 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 
 	// Test above 21 DTE - no emergency exit
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 25) // 142.9% loss, 25 DTE
-	if shouldExit && reason != "emergency exit: loss 142.9% >= 200% threshold" {
+	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit at 25 DTE, but got: %s", reason)
 	}
 
@@ -602,7 +607,7 @@ func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	// Set up Fourth Down state
 	sm.currentState = StateFourthDown
 	sm.SetFourthDownOption(OptionA)
-	sm.ExecutePunt()
+	_ = sm.ExecutePunt()
 
 	// Verify setup
 	if sm.GetFourthDownOption() != OptionA {

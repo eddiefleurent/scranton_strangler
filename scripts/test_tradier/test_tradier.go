@@ -75,7 +75,11 @@ func main() {
 
 		fmt.Println("\n  Next 10 expirations (with DTE):")
 		for i := 0; i < 10 && i < len(expirations); i++ {
-			expDate, _ := time.Parse("2006-01-02", expirations[i])
+			expDate, err := time.Parse("2006-01-02", expirations[i])
+			if err != nil {
+				fmt.Printf("Error parsing date %s: %v\n", expirations[i], err)
+				continue
+			}
 			dte := int(time.Until(expDate).Hours() / 24)
 			fmt.Printf("  %d. %s (DTE: %d)\n", i+1, expirations[i], dte)
 
@@ -234,7 +238,11 @@ func formatNumber(n int64) string {
 }
 
 func prettyPrint(v interface{}) {
-	b, _ := json.MarshalIndent(v, "  ", "  ")
+	b, err := json.MarshalIndent(v, "  ", "  ")
+	if err != nil {
+		fmt.Printf("Error marshaling JSON: %v\n", err)
+		return
+	}
 	fmt.Printf("%s\n", string(b))
 }
 

@@ -447,7 +447,11 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 
 func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 	// Get current option prices
-	options, _ := s.broker.GetOptionChain(s.config.Symbol, pos.Expiration.Format("2006-01-02"), false)
+	options, err := s.broker.GetOptionChain(s.config.Symbol, pos.Expiration.Format("2006-01-02"), false)
+	if err != nil {
+		// Return current P&L if we can't get fresh prices
+		return pos.CurrentPnL
+	}
 
 	currentCost := 0.0
 	for _, option := range options {

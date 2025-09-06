@@ -30,6 +30,17 @@ go test ./internal/storage -v
 
 # Run tests with coverage
 go test ./... -cover
+
+# Run CI pipeline locally
+go mod download
+go mod verify
+go vet ./...
+go test -race -covermode=atomic -coverprofile=coverage.out ./...
+go build -o strangle-bot cmd/bot/main.go
+./strangle-bot --help
+
+# Run linting
+golangci-lint run --timeout=5m
 ```
 
 ## Architecture Overview
@@ -149,3 +160,55 @@ cd scripts && go run test_tradier_api.go
 - 🔧 IVR calculation implementation
 - 🔧 Complete option chain processing
 - 🔧 Order execution via Tradier API
+
+## CI/CD Pipeline
+
+### Prerequisites
+```bash
+# One-time setup: Install golangci-lint
+go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+```
+
+### GitHub Actions
+The project uses GitHub Actions for CI/CD with the following jobs:
+- **Test**: Unit tests with race detection and coverage
+- **Build**: Binary compilation and Docker image build
+- **Lint**: Code quality checks with golangci-lint
+- **Security**: Vulnerability scanning with gosec and govulncheck
+- **Deploy**: Automated staging/production deployments
+
+### Common CI Issues & Fixes
+When running CI checks, watch for these common issues:
+
+1. **Unchecked errors** (`errcheck`):
+   ```go
+   // Bad
+   resp.Body.Close()
+   
+   // Good  
+   defer func() {
+       if err := resp.Body.Close(); err != nil {
+           // Handle error appropriately
+       }
+   }()
+   ```
+
+2. **Missing package comments** (`stylecheck`):
+   ```go
+   // Package broker provides trading API clients for executing options trades.
+   package broker
+   ```
+
+3. **HTTP context usage** (`noctx`):
+   ```go
+   // Use http.NewRequestWithContext instead of http.NewRequest
+   req, err := http.NewRequestWithContext(context.Background(), "GET", url, nil)
+   ```
+
+4. **Magic numbers/strings** (`goconst`):
+   ```go
+   const (
+       optionTypePut  = "put"
+       optionTypeCall = "call"
+   )
+   ```

@@ -1,6 +1,9 @@
+// Package broker provides trading API clients for executing options trades.
+// It includes the Tradier API client implementation for SPY short strangle strategies.
 package broker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +12,12 @@ import (
 	"net/url"
 	"strings"
 	"time"
+)
+
+// Option type constants
+const (
+	optionTypePut  = "put"
+	optionTypeCall = "call"
 )
 
 // TradierAPI - Accurate implementation based on actual API docs
@@ -356,7 +365,7 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 func (t *TradierAPI) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
 
-	req, err := http.NewRequest("GET", endpoint, http.NoBody)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -368,10 +377,17 @@ func (t *TradierAPI) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get order status: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("API error (status %d): failed to read error body", resp.StatusCode)
+		}
 		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -454,7 +470,11 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+		}
+	}()
 
 	// Check rate limit headers
 	if remaining := resp.Header.Get("X-Ratelimit-Available"); remaining != "" {
@@ -462,7 +482,10 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("API error %d: failed to read error body", resp.StatusCode)
+		}
 		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -485,7 +508,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 			continue
 		}
 
-		if opt.OptionType == "put" {
+		if opt.OptionType == optionTypePut {
 			// Put deltas are negative, so we use absolute value
 			delta := opt.Greeks.Delta
 			if delta < 0 {
@@ -497,7 +520,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 				bestPutDiff = diff
 				bestPut = opt
 			}
-		} else if opt.OptionType == "call" {
+		} else if opt.OptionType == optionTypeCall {
 			// Call deltas are positive
 			diff := abs(opt.Greeks.Delta - targetDelta)
 			if diff < bestCallDiff {
@@ -524,11 +547,11 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) fl
 	var putCredit, callCredit float64
 
 	for _, opt := range options {
-		if opt.Strike == putStrike && opt.OptionType == "put" {
+		if opt.Strike == putStrike && opt.OptionType == optionTypePut {
 			// Use mid price between bid and ask
 			putCredit = (opt.Bid + opt.Ask) / 2
 		}
-		if opt.Strike == callStrike && opt.OptionType == "call" {
+		if opt.Strike == callStrike && opt.OptionType == optionTypeCall {
 			// Use mid price between bid and ask
 			callCredit = (opt.Bid + opt.Ask) / 2
 		}
