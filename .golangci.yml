@@ -1,49 +1,12 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
   modules-download-mode: readonly
 
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  
-  gocyclo:
-    min-complexity: 15
-  
-  gofmt:
-    simplify: true
-  
-  goimports:
-    local-prefixes: github.com/eddiefleurent/scranton_strangler
-
-  misspell:
-    locale: US
-  
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - wrapperFunc
-      - dupImport
-      - ifElseChain
-      - octalLiteral
-      - whyNoLint
-  
-  funlen:
-    lines: 100
-    statements: 50
-
 linters:
+  default: none
   enable:
     - bodyclose
     - dogsled
@@ -54,8 +17,6 @@ linters:
     - gochecknoinits
     - goconst
     - gocyclo
-    - gofmt
-    - goimports
     - goprintffuncname
     - gosec
     - gosimple
@@ -72,9 +33,52 @@ linters:
     - unconvert
     - unparam
     - whitespace
+  
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    
+    gocyclo:
+      min-complexity: 15
+    
+    misspell:
+      locale: US
+    
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+      disabled-checks:
+        - wrapperFunc
+        - dupImport
+        - ifElseChain
+        - octalLiteral
+        - whyNoLint
+    
+    funlen:
+      lines: 100
+      statements: 50
 
-  disable:
-    # empty
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  
+  settings:
+    gofmt:
+      simplify: true
+    
+    goimports:
+      local-prefixes: github.com/eddiefleurent/scranton_strangler
 
 issues:
   exclude-rules:
