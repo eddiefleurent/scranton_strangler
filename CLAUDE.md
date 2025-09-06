@@ -18,10 +18,18 @@ go build -o strangle-bot cmd/bot/main.go
 # Test Tradier API connection
 export TRADIER_API_KEY='your_sandbox_token_here'
 cd scripts
-go run test_tradier.go
+go run test_tradier_api.go
 
-# Run tests (when implemented)
+# Run all tests
 go test ./...
+
+# Run specific package tests with verbose output
+go test ./internal/models -v
+go test ./internal/strategy -v
+go test ./internal/storage -v
+
+# Run tests with coverage
+go test ./... -cover
 ```
 
 ## Architecture Overview
@@ -44,15 +52,26 @@ The bot follows a component-based architecture with clear separation of concerns
 
 ```
 internal/
-├── broker/tradier.go     # Tradier API client implementation
-├── strategy/strangle.go  # Core trading logic and signal generation
-├── models/position.go    # Position and order data structures
-├── config/config.go      # Configuration management
-├── storage/storage.go    # Position persistence layer
-└── mock/mock_data.go     # Mock data for testing
+├── broker/
+│   ├── interface.go          # Broker interface definition
+│   ├── tradier.go           # Tradier API client implementation
+│   └── interface_test.go    # Interface tests
+├── strategy/
+│   ├── strangle.go          # Core trading logic and signal generation
+│   └── strangle_test.go     # Strategy tests
+├── models/
+│   ├── position.go          # Position and order data structures
+│   ├── state_machine.go     # Position state machine implementation
+│   └── state_machine_test.go # State machine tests
+├── storage/
+│   ├── interface.go         # Storage interface definition
+│   ├── storage.go          # JSON file storage implementation
+│   ├── mock_storage.go     # Mock storage for testing
+│   └── interface_test.go   # Storage tests
+└── config/config.go        # Configuration management
 
-cmd/bot/main.go           # Application entry point and scheduler
-scripts/test_tradier.go   # API connection testing utility
+cmd/bot/main.go             # Application entry point and scheduler
+scripts/test_tradier_api.go # API connection testing utility
 ```
 
 ## Key Implementation Notes
@@ -75,7 +94,12 @@ The state machine enforces:
 See `docs/STATE_MACHINE.md` for detailed documentation.
 
 ### Configuration
-Uses `config.yaml` for all settings. Copy from `config.yaml.example` and update with your Tradier credentials. Environment variables are supported via `${VAR_NAME}` syntax.
+Uses `config.yaml` for all settings. Copy from `config.yaml.example` and update with your Tradier credentials. Key configuration sections:
+- **Environment**: `mode` (paper/live), `log_level`
+- **Broker**: API credentials, endpoints, OTOCO order support
+- **Strategy**: Entry/exit rules, DTE targets, delta, credit requirements
+- **Risk**: Position sizing, loss limits, allocation limits
+- **Schedule**: Market hours, check intervals
 
 ## Development Phases
 
@@ -86,9 +110,42 @@ Currently in **Phase 1 (MVP)**: Basic entry/exit logic with paper trading
 
 ## Testing Approach
 
-When testing, verify:
-1. API connectivity with `scripts/test_tradier.go`
-2. Entry signals trigger correctly when IVR > 30
-3. Position sizing respects allocation limits
-4. Exit conditions work at 50% profit or 21 DTE
-5. State persists correctly across restarts
+The project includes comprehensive test coverage:
+
+### Unit Tests
+```bash
+go test ./internal/models -v      # State machine tests
+go test ./internal/strategy -v    # Strategy logic tests  
+go test ./internal/storage -v     # Storage interface tests
+go test ./internal/broker -v      # Broker interface tests
+```
+
+### Integration Tests
+```bash
+# Test API connectivity
+export TRADIER_API_KEY='your_sandbox_token'
+cd scripts && go run test_tradier_api.go
+```
+
+### Key Test Scenarios
+1. State machine transitions (all valid paths)
+2. Position state persistence across restarts
+3. Entry signal generation when IVR > 30
+4. Exit conditions at 50% profit target
+5. Risk limits enforcement
+6. Configuration loading and validation
+
+## Implementation Status
+
+**Current Implementation** (Phase 1):
+- ✅ Interface-based architecture with dependency injection
+- ✅ Position state machine with validation
+- ✅ Comprehensive test coverage
+- ✅ Mock implementations for testing
+- ✅ Configuration management
+- ✅ Basic strategy logic structure
+
+**In Progress**:
+- 🔧 IVR calculation implementation
+- 🔧 Complete option chain processing
+- 🔧 Order execution via Tradier API
