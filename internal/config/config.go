@@ -202,9 +202,8 @@ func (c *Config) Validate() error {
 	}
 	// Note: strategy.exit.stop_loss_pct takes precedence over risk.max_position_loss when both are configured
 	// This allows for different loss thresholds at strategy vs risk management levels
-	if c.Strategy.Exit.StopLossPct < c.Risk.MaxPositionLoss {
-		return fmt.Errorf("strategy.exit.stop_loss_pct (%.2f) should be >= risk.max_position_loss (%.2f) - "+
-			"strategy exit threshold takes precedence but should not be more restrictive than risk limit",
+	if c.Strategy.Exit.StopLossPct > c.Risk.MaxPositionLoss {
+		return fmt.Errorf("strategy.exit.stop_loss_pct (%.2f) must be <= risk.max_position_loss (%.2f)",
 			c.Strategy.Exit.StopLossPct, c.Risk.MaxPositionLoss)
 	}
 

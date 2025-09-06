@@ -6,6 +6,7 @@ run:
   modules-download-mode: readonly
 
 linters:
+  default: standard
   enable:
     - bodyclose
     - dogsled
@@ -30,81 +31,78 @@ linters:
     - unconvert
     - unparam
     - whitespace
-
-formatters:
-  enable:
     - gofmt
     - goimports
-
-linters-settings:
-  errcheck:
-    check-type-assertions: false
-    check-blank: true
-  govet:
-    enable-all: true
-    disable: [fieldalignment]
-  gocyclo:
-    min-complexity: 45
-  misspell:
-    locale: US
-  gocritic:
-    enabled-tags: [diagnostic, experimental, opinionated, performance, style]
-    disabled-checks: [wrapperFunc, dupImport, ifElseChain, octalLiteral, whyNoLint]
-  funlen:
-    lines: 100
-    statements: 65
-  gosec:
-    excludes: [G301, G304]
-  revive:
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: true
+    govet:
+      enable-all: true
+      disable: [fieldalignment]
+    gocyclo:
+      min-complexity: 45
+    misspell:
+      locale: US
+    gocritic:
+      enabled-tags: [diagnostic, experimental, opinionated, performance, style]
+      disabled-checks: [wrapperFunc, dupImport, ifElseChain, octalLiteral, whyNoLint]
+    funlen:
+      lines: 100
+      statements: 65
+    gosec:
+      excludes: [G301, G304]
+    revive:
+      rules:
+        - name: exported
+          disabled: false
+          arguments: [disableStutteringCheck]
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes: github.com/eddiefleurent/scranton_strangler
+  exclusions:
     rules:
-      - name: exported
-        disabled: false
-        arguments: [disableStutteringCheck]
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/eddiefleurent/scranton_strangler
+      - path: "_test\\.go"
+        linters:
+          - funlen
+          - gocyclo
+          - errcheck
+      - path: "cmd/"
+        linters:
+          - gochecknoinits
+          - funlen
+      - path: "scripts/"
+        linters:
+          - gocyclo
+          - funlen
+          - revive
+      - path: "internal/config/config_test\\.go"
+        linters:
+          - gosec
+      - path: "internal/config/config\\.go"
+        linters:
+          - gosec
+      - path: "internal/storage/"
+        linters:
+          - gosec
+          - revive
+      - path: "internal/mock/"
+        linters:
+          - revive
+      - path: "internal/strategy/"
+        linters:
+          - revive
+      - path: "internal/orders/"
+        linters:
+          - funlen
+      - path: "internal/retry/"
+        linters:
+          - funlen
+      - path: "internal/broker/"
+        linters:
+          - funlen
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: "_test\\.go"
-      linters:
-        - funlen
-        - gocyclo
-        - errcheck
-    - path: "cmd/"
-      linters:
-        - gochecknoinits
-        - funlen
-    - path: "scripts/"
-      linters:
-        - gocyclo
-        - funlen
-        - revive
-    - path: "internal/config/config_test\\.go"
-      linters:
-        - gosec
-    - path: "internal/config/config\\.go"
-      linters:
-        - gosec
-    - path: "internal/storage/"
-      linters:
-        - gosec
-        - revive
-    - path: "internal/mock/"
-      linters:
-        - revive
-    - path: "internal/strategy/"
-      linters:
-        - revive
-    - path: "internal/orders/"
-      linters:
-        - funlen
-    - path: "internal/retry/"
-      linters:
-        - funlen
-    - path: "internal/broker/"
-      linters:
-        - funlen

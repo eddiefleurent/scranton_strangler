@@ -100,6 +100,7 @@ func main() {
 		MinCredit:           cfg.Strategy.Entry.MinCredit,
 		EscalateLossPct:     cfg.Strategy.EscalateLossPct,
 		StopLossPct:         cfg.Strategy.Exit.StopLossPct,
+		MaxPositionLoss:     cfg.Risk.MaxPositionLoss,
 		UseMockHistoricalIV: cfg.Strategy.UseMockHistoricalIV,
 	}
 	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig)

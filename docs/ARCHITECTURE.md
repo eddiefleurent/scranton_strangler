@@ -695,7 +695,7 @@ The bot supports optional after-hours position monitoring via the `after_hours_c
 ```go
 type RateLimitedClient struct {
     client     *http.Client
-    limiter    *rate.Limiter  // 120/min sandbox, 500/min prod
+    limiter    *rate.Limiter  // Market Data: 60/min sandbox, 120/min prod
     lastRequest time.Time
     cache      *cache.Cache    // 1-minute TTL
 }

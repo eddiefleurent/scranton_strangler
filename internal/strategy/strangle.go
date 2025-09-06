@@ -29,6 +29,7 @@ type Config struct {
 	MinCredit           float64 // $2.00
 	EscalateLossPct     float64 // e.g., 2.0 (200% loss triggers escalation)
 	StopLossPct         float64 // e.g., 2.5 (250% loss triggers hard stop)
+	MaxPositionLoss     float64 // Maximum position loss percentage from risk config
 	UseMockHistoricalIV bool    // Whether to use mock historical IV data
 }
 
@@ -493,6 +494,10 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		if sl <= 0 {
 			sl = 2.5
 		} // Default to 250% to match old behavior
+		// Clamp the stop-loss to the risk cap
+		if sl > s.config.MaxPositionLoss {
+			sl = s.config.MaxPositionLoss
+		}
 		if profitPct <= -sl {
 			return true, ExitReasonStopLoss
 		}

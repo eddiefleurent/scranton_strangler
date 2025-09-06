@@ -142,9 +142,10 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 
 func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 	cfg := &Config{
-		Symbol:       "SPY",
-		ProfitTarget: 0.50, // 50%
-		MaxDTE:       21,   // Default MaxDTE value
+		Symbol:          "SPY",
+		ProfitTarget:    0.50, // 50%
+		MaxDTE:          21,   // Default MaxDTE value
+		MaxPositionLoss: 2.5,  // Allow up to 250% loss (same as default stop loss)
 	}
 
 	tests := []struct {

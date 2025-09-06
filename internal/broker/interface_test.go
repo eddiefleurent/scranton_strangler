@@ -173,6 +173,64 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 	// This would require refactoring TradierClient to accept an http.Client interface
 }
 
+func TestNewTradierClient_ProfitTargetClamping(t *testing.T) {
+	tests := []struct {
+		name              string
+		inputProfitTarget float64
+		expected          float64
+	}{
+		{
+			name:              "valid profitTarget",
+			inputProfitTarget: 0.5,
+			expected:          0.5,
+		},
+		{
+			name:              "clamp negative to 0.0",
+			inputProfitTarget: -0.1,
+			expected:          0.0,
+		},
+		{
+			name:              "clamp positive above 1.0 to 1.0",
+			inputProfitTarget: 1.5,
+			expected:          1.0,
+		},
+		{
+			name:              "clamp large negative to 0.0",
+			inputProfitTarget: -10.0,
+			expected:          0.0,
+		},
+		{
+			name:              "clamp large positive to 1.0",
+			inputProfitTarget: 100.0,
+			expected:          1.0,
+		},
+		{
+			name:              "zero value",
+			inputProfitTarget: 0.0,
+			expected:          0.0,
+		},
+		{
+			name:              "one value",
+			inputProfitTarget: 1.0,
+			expected:          1.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewTradierClient("test", "test", true, true, tt.inputProfitTarget)
+
+			if client == nil {
+				t.Fatal("NewTradierClient returned nil")
+			}
+
+			if client.profitTarget != tt.expected {
+				t.Errorf("profitTarget = %v, want %v", client.profitTarget, tt.expected)
+			}
+		})
+	}
+}
+
 func TestExtractUnderlyingFromOSI(t *testing.T) {
 	tests := []struct {
 		name     string

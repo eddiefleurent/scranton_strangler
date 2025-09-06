@@ -83,6 +83,8 @@ func NewTradierAPIWithBaseURL(
 			baseURL = "https://api.tradier.com/v1"
 		}
 	}
+	// Normalize once
+	baseURL = strings.TrimRight(baseURL, "/")
 
 	// Use custom limits if provided, otherwise use defaults based on sandbox mode
 	var providedLimits RateLimits

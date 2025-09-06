@@ -54,9 +54,12 @@ var _ Broker = (*TradierClient)(nil)
 // profitTarget should be a ratio between 0.0 and 1.0 (e.g., 0.5 for 50% profit target)
 func NewTradierClient(apiKey, accountID string, sandbox bool,
 	useOTOCO bool, profitTarget float64) *TradierClient {
-	if profitTarget < 0 || profitTarget > 1 {
-		log.Printf("invalid profitTarget %.3f; must be between 0.0 and 1.0", profitTarget)
-		return nil
+	if profitTarget < 0 {
+		log.Printf("warning: profitTarget %.3f is below valid range [0,1]; clamping to 0.0", profitTarget)
+		profitTarget = 0.0
+	} else if profitTarget > 1 {
+		log.Printf("warning: profitTarget %.3f is above valid range [0,1]; clamping to 1.0", profitTarget)
+		profitTarget = 1.0
 	}
 	return &TradierClient{
 		TradierAPI:   NewTradierAPI(apiKey, accountID, sandbox),

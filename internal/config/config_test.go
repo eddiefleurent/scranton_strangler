@@ -78,9 +78,9 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 
 	t.Run("valid loss percentages", func(t *testing.T) {
 		config := *baseConfig
-		config.Strategy.EscalateLossPct = 2.0
-		config.Strategy.Exit.StopLossPct = 2.5
-		config.Risk.MaxPositionLoss = 2.0
+		config.Strategy.EscalateLossPct = 1.5
+		config.Strategy.Exit.StopLossPct = 2.0
+		config.Risk.MaxPositionLoss = 2.5
 
 		err := config.Validate()
 		if err != nil {
@@ -118,17 +118,17 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 		}
 	})
 
-	t.Run("stop_loss_pct less than max_position_loss - invalid", func(t *testing.T) {
+	t.Run("stop_loss_pct greater than max_position_loss - invalid", func(t *testing.T) {
 		config := *baseConfig
 		config.Strategy.EscalateLossPct = 1.5
-		config.Strategy.Exit.StopLossPct = 2.0
-		config.Risk.MaxPositionLoss = 2.5
+		config.Strategy.Exit.StopLossPct = 2.5
+		config.Risk.MaxPositionLoss = 2.0
 
 		err := config.Validate()
 		if err == nil {
-			t.Error("Expected error when stop_loss_pct < max_position_loss")
+			t.Error("Expected error when stop_loss_pct > max_position_loss")
 		}
-		expectedMsg := "strategy.exit.stop_loss_pct (2.00) should be >= risk.max_position_loss (2.50)"
+		expectedMsg := "strategy.exit.stop_loss_pct (2.50) must be <= risk.max_position_loss (2.00)"
 		if !strings.Contains(err.Error(), expectedMsg) {
 			t.Errorf("Expected error message to contain '%s', got: %v", expectedMsg, err)
 		}
@@ -177,8 +177,8 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 	t.Run("boundary values - valid ascending order", func(t *testing.T) {
 		config := *baseConfig
 		config.Strategy.EscalateLossPct = 1.0
-		config.Strategy.Exit.StopLossPct = 2.0
-		config.Risk.MaxPositionLoss = 1.5
+		config.Strategy.Exit.StopLossPct = 1.5
+		config.Risk.MaxPositionLoss = 2.0
 
 		err := config.Validate()
 		if err != nil {
