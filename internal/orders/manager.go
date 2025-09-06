@@ -64,7 +64,7 @@ func NewManager(
 	}
 }
 
-func (m *Manager) PollOrderStatus(positionID string, orderID int) {
+func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder bool) {
 	m.logger.Printf("Starting order status polling for position %s, order %d", positionID, orderID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), m.config.Timeout)
@@ -97,12 +97,16 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int) {
 				continue
 			}
 
+			if orderStatus == nil {
+				m.logger.Printf("Nil order status for %d", orderID)
+				continue
+			}
 			m.logger.Printf("Order %d status: %s", orderID, orderStatus.Order.Status)
 
 			switch orderStatus.Order.Status {
 			case "filled":
 				m.logger.Printf("Order filled for position %s", positionID)
-				m.handleOrderFilled(positionID)
+				m.handleOrderFilled(positionID, isEntryOrder)
 				return
 			case "canceled", "rejected", "expired":
 				m.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
@@ -112,20 +116,32 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int) {
 				continue
 			default:
 				m.logger.Printf("Unknown order status for position %s: %s", positionID, orderStatus.Order.Status)
+				continue
 			}
 		}
 	}
 }
 
-func (m *Manager) handleOrderFilled(positionID string) {
+func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 	position := m.storage.GetCurrentPosition()
 	if position == nil || position.ID != positionID {
 		m.logger.Printf("Position %s not found or mismatched", positionID)
 		return
 	}
 
-	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
-		m.logger.Printf("Failed to transition position %s to open: %v", positionID, err)
+	var targetState models.PositionState
+	var transitionReason string
+
+	if isEntryOrder {
+		targetState = models.StateOpen
+		transitionReason = "entry_order_filled"
+	} else {
+		targetState = models.StateClosed
+		transitionReason = "exit_order_filled"
+	}
+
+	if err := position.TransitionState(targetState, transitionReason); err != nil {
+		m.logger.Printf("Failed to transition position %s to %s: %v", positionID, targetState, err)
 		return
 	}
 
@@ -134,7 +150,7 @@ func (m *Manager) handleOrderFilled(positionID string) {
 		return
 	}
 
-	m.logger.Printf("Position %s successfully transitioned to open state", positionID)
+	m.logger.Printf("Position %s successfully transitioned to %s state", positionID, targetState)
 }
 
 func (m *Manager) handleOrderFailed(positionID string, reason string) {

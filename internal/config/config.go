@@ -26,6 +26,7 @@ type Config struct {
 	Schedule    ScheduleConfig    `yaml:"schedule"`
 	Strategy    StrategyConfig    `yaml:"strategy"`
 	Risk        RiskConfig        `yaml:"risk"`
+	Storage     StorageConfig     `yaml:"storage"`
 }
 
 // EnvironmentConfig defines the environment settings.
@@ -84,6 +85,10 @@ type ScheduleConfig struct {
 	TradingStart        string `yaml:"trading_start"`
 	TradingEnd          string `yaml:"trading_end"`
 	AfterHoursCheck     bool   `yaml:"after_hours_check"`
+}
+
+type StorageConfig struct {
+	Path string `yaml:"path"`
 }
 
 func Load(configPath string) (*Config, error) {

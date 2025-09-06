@@ -474,7 +474,8 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 }
 
 // makeRequestCtx makes an HTTP request with context support for timeout/cancellation
-func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string, params url.Values, response interface{}) error {
+func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string,
+	params url.Values, response interface{}) error {
 	var req *http.Request
 	var err error
 

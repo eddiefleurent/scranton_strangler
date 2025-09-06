@@ -436,23 +436,23 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	sm := NewStateMachine()
 
 	// Test below 200% loss - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -6.50, 30, 21) // 185.7% loss
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -6.50, 30, 21, 2.0) // 185.7% loss
 	if shouldExit {
 		t.Errorf("Should not emergency exit at 185.7%% loss, but got: %s", reason)
 	}
 
 	// Test exactly at 200% loss - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -7.00, 30, 21) // 200% loss
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -7.00, 30, 21, 2.0) // 200% loss
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
 	}
-	expectedMsg := fmt.Sprintf("emergency exit: loss 200.0%% >= %.0f%% threshold", config.EscalateLossPct*100)
+	expectedMsg := fmt.Sprintf("emergency exit: loss 200.0%% >= %.0f%% threshold", 2.0*100)
 	if reason != expectedMsg {
 		t.Errorf("Expected specific loss message, got: %s", reason)
 	}
 
 	// Test above 200% loss - should trigger
-	shouldExit, _ = sm.ShouldEmergencyExit(3.50, -8.00, 30, 21) // 228.6% loss
+	shouldExit, _ = sm.ShouldEmergencyExit(3.50, -8.00, 30, 21, 2.0) // 228.6% loss
 	if !shouldExit {
 		t.Error("Should emergency exit at 228.6% loss")
 	}
@@ -468,21 +468,21 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
 
 	// Test within 5-day limit - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, 3.499, 30, 21) // negligible loss, 4 days
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, 3.499, 30, 21, 2.0) // negligible loss, 4 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
-	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour)     // exactly 5 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, 3.499, 30, 21) // negligible loss, 5 days
+	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour)          // exactly 5 days ago
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, 3.499, 30, 21, 2.0) // negligible loss, 5 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
 	}
 
 	// Test beyond 5-day limit - should trigger
-	sm.fourthDownStartTime = time.Now().Add(-6 * 24 * time.Hour)     // 6 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30, 21) // 142.9% loss, 6 days
+	sm.fourthDownStartTime = time.Now().Add(-6 * 24 * time.Hour)          // 6 days ago
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30, 21, 2.0) // 142.9% loss, 6 days
 	if !shouldExit {
 		t.Error("Should emergency exit after 6 days for Option A")
 	}
@@ -498,15 +498,15 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 	sm.SetFourthDownOption(OptionB)
 
 	// Test within 3-day limit - no emergency exit
-	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)      // 2 days ago
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 30, 21) // 2.9% loss, 2 days
+	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)           // 2 days ago
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 30, 21, 2.0) // 2.9% loss, 2 days
 	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
 
 	// Test beyond 3-day limit - should trigger
-	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour)     // 4 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 30, 21) // 2.9% loss, 4 days
+	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour)          // 4 days ago
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 30, 21, 2.0) // 2.9% loss, 4 days
 	if !shouldExit {
 		t.Error("Should emergency exit after 4 days for Option B")
 	}
@@ -523,13 +523,13 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
 
 	// Test above MaxDTE - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 25, 21) // 2.9% loss, above MaxDTE
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 25, 21, 2.0) // 2.9% loss, above MaxDTE
 	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit at %d DTE, but got: %s", 25, reason)
 	}
 
 	// Test exactly at MaxDTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 21, 21) // 2.9% loss, MaxDTE
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 21, 21, 2.0) // 2.9% loss, MaxDTE
 	if !shouldExit {
 		t.Errorf("Should emergency exit at %d DTE for Option C", 21)
 	}
@@ -539,7 +539,7 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	}
 
 	// Test below MaxDTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 15, 21) // 2.9% loss, 15 DTE
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 15, 21, 2.0) // 2.9% loss, 15 DTE
 	if !shouldExit {
 		t.Errorf("Should emergency exit at %d DTE for Option C", 15)
 	}
@@ -589,14 +589,14 @@ func TestPosition_EmergencyExit_Integration(t *testing.T) {
 	pos.CurrentPnL = -5.00 // 142.9% loss
 
 	// Below 200% loss - no emergency exit
-	shouldExit, reason := pos.ShouldEmergencyExit(21)
+	shouldExit, reason := pos.ShouldEmergencyExit(21, 2.0)
 	if shouldExit {
 		t.Errorf("Should not emergency exit at 142.9%% loss, but got: %s", reason)
 	}
 
 	// At 200% loss - should trigger
 	pos.CurrentPnL = -7.00 // 200% loss
-	shouldExit, _ = pos.ShouldEmergencyExit(21)
+	shouldExit, _ = pos.ShouldEmergencyExit(21, 2.0)
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
 	}

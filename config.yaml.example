@@ -8,15 +8,15 @@ environment:
 broker:
   provider: "tradier"
   api_key: "YOUR_SANDBOX_API_KEY_HERE"  # Get from https://developer.tradier.com/
-  api_endpoint: "https://sandbox.tradier.com/v1/"  # Sandbox endpoint
+  api_endpoint: "https://sandbox.tradier.com/v1"  # Sandbox endpoint
   account_id: "YOUR_ACCOUNT_ID_HERE"  # Get from Tradier dashboard
   use_otoco: true  # Use OTOCO orders to preset exit at 50% profit
   
 strategy:
   symbol: "SPY"
   allocation_pct: 0.35  # 35% of account max
-  escalate_loss_pct: 2.0  # Escalate if loss exceeds 200% of credit
-  use_mock_historical_iv: true  # Use mock data until proper storage implemented
+  escalate_loss_pct: 2.0  # Escalate if loss exceeds 200% of credit (must be < exit.stop_loss_pct)
+  use_mock_historical_iv: false  # Enable only in tests/dev; real runs require live IV
   
   entry:
     min_ivr: 30  # Minimum IV rank to enter
@@ -28,7 +28,7 @@ strategy:
   exit:
     profit_target: 0.50  # Exit at 50% profit
     max_dte: 21  # Exit with 21 days remaining
-    stop_loss_pct: 2.5  # Exit if loss exceeds 250% of credit
+    stop_loss_pct: 2.5  # Exit if loss exceeds 250% of credit (precedence over risk.max_position_loss)
     
   adjustments:
     enabled: false  # Start with false, enable after MVP proven
@@ -44,3 +44,6 @@ schedule:
   trading_start: "09:45"  # Start 15 min after open
   trading_end: "15:45"  # Stop 15 min before close
   after_hours_check: false
+
+storage:
+  path: "positions.json"  # Path to store position data

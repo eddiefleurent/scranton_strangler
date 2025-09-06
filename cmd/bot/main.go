@@ -72,7 +72,11 @@ func main() {
 	)
 
 	// Initialize storage
-	store, err := storage.NewStorage("positions.json")
+	storagePath := cfg.Storage.Path
+	if storagePath == "" {
+		storagePath = "positions.json"
+	}
+	store, err := storage.NewStorage(storagePath)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
@@ -317,7 +321,7 @@ func (b *Bot) executeEntry() {
 		position.ID, position.CreditReceived, position.DTE)
 
 	// Start order status polling in background
-	go b.orderManager.PollOrderStatus(position.ID, placedOrder.Order.ID)
+	go b.orderManager.PollOrderStatus(position.ID, placedOrder.Order.ID, true)
 }
 
 func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
@@ -369,7 +373,8 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 	}
 
 	// For all other states (including Submitted, Idle, Error, Adjusting, Rolling)
-	b.logger.Printf("Position %s is in state %s, not eligible for close (only Open and management states allowed)", position.ID, currentState)
+	b.logger.Printf("Position %s is in state %s, not eligible for close (only Open and management states allowed)",
+		position.ID, currentState)
 	return false
 }
 
@@ -406,6 +411,10 @@ func (b *Bot) completePositionClose(
 ) {
 	actualPnL := b.calculateActualPnL(position, reason)
 	b.logPnL(position, actualPnL)
+
+	if err := position.TransitionState(models.StateClosed, "position_closed"); err != nil {
+		b.logger.Printf("Warning: failed to transition to Closed: %v", err)
+	}
 
 	if err := b.storage.ClosePosition(actualPnL, string(reason)); err != nil {
 		b.logger.Printf("Failed to close position in storage: %v", err)

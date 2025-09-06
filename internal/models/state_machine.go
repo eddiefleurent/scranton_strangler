@@ -4,8 +4,6 @@ package models
 import (
 	"fmt"
 	"time"
-
-	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 // PositionState represents the current state of a position
@@ -67,6 +65,7 @@ var ValidTransitions = []StateTransition{
 	{StateSecondDown, StateFirstDown, "price_recovered", "Price moved away from strike"},
 	{StateThirdDown, StateFirstDown, "adjustment_successful", "Successfully adjusted position"},
 	{StateFourthDown, StateFirstDown, "recovery_successful", "Position recovered after critical adjustment"},
+	{StateFourthDown, StateFirstDown, "punt_executed", "Punting position in fourth down"},
 
 	// Exit transitions from any management state
 	{StateFirstDown, StateClosed, "exit_conditions", "Profit target or time limit reached"},
@@ -128,21 +127,36 @@ func (sm *StateMachine) GetPreviousState() PositionState {
 // IsValidTransition checks if a transition is valid
 func (sm *StateMachine) IsValidTransition(to PositionState, condition string) error {
 	// Check if this transition is defined
+	var foundTransition bool
 	for _, transition := range ValidTransitions {
 		if transition.From == sm.currentState && transition.To == to {
-			// Additional validation for adjustment limits
-			if to == StateAdjusting && sm.transitionCount[StateAdjusting] >= sm.maxAdjustments {
-				return fmt.Errorf("maximum adjustments (%d) exceeded", sm.maxAdjustments)
+			foundTransition = true
+			// If a condition is specified on the allowed transition, check if it matches
+			if transition.Condition != "" && condition != "" && condition == transition.Condition {
+				// Condition matches, proceed with additional validation
+				break
+			} else if transition.Condition == "" {
+				// No condition required for this transition, it's valid
+				break
 			}
-			if to == StateRolling && sm.transitionCount[StateRolling] >= sm.maxTimeRolls {
-				return fmt.Errorf("maximum time rolls (%d) exceeded", sm.maxTimeRolls)
-			}
-			return nil
+			// If condition doesn't match, continue checking other transitions
 		}
 	}
 
-	return fmt.Errorf("invalid transition from %s to %s with condition '%s'",
-		sm.currentState, to, condition)
+	if !foundTransition {
+		return fmt.Errorf("invalid transition from %s to %s with condition '%s'",
+			sm.currentState, to, condition)
+	}
+
+	// Additional validation for adjustment limits
+	if to == StateAdjusting && sm.transitionCount[StateAdjusting] >= sm.maxAdjustments {
+		return fmt.Errorf("maximum adjustments (%d) exceeded", sm.maxAdjustments)
+	}
+	if to == StateRolling && sm.transitionCount[StateRolling] >= sm.maxTimeRolls {
+		return fmt.Errorf("maximum time rolls (%d) exceeded", sm.maxTimeRolls)
+	}
+
+	return nil
 }
 
 // Transition moves to a new state
@@ -284,7 +298,8 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
-func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte float64, maxDTE int) (bool, string) {
+func (sm *StateMachine) ShouldEmergencyExit(
+	creditReceived, currentPnL, dte float64, maxDTE int, escalateLossPct float64) (bool, string) {
 	// Calculate loss percentage
 	if creditReceived == 0 {
 		return false, ""
@@ -292,8 +307,8 @@ func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte floa
 	lossPercent := (currentPnL / creditReceived) * -100 // Negative because P&L is negative for losses
 
 	// Emergency exit at configured escalate loss percentage (always applies)
-	if lossPercent >= config.EscalateLossPct*100 {
-		return true, fmt.Sprintf("emergency exit: loss %.1f%% >= %.0f%% threshold", lossPercent, config.EscalateLossPct*100)
+	if lossPercent >= escalateLossPct*100 {
+		return true, fmt.Sprintf("emergency exit: loss %.1f%% >= %.0f%% threshold", lossPercent, escalateLossPct*100)
 	}
 
 	// Check Fourth Down time-based limits if in Fourth Down state

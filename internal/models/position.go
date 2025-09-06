@@ -6,21 +6,21 @@ import (
 )
 
 type Position struct {
-	Expiration     time.Time     `json:"expiration"`
-	EntryDate      time.Time     `json:"entry_date"`
 	StateMachine   *StateMachine `json:"state_machine"`
+	Adjustments    []Adjustment  `json:"adjustments"`
 	ID             string        `json:"id"`
 	Symbol         string        `json:"symbol"`
-	Adjustments    []Adjustment  `json:"adjustments"`
+	EntryOrderID   string        `json:"entry_order_id"`
+	Expiration     time.Time     `json:"expiration"`
+	EntryDate      time.Time     `json:"entry_date"`
 	CreditReceived float64       `json:"credit_received"`
-	Quantity       int           `json:"quantity"`
 	EntryIVR       float64       `json:"entry_ivr"`
 	EntrySpot      float64       `json:"entry_spot"`
 	CurrentPnL     float64       `json:"current_pnl"`
-	DTE            int           `json:"dte"`
 	CallStrike     float64       `json:"call_strike"`
 	PutStrike      float64       `json:"put_strike"`
-	EntryOrderID   string        `json:"entry_order_id"`
+	Quantity       int           `json:"quantity"`
+	DTE            int           `json:"dte"`
 }
 
 type Adjustment struct {
@@ -169,11 +169,12 @@ func (p *Position) GetStateDescription() string {
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
-func (p *Position) ShouldEmergencyExit(maxDTE int) (bool, string) {
+func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (bool, string) {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
 	}
-	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, float64(p.CalculateDTE()), maxDTE)
+	return p.StateMachine.ShouldEmergencyExit(
+		p.CreditReceived, p.CurrentPnL, float64(p.CalculateDTE()), maxDTE, escalateLossPct)
 }
 
 // SetFourthDownOption sets the Fourth Down strategy option
