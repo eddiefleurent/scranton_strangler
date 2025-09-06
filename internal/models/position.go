@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// Position represents a short strangle trading position with state management.
 type Position struct {
 	StateMachine   *StateMachine `json:"state_machine"`
 	Adjustments    []Adjustment  `json:"adjustments"`
@@ -15,6 +16,7 @@ type Position struct {
 	ExitReason     string        `json:"exit_reason"`
 	Expiration     time.Time     `json:"expiration"`
 	EntryDate      time.Time     `json:"entry_date"`
+	ExitDate       time.Time     `json:"exit_date"`
 	CreditReceived float64       `json:"credit_received"`
 	EntryIVR       float64       `json:"entry_ivr"`
 	EntrySpot      float64       `json:"entry_spot"`
@@ -22,24 +24,44 @@ type Position struct {
 	CallStrike     float64       `json:"call_strike"`
 	PutStrike      float64       `json:"put_strike"`
 	Quantity       int           `json:"quantity"`
-	DTE            int           `json:"dte"`
+	// DTE is derived; avoid persisting to prevent staleness
+	DTE int `json:"-"`
 }
 
+// AdjustmentType defines the type of adjustment made to a position.
+type AdjustmentType string
+
+const (
+	// AdjustmentRoll indicates a rolling adjustment
+	AdjustmentRoll AdjustmentType = "roll"
+	// AdjustmentDelta indicates a delta adjustment
+	AdjustmentDelta AdjustmentType = "delta"
+	// AdjustmentHedge indicates a hedging adjustment
+	AdjustmentHedge AdjustmentType = "hedge"
+)
+
+// Adjustment represents a modification made to an existing position.
 type Adjustment struct {
-	Date        time.Time `json:"date"`
-	Type        string    `json:"type"`
-	Description string    `json:"description"`
-	OldStrike   float64   `json:"old_strike"`
-	NewStrike   float64   `json:"new_strike"`
-	Credit      float64   `json:"credit"`
+	Date        time.Time      `json:"date"`
+	Type        AdjustmentType `json:"type"`
+	Description string         `json:"description"`
+	OldStrike   float64        `json:"old_strike"`
+	NewStrike   float64        `json:"new_strike"`
+	Credit      float64        `json:"credit"`
 }
 
+// CalculateDTE calculates and returns the days to expiration for the position.
 func (p *Position) CalculateDTE() int {
 	now := time.Now().UTC().Truncate(24 * time.Hour)
 	exp := p.Expiration.UTC().Truncate(24 * time.Hour)
-	return int(exp.Sub(now).Hours() / 24)
+	days := int(exp.Sub(now).Hours() / 24)
+	if days < 0 {
+		return 0
+	}
+	return days
 }
 
+// GetTotalCredit returns the total credit received including adjustments.
 func (p *Position) GetTotalCredit() float64 {
 	total := p.CreditReceived
 	for _, adj := range p.Adjustments {
@@ -68,6 +90,7 @@ func NewPosition(id, symbol string, putStrike, callStrike float64, expiration ti
 		Quantity:     quantity,
 		Adjustments:  make([]Adjustment, 0),
 		StateMachine: NewStateMachine(),
+		ExitDate:     time.Time{}, // Initialize as zero time
 	}
 }
 
@@ -85,6 +108,11 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 	// Set EntryDate when transitioning to open state (only if not already set)
 	if to == StateOpen && p.EntryDate.IsZero() {
 		p.EntryDate = time.Now().UTC()
+	}
+
+	// Set ExitDate when transitioning to closed state (only if not already set)
+	if to == StateClosed && p.ExitDate.IsZero() {
+		p.ExitDate = time.Now().UTC()
 	}
 
 	return nil
@@ -109,7 +137,7 @@ func (p *Position) IsInManagement() bool {
 // GetManagementPhase returns which "down" we're in (1-4)
 func (p *Position) GetManagementPhase() int {
 	if p.StateMachine == nil {
-		return 0
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.GetManagementPhase()
 }
@@ -130,7 +158,7 @@ func (p *Position) CanRoll() bool {
 	return p.StateMachine.CanRoll()
 }
 
-// ValidateState ensures the position state is consistent
+// ValidateState ensures the position state is consistent with strong invariants
 func (p *Position) ValidateState() error {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
@@ -141,24 +169,62 @@ func (p *Position) ValidateState() error {
 		return fmt.Errorf("position %s state validation failed: %w", p.ID, err)
 	}
 
+	// Global invariant: CreditReceived must never be negative
+	if p.CreditReceived < 0 {
+		return fmt.Errorf("position %s in state %s: CreditReceived cannot be negative (current: %.2f)",
+			p.ID, p.StateMachine.GetCurrentState(), p.CreditReceived)
+	}
+
 	// Validate position data consistency with state
 	currentState := p.StateMachine.GetCurrentState()
 
 	// Check if position data is consistent with state
 	switch currentState {
 	case StateIdle:
-		// New positions: no credit and no entry timestamp yet
-		if !p.EntryDate.IsZero() || p.CreditReceived > 0 {
-			return fmt.Errorf("position %s: should not have credit or entry date in state %s", p.ID, currentState)
+		// Idle state invariants: no active position data
+		if !p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be zero for idle positions (current: %v)",
+				p.ID, currentState, p.EntryDate)
+		}
+		if p.CreditReceived != 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be zero for idle positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
 		}
 	case StateOpen, StateFirstDown, StateSecondDown, StateThirdDown, StateFourthDown:
-		if p.CreditReceived <= 0 || p.EntryDate.IsZero() {
-			return fmt.Errorf("position %s: missing position data for state %s", p.ID, currentState)
+		// Active position invariants: must have entry data and positive credit
+		if p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be set for active positions",
+				p.ID, currentState)
+		}
+		if p.CreditReceived <= 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for active positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
 		}
 	case StateClosed:
-		if p.CreditReceived <= 0 {
-			return fmt.Errorf("position %s: closed position should have credit received", p.ID)
+		// Closed position invariants: must have complete lifecycle data
+		if p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be set for closed positions",
+				p.ID, currentState)
 		}
+		if p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be set for closed positions",
+				p.ID, currentState)
+		}
+		if p.CreditReceived <= 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for closed positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
+		}
+		// Validate temporal ordering: EntryDate must be before ExitDate
+		if !p.EntryDate.Before(p.ExitDate) {
+			return fmt.Errorf("position %s in state %s: EntryDate (%v) must be before ExitDate (%v)",
+				p.ID, currentState, p.EntryDate, p.ExitDate)
+		}
+	}
+
+	// Additional temporal validation for any position with ExitDate set
+	if !p.ExitDate.IsZero() && !p.EntryDate.IsZero() && !p.EntryDate.Before(p.ExitDate) {
+		return fmt.Errorf("position %s in state %s: EntryDate (%v) must be before ExitDate (%v) when both are set",
+			p.ID, currentState, p.EntryDate, p.ExitDate)
 	}
 
 	return nil
@@ -167,7 +233,7 @@ func (p *Position) ValidateState() error {
 // GetStateDescription returns a human-readable state description
 func (p *Position) GetStateDescription() string {
 	if p.StateMachine == nil {
-		return "State machine not initialized"
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.GetStateDescription()
 }
@@ -177,8 +243,12 @@ func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (boo
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
 	}
+	dte := p.CalculateDTE()
+	if dte < 0 {
+		dte = 0
+	}
 	return p.StateMachine.ShouldEmergencyExit(
-		p.CreditReceived, p.CurrentPnL, float64(p.CalculateDTE()), maxDTE, escalateLossPct)
+		p.CreditReceived, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
 }
 
 // SetFourthDownOption sets the Fourth Down strategy option
@@ -192,7 +262,7 @@ func (p *Position) SetFourthDownOption(option FourthDownOption) {
 // GetFourthDownOption returns the selected Fourth Down strategy
 func (p *Position) GetFourthDownOption() FourthDownOption {
 	if p.StateMachine == nil {
-		return ""
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.GetFourthDownOption()
 }
@@ -210,5 +280,8 @@ func (p *Position) ExecutePunt() error {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
 	}
-	return p.StateMachine.ExecutePunt()
+	if err := p.StateMachine.ExecutePunt(); err != nil {
+		return fmt.Errorf("position %s punt failed: %w", p.ID, err)
+	}
+	return nil
 }

@@ -13,28 +13,35 @@ type PositionState string
 type FourthDownOption string
 
 const (
-	OptionA FourthDownOption = "option_a" // Aggressive adjustment
-	OptionB FourthDownOption = "option_b" // Conservative adjustment
-	OptionC FourthDownOption = "option_c" // DTE-based limit
+	// OptionA represents aggressive adjustment strategy
+	OptionA FourthDownOption = "option_a"
+	// OptionB represents conservative adjustment strategy
+	OptionB FourthDownOption = "option_b"
+	// OptionC represents DTE-based limit strategy
+	OptionC FourthDownOption = "option_c"
 )
 
 const (
-	// Core states
-	StateIdle      PositionState = "idle"      // No active position
-	StateSubmitted PositionState = "submitted" // Order submitted, waiting for fill
-	StateOpen      PositionState = "open"      // Position opened, ready for management
-	StateClosed    PositionState = "closed"    // Position closed
-	StateError     PositionState = "error"     // Error state requiring intervention
+	// StateIdle indicates no active position
+	StateIdle PositionState = "idle"
+	// StateSubmitted indicates order submitted, waiting for fill
+	StateSubmitted PositionState = "submitted"
+	// StateOpen indicates position opened, ready for management
+	StateOpen PositionState = "open"
+	// StateClosed indicates position closed
+	StateClosed PositionState = "closed"
+	// StateError indicates error state requiring intervention
+	StateError  PositionState = "error"
 
-	// Football System management states
-	StateFirstDown  PositionState = "first_down"  // Normal theta decay monitoring
+	// StateFirstDown indicates normal theta decay monitoring
+	StateFirstDown  PositionState = "first_down"
 	StateSecondDown PositionState = "second_down" // Strike challenged (within 5 points)
 	StateThirdDown  PositionState = "third_down"  // Strike breached, consider adjustments
 	StateFourthDown PositionState = "fourth_down" // Critical decision point
 
-	// Action states
-	StateAdjusting PositionState = "adjusting" // Executing position adjustment
-	StateRolling   PositionState = "rolling"   // Rolling to new expiration
+	// StateAdjusting indicates executing position adjustment
+	StateAdjusting PositionState = "adjusting"
+	StateRolling   PositionState = "rolling" // Rolling to new expiration
 )
 
 // StateTransition defines valid state transitions
@@ -45,7 +52,7 @@ type StateTransition struct {
 	Description string
 }
 
-// Valid state transitions (simplified)
+// ValidTransitions defines the allowed state transitions for the position state machine.
 var ValidTransitions = []StateTransition{
 	// Position lifecycle
 	{StateIdle, StateSubmitted, "order_placed", "Order submitted to broker"},

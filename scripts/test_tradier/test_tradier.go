@@ -110,7 +110,11 @@ func main() {
 				selectedDTE = dte
 			}
 		}
-		fmt.Printf("\n  ➜ Selected expiration for ~45 DTE: %s (DTE: %d)\n\n", selectedExp, selectedDTE)
+		if selectedExp != "" {
+			fmt.Printf("\n  ➜ Selected expiration for ~45 DTE: %s (DTE: %d)\n\n", selectedExp, selectedDTE)
+		} else {
+			fmt.Printf("\n  ➜ No valid future expirations found. Skipping option chain test.\n\n")
+		}
 
 		// Test 3: Get Option Chain
 		if selectedExp != "" {
@@ -223,7 +227,7 @@ func main() {
 						posType = "SHORT"
 					}
 					unit := "shares"
-					if strings.Contains(strings.ToUpper(pos.Symbol), "P") || strings.Contains(strings.ToUpper(pos.Symbol), "C") {
+					if isOptionSymbol(pos.Symbol) {
 						unit = "contracts"
 					}
 					fmt.Printf("  %d. %s: %.0f %s (%s), Cost: $%.2f\n",
@@ -292,4 +296,16 @@ func abs[T float64 | int](x T) T {
 		return -x
 	}
 	return x
+}
+
+// isOptionSymbol performs a basic OPRA-style check: TICKER + YYMMDD + [C|P] + strike
+// Example: SPY240920P00450000
+func isOptionSymbol(s string) bool {
+	u := strings.ToUpper(strings.TrimSpace(s))
+	// len 15–25 covers common OPRA lengths; adjust as needed
+	if len(u) < 15 || len(u) > 32 {
+		return false
+	}
+	// crude check: must contain 'C' or 'P' followed by digits
+	return strings.Contains(u, "C") || strings.Contains(u, "P")
 }

@@ -496,21 +496,21 @@ func (m *mockBroker) PlaceStrangleOrder(
 }
 
 func (m *mockBroker) PlaceStrangleOTOCO(
-	symbol string,
-	putStrike, callStrike float64,
-	expiration string,
-	quantity int,
-	credit, profitTarget float64,
+	_ string,
+	_, _ float64,
+	_ string,
+	_ int,
+	_, _ float64,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
 
 func (m *mockBroker) CloseStranglePosition(
-	symbol string,
-	putStrike, callStrike float64,
-	expiration string,
-	quantity int,
-	maxDebit float64,
+	_ string,
+	_, _ float64,
+	_ string,
+	_ int,
+	_ float64,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -541,14 +541,14 @@ func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) 
 	}, nil
 }
 
-func (m *mockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+func (m *mockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*broker.OrderResponse, error) {
 	return m.GetOrderStatus(orderID)
 }
 
 func (m *mockBroker) PlaceBuyToCloseOrder(
-	optionSymbol string,
-	quantity int,
-	maxPrice float64,
+	_ string,
+	_ int,
+	_ float64,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }

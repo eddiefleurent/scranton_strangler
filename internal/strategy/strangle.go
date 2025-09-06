@@ -38,12 +38,15 @@ type ExitReason string
 const (
 	// ExitReasonProfitTarget indicates position closed due to profit target hit
 	ExitReasonProfitTarget ExitReason = "profit_target"
-	ExitReasonTime         ExitReason = "time"
-	ExitReasonEscalate     ExitReason = "escalate"
-	ExitReasonStopLoss     ExitReason = "stop_loss"
-	ExitReasonManual       ExitReason = "manual"
-	ExitReasonError        ExitReason = "error"
-	ExitReasonNone         ExitReason = "none"
+	// ExitReasonTime indicates exit due to time decay
+	ExitReasonTime ExitReason = "time"
+	// ExitReasonEscalate indicates exit due to loss escalation
+	ExitReasonEscalate ExitReason = "escalate"
+	// ExitReasonStopLoss indicates exit due to stop loss
+	ExitReasonStopLoss ExitReason = "stop_loss"
+	ExitReasonManual   ExitReason = "manual"
+	ExitReasonError    ExitReason = "error"
+	ExitReasonNone     ExitReason = "none"
 )
 
 // NewStrangleStrategy creates a new strangle strategy instance.
@@ -170,26 +173,37 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 		return 0, fmt.Errorf("failed to get quote: %w", err)
 	}
 
-	// Find ATM call option to get current IV
+	// Prefer ATM call; fall back to ATM put, then nearest-with-IV
 	atmStrike := s.findNearestStrike(chain, quote.Last)
 	if atmStrike == 0 {
 		return 0, fmt.Errorf("no options available for ATM calculation")
 	}
-	for _, option := range chain {
-		if option.Strike == atmStrike && option.OptionType == "call" && option.Greeks != nil {
-			if option.Greeks.MidIV > 0 {
+	// Try call then put at ATM
+	for _, typ := range []string{"call", "put"} {
+		for _, option := range chain {
+			if option.Strike == atmStrike && option.OptionType == typ && option.Greeks != nil && option.Greeks.MidIV > 0 {
 				return option.Greeks.MidIV, nil
 			}
 		}
 	}
+	// Nearest strike with a valid IV
+	bestIV := 0.0
+	bestDiff := math.MaxFloat64
+	for _, opt := range chain {
+		if opt.Greeks == nil || opt.Greeks.MidIV <= 0 {
+			continue
+		}
+		d := math.Abs(opt.Strike - quote.Last)
+		if d < bestDiff {
+			bestDiff, bestIV = d, opt.Greeks.MidIV
+		}
+	}
+	if bestIV > 0 {
+		return bestIV, nil
+	}
 
 	return 0, fmt.Errorf("no valid IV found for ATM option")
 }
-
-// NOTE: Code review suggested broadening ATM IV retrieval to fall back to ATM put,
-// then nearest with valid IV. However, there will always be calls available in real
-// trading scenarios, so this implementation is sufficient and the suggested change
-// is unnecessary. Leaving this comment to prevent future code review suggestions.
 
 // getHistoricalImpliedVolatility retrieves historical IV data
 // For MVP, this is a simplified implementation
@@ -263,13 +277,13 @@ func getMinIV(historicalIVs []float64) float64 {
 	if len(historicalIVs) == 0 {
 		return 0
 	}
-	min := historicalIVs[0]
+	minIV := historicalIVs[0]
 	for _, iv := range historicalIVs {
-		if iv < min {
-			min = iv
+		if iv < minIV {
+			minIV = iv
 		}
 	}
-	return min
+	return minIV
 }
 
 // getMaxIV finds the maximum IV in historical data
@@ -277,13 +291,13 @@ func getMaxIV(historicalIVs []float64) float64 {
 	if len(historicalIVs) == 0 {
 		return 0
 	}
-	max := historicalIVs[0]
+	maxIV := historicalIVs[0]
 	for _, iv := range historicalIVs {
-		if iv > max {
-			max = iv
+		if iv > maxIV {
+			maxIV = iv
 		}
 	}
-	return max
+	return maxIV
 }
 
 // CalculatePositionPnL calculates current P&L for a position using live option quotes
@@ -416,6 +430,11 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 }
 
 func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
+	// Defense-in-depth: guard against zero/negative quantities
+	if creditPerShare <= 0 {
+		return 0
+	}
+
 	balance, err := s.broker.GetAccountBalance()
 	if err != nil {
 		return 0

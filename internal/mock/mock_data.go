@@ -1,3 +1,4 @@
+// Package mock provides mock implementations for testing the trading bot components.
 package mock
 
 import (
@@ -10,6 +11,7 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 )
 
+// MockDataProvider provides mock market data for testing.
 type MockDataProvider struct {
 	currentPrice float64
 	ivr          float64 // IV rank (percentile)
@@ -28,8 +30,8 @@ func secureFloat64() float64 {
 
 // secureInt63n generates a cryptographically secure random int64 between 0 and n-1
 func secureInt63n(n int64) int64 {
-	max := big.NewInt(n)
-	r, err := rand.Int(rand.Reader, max)
+	maxVal := big.NewInt(n)
+	r, err := rand.Int(rand.Reader, maxVal)
 	if err != nil {
 		// Fallback to a reasonable default if crypto/rand fails
 		return n / 2
@@ -37,6 +39,7 @@ func secureInt63n(n int64) int64 {
 	return r.Int64()
 }
 
+// NewMockDataProvider creates a new mock data provider instance.
 func NewMockDataProvider() *MockDataProvider {
 	return &MockDataProvider{
 		currentPrice: 450.0 + secureFloat64()*10, // SPY around 450-460
@@ -45,6 +48,7 @@ func NewMockDataProvider() *MockDataProvider {
 	}
 }
 
+// GetQuote returns mock quote data for the given symbol.
 func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	// Simulate small price movements
 	m.currentPrice += (secureFloat64() - 0.5) * 2
@@ -59,6 +63,7 @@ func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	}, nil
 }
 
+// GetIVR returns a mock implied volatility rank.
 func (m *MockDataProvider) GetIVR() float64 {
 	// Simulate IV rank changes
 	m.ivr += (secureFloat64() - 0.5) * 2
@@ -66,6 +71,7 @@ func (m *MockDataProvider) GetIVR() float64 {
 	return m.ivr
 }
 
+// GetOptionChain returns mock option chain data.
 func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
@@ -158,6 +164,7 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 	return options, nil
 }
 
+// Find16DeltaStrikes finds put and call strikes closest to 16 delta.
 func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, callStrike float64) {
 	targetDelta := 0.16
 
@@ -192,6 +199,7 @@ func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrik
 	return bestPutStrike, bestCallStrike
 }
 
+// CalculateStrangleCredit calculates the credit received for a strangle.
 func (m *MockDataProvider) CalculateStrangleCredit(
 	options []broker.Option,
 	putStrike, callStrike float64,
@@ -214,7 +222,7 @@ func (m *MockDataProvider) CalculateStrangleCredit(
 	return putCredit + callCredit, nil
 }
 
-// Generate sample position for testing
+// GenerateSamplePosition creates a sample position for testing.
 func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
 	quote, err := m.GetQuote("SPY")
 	if err != nil {

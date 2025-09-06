@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	yaml "gopkg.in/yaml.v3"
@@ -42,6 +43,10 @@ type BrokerConfig struct {
 	APIEndpoint string `yaml:"api_endpoint"`
 	AccountID   string `yaml:"account_id"`
 	UseOTOCO    bool   `yaml:"use_otoco"` // Use OTOCO orders for preset exits
+	// OTOCOPreview enables preview validation for OTOCO orders before placement
+	OTOCOPreview bool `yaml:"otoco_preview"`
+	// OTOCOFallback enables fallback to separate orders if OTOCO validation fails
+	OTOCOFallback bool `yaml:"otoco_fallback"`
 }
 
 // StrategyConfig defines trading strategy parameters.
@@ -55,6 +60,7 @@ type StrategyConfig struct {
 	UseMockHistoricalIV bool             `yaml:"use_mock_historical_iv"`
 }
 
+// EntryConfig defines entry criteria for opening new positions.
 type EntryConfig struct {
 	DTERange  []int   `yaml:"dte_range"`
 	MinIVR    float64 `yaml:"min_ivr"`
@@ -63,34 +69,41 @@ type EntryConfig struct {
 	MinCredit float64 `yaml:"min_credit"`
 }
 
+// ExitConfig defines exit criteria for closing positions.
 type ExitConfig struct {
 	ProfitTarget float64 `yaml:"profit_target"`
 	MaxDTE       int     `yaml:"max_dte"`
 	StopLossPct  float64 `yaml:"stop_loss_pct"`
 }
 
+// AdjustmentConfig defines parameters for position adjustments.
 type AdjustmentConfig struct {
 	Enabled             bool    `yaml:"enabled"`
 	SecondDownThreshold float64 `yaml:"second_down_threshold"`
 }
 
+// RiskConfig defines risk management parameters.
 type RiskConfig struct {
 	MaxContracts    int     `yaml:"max_contracts"`
 	MaxDailyLoss    float64 `yaml:"max_daily_loss"`
 	MaxPositionLoss float64 `yaml:"max_position_loss"`
 }
 
+// ScheduleConfig defines trading schedule and market hours.
 type ScheduleConfig struct {
 	MarketCheckInterval string `yaml:"market_check_interval"`
-	TradingStart        string `yaml:"trading_start"`
-	TradingEnd          string `yaml:"trading_end"`
+	Timezone            string `yaml:"timezone"`      // e.g., "America/New_York"
+	TradingStart        string `yaml:"trading_start"` // "HH:MM"
+	TradingEnd          string `yaml:"trading_end"`   // "HH:MM"
 	AfterHoursCheck     bool   `yaml:"after_hours_check"`
 }
 
+// StorageConfig defines storage settings for position data.
 type StorageConfig struct {
 	Path string `yaml:"path"`
 }
 
+// Load reads and parses the configuration file from the specified path.
 func Load(configPath string) (*Config, error) {
 	if configPath == "" {
 		configPath = "config.yaml"
@@ -105,7 +118,9 @@ func Load(configPath string) (*Config, error) {
 	expanded := os.ExpandEnv(string(data))
 
 	var config Config
-	if err := yaml.Unmarshal([]byte(expanded), &config); err != nil {
+	dec := yaml.NewDecoder(strings.NewReader(expanded))
+	dec.KnownFields(true)
+	if err := dec.Decode(&config); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
@@ -117,6 +132,7 @@ func Load(configPath string) (*Config, error) {
 	return &config, nil
 }
 
+// Validate checks that all configuration values are valid and consistent.
 func (c *Config) Validate() error {
 	// Environment validation
 	if c.Environment.Mode != "paper" && c.Environment.Mode != "live" {
@@ -207,7 +223,11 @@ func (c *Config) Validate() error {
 	if _, err := time.ParseDuration(c.Schedule.MarketCheckInterval); err != nil {
 		return fmt.Errorf("schedule.market_check_interval invalid: %w", err)
 	}
-	loc, err := time.LoadLocation("America/New_York")
+	tz := c.Schedule.Timezone
+	if tz == "" {
+		tz = "America/New_York"
+	}
+	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		// Fallback for minimal containers
 		loc = time.FixedZone("ET", -5*60*60)
@@ -221,10 +241,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// IsPaperTrading returns true if the bot is configured for paper trading.
 func (c *Config) IsPaperTrading() bool {
 	return c.Environment.Mode == "paper"
 }
 
+// GetCheckInterval returns the configured market check interval duration.
 func (c *Config) GetCheckInterval() time.Duration {
 	d, err := time.ParseDuration(c.Schedule.MarketCheckInterval)
 	if err != nil {
@@ -233,15 +255,26 @@ func (c *Config) GetCheckInterval() time.Duration {
 	return d
 }
 
+// IsWithinTradingHours checks if the given time falls within configured trading hours.
 func (c *Config) IsWithinTradingHours(now time.Time) bool {
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		loc = time.FixedZone("ET", -5*60*60) // fallback, DST-agnostic
+	tz := c.Schedule.Timezone
+	if tz == "" {
+		tz = "America/New_York"
 	}
-	todayET := now.In(loc)
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		// Try fallback to America/New_York
+		if fallbackLoc, err2 := time.LoadLocation("America/New_York"); err2 == nil {
+			loc = fallbackLoc
+		} else {
+			// Final fallback to DST-agnostic FixedZone
+			loc = time.FixedZone("ET", -5*60*60)
+		}
+	}
+	today := now.In(loc)
 
 	// Only allow Monday–Friday trading
-	if todayET.Weekday() == time.Saturday || todayET.Weekday() == time.Sunday {
+	if today.Weekday() == time.Saturday || today.Weekday() == time.Sunday {
 		return false
 	}
 
@@ -252,13 +285,13 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 		startClock, _ = time.ParseInLocation("15:04", "09:45", loc) //nolint:errcheck // hardcoded default
 		endClock, _ = time.ParseInLocation("15:04", "15:45", loc)   //nolint:errcheck // hardcoded default
 	}
-	start := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
+	start := time.Date(today.Year(), today.Month(), today.Day(),
 		startClock.Hour(), startClock.Minute(), 0, 0, loc)
-	end := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
+	end := time.Date(today.Year(), today.Month(), today.Day(),
 		endClock.Hour(), endClock.Minute(), 0, 0, loc)
 
 	// Inclusive start, exclusive end
-	return !todayET.Before(start) && todayET.Before(end)
+	return !today.Before(start) && today.Before(end)
 }
 
 // normalizeExitConfig sets default values for exit configuration

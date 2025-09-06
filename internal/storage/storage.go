@@ -22,6 +22,7 @@ type JSONStorage struct {
 	mu       sync.RWMutex
 }
 
+// StorageData represents the complete data structure stored in JSON files.
 type StorageData struct {
 	LastUpdated     time.Time          `json:"last_updated"`
 	CurrentPosition *models.Position   `json:"current_position"`
@@ -30,6 +31,7 @@ type StorageData struct {
 	History         []models.Position  `json:"history"`
 }
 
+// Statistics represents performance metrics and analytics data.
 type Statistics struct {
 	TotalTrades   int     `json:"total_trades"`
 	WinningTrades int     `json:"winning_trades"`
@@ -64,6 +66,7 @@ func NewJSONStorage(filepath string) (*JSONStorage, error) {
 	return s, nil
 }
 
+// Load reads position data from the JSON file.
 func (s *JSONStorage) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -92,6 +95,7 @@ func (s *JSONStorage) Load() error {
 	return nil
 }
 
+// Save writes position data to the JSON file.
 func (s *JSONStorage) Save() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -265,6 +269,7 @@ func (s *JSONStorage) syncParentDir() error {
 	return nil
 }
 
+// GetCurrentPosition returns the currently active position or nil if none exists.
 func (s *JSONStorage) GetCurrentPosition() *models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -303,6 +308,7 @@ func (s *JSONStorage) GetCurrentPosition() *models.Position {
 	return pos
 }
 
+// SetCurrentPosition updates the current active position in storage.
 func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -311,6 +317,7 @@ func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
 	return s.saveUnsafe()
 }
 
+// ClosePosition closes the current position and moves it to history.
 func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -386,6 +393,7 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 	}
 }
 
+// GetStatistics calculates and returns performance statistics.
 func (s *JSONStorage) GetStatistics() *Statistics {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -394,12 +402,14 @@ func (s *JSONStorage) GetStatistics() *Statistics {
 	return &stats
 }
 
+// GetDailyPnL returns the profit/loss for a specific date.
 func (s *JSONStorage) GetDailyPnL(date string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.data.DailyPnL[date]
 }
 
+// GetHistory returns all historical closed positions.
 func (s *JSONStorage) GetHistory() []models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -415,6 +425,7 @@ func (s *JSONStorage) GetHistory() []models.Position {
 	return history
 }
 
+// AddAdjustment adds an adjustment to the current position.
 func (s *JSONStorage) AddAdjustment(adj models.Adjustment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

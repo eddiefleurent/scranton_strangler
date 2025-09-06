@@ -8,11 +8,10 @@ environment:
 broker:
   provider: "tradier"
   api_key: "YOUR_SANDBOX_API_KEY_HERE"  # Get from https://developer.tradier.com/
-  api_endpoint: "https://sandbox.tradier.com/v1"  # Sandbox endpoint
   account_id: "YOUR_ACCOUNT_ID_HERE"  # Get from Tradier dashboard
   use_otoco: true  # Use OTOCO orders to preset exit at 50% profit
-  otoco_preview: true  # Use /orders/preview?preview=true to validate OTOCO before placement
-  otoco_fallback: true  # Fall back to separate entry + linked exits if OTOCO validation fails
+  otoco_preview: true  # Future: Use /orders/preview?preview=true to validate OTOCO before placement (currently no-op)
+  otoco_fallback: true  # Future: Fall back to separate entry + linked exits if OTOCO validation fails (currently no-op)
   
 strategy:
   symbol: "SPY"

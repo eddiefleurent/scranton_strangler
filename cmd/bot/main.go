@@ -1,3 +1,4 @@
+// Package main provides the entry point for the SPY short strangle trading bot.
 package main
 
 import (
@@ -20,6 +21,7 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 )
 
+// Bot represents the main trading bot instance.
 type Bot struct {
 	config       *config.Config
 	broker       broker.Broker
@@ -126,6 +128,7 @@ func main() {
 	logger.Println("Bot stopped successfully")
 }
 
+// Run starts the bot's main execution loop.
 func (b *Bot) Run(ctx context.Context) error {
 	b.ctx = ctx // Store context for use in operations
 	b.logger.Println("Bot starting main loop...")

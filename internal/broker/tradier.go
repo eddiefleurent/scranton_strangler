@@ -35,26 +35,37 @@ type TradierAPI struct {
 	sandbox    bool
 }
 
-// Rate limits per environment
+// RateLimits defines API rate limits for different endpoint categories.
 type RateLimits struct {
 	MarketData int // requests per minute
 	Trading    int // requests per minute
 	Standard   int // requests per minute
 }
 
+// NewTradierAPI creates a new TradierAPI client with default settings.
 func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
-	var baseURL string
+	return NewTradierAPIWithBaseURL(apiKey, accountID, sandbox, "")
+}
+
+// NewTradierAPIWithBaseURL creates a new TradierAPI client with optional custom baseURL
+func NewTradierAPIWithBaseURL(apiKey, accountID string, sandbox bool, baseURL string) *TradierAPI {
 	var limits RateLimits
 
+	if baseURL == "" {
+		if sandbox {
+			baseURL = "https://sandbox.tradier.com/v1"
+		} else {
+			baseURL = "https://api.tradier.com/v1"
+		}
+	}
+
 	if sandbox {
-		baseURL = "https://sandbox.tradier.com/v1"
 		limits = RateLimits{
 			MarketData: 60,
 			Trading:    60,
 			Standard:   60,
 		}
 	} else {
-		baseURL = "https://api.tradier.com/v1"
 		limits = RateLimits{
 			MarketData: 120,
 			Trading:    60,
@@ -92,7 +103,7 @@ func (s *singleOrArray[T]) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Option chain response - matches API exactly
+// OptionChainResponse represents the API response for option chain requests.
 type OptionChainResponse struct {
 	Options struct {
 		Option singleOrArray[Option] `json:"option"`
@@ -451,61 +462,7 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 
 // Helper method for making HTTP requests
 func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, response interface{}) error {
-	var req *http.Request
-	var err error
-
-	if method == "POST" && params != nil {
-		req, err = http.NewRequest(method, endpoint, strings.NewReader(params.Encode()))
-		if err != nil {
-			return err
-		}
-		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	} else {
-		req, err = http.NewRequest(method, endpoint, http.NoBody)
-		if err != nil {
-			return err
-		}
-	}
-
-	req.Header.Add("Authorization", "Bearer "+t.apiKey)
-	req.Header.Add("Accept", "application/json")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail the operation
-			log.Printf("Failed to close response body: %v", err)
-		}
-	}()
-
-	// Check rate limit headers
-	remaining := resp.Header.Get("X-Ratelimit-Available")
-	if remaining == "" {
-		remaining = resp.Header.Get("X-RateLimit-Available")
-		if remaining == "" {
-			remaining = resp.Header.Get("X-RateLimit-Remaining")
-		}
-	}
-	if remaining != "" {
-		log.Printf("Rate limit remaining: %s", remaining)
-	}
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return fmt.Errorf("API error %d: failed to read error body", resp.StatusCode)
-		}
-		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
-	}
-
-	decErr := json.NewDecoder(resp.Body).Decode(response)
-	if decErr == io.EOF {
-		return nil
-	}
-	return decErr
+	return t.makeRequestCtx(context.Background(), method, endpoint, params, response)
 }
 
 // makeRequestCtx makes an HTTP request with context support for timeout/cancellation

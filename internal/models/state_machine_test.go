@@ -8,9 +8,6 @@ import (
 )
 
 // Test constants for repeated strings
-var (
-	emergencyExitMessage = "emergency exit: loss 142.9% >= 200% threshold"
-)
 
 func TestStateMachine_BasicTransitions(t *testing.T) {
 	sm := NewStateMachine()
@@ -498,7 +495,7 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 	// Test within 3-day limit - no emergency exit
 	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)           // 2 days ago
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 30, 21, 2.0) // 2.9% loss, 2 days
-	if shouldExit && reason != emergencyExitMessage {
+	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
 
@@ -522,7 +519,7 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 
 	// Test above MaxDTE - no emergency exit
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 25, 21, 2.0) // 2.9% loss, above MaxDTE
-	if shouldExit && reason != emergencyExitMessage {
+	if shouldExit {
 		t.Errorf("Should not emergency exit at %d DTE, but got: %s", 25, reason)
 	}
 
@@ -682,7 +679,7 @@ func TestPosition_ProfitPercent(t *testing.T) {
 			name:           "Single quantity, positive P&L",
 			quantity:       1,
 			creditReceived: 3.50,
-			currentPnL:     175.0,  // 50% of total credit (3.50 * 1 * 100 = 350)
+			currentPnL:     175.0, // 50% of total credit (3.50 * 1 * 100 = 350)
 			expectedPct:    50.0,
 		},
 		{

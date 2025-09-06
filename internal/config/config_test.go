@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -183,4 +184,30 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 			t.Errorf("Expected valid config with proper ascending order, got error: %v", err)
 		}
 	})
+}
+
+func TestLoad_UnknownFields(t *testing.T) {
+	const badYAML = `
+environment: { mode: "paper", log_level: "info" }
+broker: { provider: "tradier", api_key: "k", api_endpoint: "x", account_id: "a" }
+strategy:
+  symbol: "SPY"
+  allocation_pct: 0.3
+  escalate_loss_pct: 2.0
+  entry: { min_ivr: 30, target_dte: 45, dte_range: [40,50], delta: 16, min_credit: 2.0 }
+  exit: { profit_target: 0.5, max_dte: 21, stop_loss_pct: 2.5 }
+risk: { max_contracts: 1, max_daily_loss: 500, max_position_loss: 2.0 }
+schedule: { market_check_interval: "15m", trading_start: "09:45", trading_end: "15:45", after_hours_check: false }
+storage: { path: "positions.json" }
+extra_unknown_key: true
+`
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "cfg.yaml")
+	if err := os.WriteFile(path, []byte(badYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for unknown key")
+	}
 }

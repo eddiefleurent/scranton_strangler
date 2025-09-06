@@ -97,7 +97,7 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 			statusCancel() // Explicitly cancel the context after the call
 
 			if err != nil {
-				if errors.Is(err, context.DeadlineExceeded) {
+				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 					m.logger.Printf("GetOrderStatus timeout for position %s, order %d", positionID, orderID)
 					continue // Continue the loop on timeout so ticker keeps running
 				}
@@ -124,7 +124,7 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 				return
 			case "canceled", "rejected", "expired":
 				m.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
-				m.handleOrderFailed(positionID, orderStatus.Order.Status)
+				m.handleOrderFailed(positionID, orderID, orderStatus.Order.Status)
 				return
 			case "pending", "open", "partial", "partially_filled":
 				continue
@@ -185,15 +185,17 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 	m.logger.Printf("Position %s successfully transitioned to %s state", positionID, targetState)
 }
 
-func (m *Manager) handleOrderFailed(positionID string, reason string) {
+func (m *Manager) handleOrderFailed(positionID string, orderID int, reason string) {
 	position := m.storage.GetCurrentPosition()
 	if position == nil || position.ID != positionID {
 		m.logger.Printf("Position %s not found or mismatched", positionID)
 		return
 	}
 
-	// Check if this is an exit order failure
-	isExitOrder := position.ExitOrderID != "" && position.GetCurrentState() == models.StateAdjusting
+	// Check if this is an exit order failure - verify the orderID matches
+	isExitOrder := position.ExitOrderID != "" &&
+		position.GetCurrentState() == models.StateAdjusting &&
+		position.ExitOrderID == fmt.Sprintf("%d", orderID)
 
 	if isExitOrder {
 		m.logger.Printf("Exit order failed for position %s: %s, reverting to previous state", positionID, reason)

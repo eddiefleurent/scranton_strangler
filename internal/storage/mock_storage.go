@@ -26,16 +26,18 @@ func NewMockStorage() *MockStorage {
 	}
 }
 
-// Position management methods
+// GetCurrentPosition returns the mock current position.
 func (m *MockStorage) GetCurrentPosition() *models.Position {
 	return m.currentPosition
 }
 
+// SetCurrentPosition updates the mock current position.
 func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
 	m.currentPosition = pos
 	return nil
 }
 
+// ClosePosition closes the mock position.
 func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 	if m.currentPosition == nil {
 		return fmt.Errorf("no position to close")
@@ -60,6 +62,7 @@ func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 	return nil
 }
 
+// AddAdjustment adds an adjustment to the mock position.
 func (m *MockStorage) AddAdjustment(adj models.Adjustment) error {
 	if m.currentPosition == nil {
 		return fmt.Errorf("no current position to adjust")
@@ -69,51 +72,59 @@ func (m *MockStorage) AddAdjustment(adj models.Adjustment) error {
 	return nil
 }
 
-// Data persistence methods (mocked)
+// Save simulates saving data (mock implementation).
 func (m *MockStorage) Save() error {
 	m.saveCallCount++
 	return m.saveError
 }
 
+// Load simulates loading data (mock implementation).
 func (m *MockStorage) Load() error {
 	m.loadCallCount++
 	return m.loadError
 }
 
-// Historical data and analytics
+// GetHistory returns the mock historical position data.
 func (m *MockStorage) GetHistory() []models.Position {
 	return m.history
 }
 
+// GetStatistics returns the mock statistics data.
 func (m *MockStorage) GetStatistics() *Statistics {
 	return m.statistics
 }
 
+// GetDailyPnL returns the mock daily P&L for a date.
 func (m *MockStorage) GetDailyPnL(date string) float64 {
 	return m.dailyPnL[date]
 }
 
-// Mock control methods for testing
+// SetSaveError configures the mock to return an error on Save calls.
 func (m *MockStorage) SetSaveError(err error) {
 	m.saveError = err
 }
 
+// SetLoadError configures the mock to return an error on Load calls.
 func (m *MockStorage) SetLoadError(err error) {
 	m.loadError = err
 }
 
+// GetSaveCallCount returns the number of times Save was called.
 func (m *MockStorage) GetSaveCallCount() int {
 	return m.saveCallCount
 }
 
+// GetLoadCallCount returns the number of times Load was called.
 func (m *MockStorage) GetLoadCallCount() int {
 	return m.loadCallCount
 }
 
+// AddHistoryPosition adds a position to the mock history.
 func (m *MockStorage) AddHistoryPosition(pos models.Position) {
 	m.history = append(m.history, pos)
 }
 
+// SetDailyPnL sets the mock daily P&L for a specific date.
 func (m *MockStorage) SetDailyPnL(date string, pnl float64) {
 	m.dailyPnL[date] = pnl
 }
