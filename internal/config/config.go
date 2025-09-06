@@ -1,0 +1,153 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"time"
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	Environment EnvironmentConfig `yaml:"environment"`
+	Broker      BrokerConfig      `yaml:"broker"`
+	Strategy    StrategyConfig    `yaml:"strategy"`
+	Risk        RiskConfig        `yaml:"risk"`
+	Schedule    ScheduleConfig    `yaml:"schedule"`
+}
+
+type EnvironmentConfig struct {
+	Mode     string `yaml:"mode"`      // paper | live
+	LogLevel string `yaml:"log_level"` // debug | info | warn | error
+}
+
+type BrokerConfig struct {
+	Provider    string `yaml:"provider"`
+	APIKey      string `yaml:"api_key"`
+	APIEndpoint string `yaml:"api_endpoint"`
+	AccountID   string `yaml:"account_id"`
+}
+
+type StrategyConfig struct {
+	Symbol        string          `yaml:"symbol"`
+	AllocationPct float64         `yaml:"allocation_pct"`
+	Entry         EntryConfig     `yaml:"entry"`
+	Exit          ExitConfig      `yaml:"exit"`
+	Adjustments   AdjustmentConfig `yaml:"adjustments"`
+}
+
+type EntryConfig struct {
+	MinIVR      float64   `yaml:"min_ivr"`
+	TargetDTE   int       `yaml:"target_dte"`
+	DTERange    []int     `yaml:"dte_range"`
+	Delta       float64   `yaml:"delta"`
+	MinCredit   float64   `yaml:"min_credit"`
+}
+
+type ExitConfig struct {
+	ProfitTarget float64 `yaml:"profit_target"`
+	MaxDTE       int     `yaml:"max_dte"`
+}
+
+type AdjustmentConfig struct {
+	Enabled              bool    `yaml:"enabled"`
+	SecondDownThreshold  float64 `yaml:"second_down_threshold"`
+}
+
+type RiskConfig struct {
+	MaxContracts      int     `yaml:"max_contracts"`
+	MaxDailyLoss      float64 `yaml:"max_daily_loss"`
+	MaxPositionLoss   float64 `yaml:"max_position_loss"`
+}
+
+type ScheduleConfig struct {
+	MarketCheckInterval string `yaml:"market_check_interval"`
+	TradingStart        string `yaml:"trading_start"`
+	TradingEnd          string `yaml:"trading_end"`
+	AfterHoursCheck     bool   `yaml:"after_hours_check"`
+}
+
+func Load(configPath string) (*Config, error) {
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading config file: %w", err)
+	}
+
+	// Expand environment variables
+	expanded := os.ExpandEnv(string(data))
+
+	var config Config
+	if err := yaml.Unmarshal([]byte(expanded), &config); err != nil {
+		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	// Validate config
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	return &config, nil
+}
+
+func (c *Config) Validate() error {
+	// Environment validation
+	if c.Environment.Mode != "paper" && c.Environment.Mode != "live" {
+		return fmt.Errorf("environment.mode must be 'paper' or 'live'")
+	}
+
+	// Broker validation
+	if c.Broker.APIKey == "" {
+		return fmt.Errorf("broker.api_key is required")
+	}
+	if c.Broker.AccountID == "" {
+		return fmt.Errorf("broker.account_id is required")
+	}
+
+	// Strategy validation
+	if c.Strategy.Symbol == "" {
+		return fmt.Errorf("strategy.symbol is required")
+	}
+	if c.Strategy.AllocationPct <= 0 || c.Strategy.AllocationPct > 0.5 {
+		return fmt.Errorf("strategy.allocation_pct must be between 0 and 0.5")
+	}
+	if c.Strategy.Entry.MinIVR < 0 || c.Strategy.Entry.MinIVR > 100 {
+		return fmt.Errorf("strategy.entry.min_ivr must be between 0 and 100")
+	}
+	if c.Strategy.Entry.Delta <= 0 || c.Strategy.Entry.Delta > 50 {
+		return fmt.Errorf("strategy.entry.delta must be between 0 and 50")
+	}
+
+	// Risk validation
+	if c.Risk.MaxContracts <= 0 {
+		return fmt.Errorf("risk.max_contracts must be > 0")
+	}
+	if c.Risk.MaxDailyLoss <= 0 {
+		return fmt.Errorf("risk.max_daily_loss must be > 0")
+	}
+
+	return nil
+}
+
+func (c *Config) IsPaperTrading() bool {
+	return c.Environment.Mode == "paper"
+}
+
+func (c *Config) GetCheckInterval() time.Duration {
+	d, err := time.ParseDuration(c.Schedule.MarketCheckInterval)
+	if err != nil {
+		return 15 * time.Minute // default
+	}
+	return d
+}
+
+func (c *Config) IsWithinTradingHours(now time.Time) bool {
+	startTime, _ := time.Parse("15:04", c.Schedule.TradingStart)
+	endTime, _ := time.Parse("15:04", c.Schedule.TradingEnd)
+	
+	currentTime, _ := time.Parse("15:04", now.Format("15:04"))
+	
+	return currentTime.After(startTime) && currentTime.Before(endTime)
+}

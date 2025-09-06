@@ -1,0 +1,54 @@
+# Configuration files with secrets
+config.yaml
+*.env
+.env.*
+
+# Binary
+strangle-bot
+*.exe
+
+# Test files
+*.test
+*.out
+
+# Go build cache
+*.o
+*.a
+*.so
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Position data
+positions.json
+positions_backup.json
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Coverage
+coverage.txt
+*.cover
+*.coverprofile

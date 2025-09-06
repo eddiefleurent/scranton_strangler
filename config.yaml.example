@@ -1,0 +1,42 @@
+# SPY Strangle Bot Configuration
+# Copy this to config.yaml and fill in your values
+
+environment:
+  mode: "paper"  # paper | live (ALWAYS start with paper)
+  log_level: "info"  # debug | info | warn | error
+  
+broker:
+  provider: "tradier"
+  api_key: "YOUR_SANDBOX_API_KEY_HERE"  # Get from https://developer.tradier.com/
+  api_endpoint: "https://sandbox.tradier.com/v1/"  # Sandbox endpoint
+  account_id: "YOUR_ACCOUNT_ID_HERE"  # Get from Tradier dashboard
+  
+strategy:
+  symbol: "SPY"
+  allocation_pct: 0.35  # 35% of account max
+  
+  entry:
+    min_ivr: 30  # Minimum IV rank to enter
+    target_dte: 45  # Target days to expiration
+    dte_range: [40, 50]  # Acceptable DTE range
+    delta: 16  # Target delta (16 = 0.16)
+    min_credit: 2.00  # Minimum credit to receive
+    
+  exit:
+    profit_target: 0.50  # Exit at 50% profit
+    max_dte: 21  # Exit with 21 days remaining
+    
+  adjustments:
+    enabled: false  # Start with false, enable after MVP proven
+    second_down_threshold: 10  # Points from strike to trigger
+    
+risk:
+  max_contracts: 1  # Start with 1 for safety
+  max_daily_loss: 500  # Stop trading if daily loss exceeds
+  max_position_loss: 2.0  # Exit if loss exceeds 200% of credit
+  
+schedule:
+  market_check_interval: "15m"  # How often to check market
+  trading_start: "09:45"  # Start 15 min after open
+  trading_end: "15:45"  # Stop 15 min before close
+  after_hours_check: false
