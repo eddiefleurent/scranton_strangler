@@ -21,13 +21,13 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 - **Paper First**: Prove it works before risking capital
 - **Progressive Enhancement**: Start simple, add complexity only after proving stability
 
-### Architecture Score: 6.5/10
-**Current State**: Solid foundation with critical improvements needed before production
+### Architecture Score: 7.5/10
+**Current State**: Solid foundation; production hardening in progress
 - ✅ Clean separation of concerns
-- ✅ Configuration-driven design  
-- ❌ Missing interface-based design
-- ❌ No test coverage
-- ❌ State management vulnerabilities
+- ✅ Configuration-driven design
+- ✅ Interface-based design (Broker, Storage, Strategy, Orders)
+- ✅ Unit tests for strategy/state machine/storage
+- ⚠️ Further hardening: integration tests, sandbox E2E, observability
 
 ---
 
@@ -67,7 +67,7 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 ```
 
 ### Layered Architecture View
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                    Application Layer                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
@@ -193,7 +193,7 @@ cmd/bot/main.go
 // Core interfaces needed for proper abstraction
 type Broker interface {
     GetQuote(symbol string) (*Quote, error)
-    GetOptionChain(symbol, exp string) ([]Option, error)
+    GetOptionChain(symbol, exp string, withGreeks bool) ([]Option, error)
     PlaceStrangleOrder(params OrderParams) (*Order, error)
     GetAccountBalance() (float64, error)
 }
@@ -300,7 +300,7 @@ Next Trade:
 ```
 
 ### Strategy Alignment
-- **No Stop Losses**: OCO used for profit/management, not stops  
+- **Risk Controls**: Escalation and stop-loss thresholds supported
 - **50% Profit Target**: Automated via OTOCO exit orders
 - **Rolling Management**: OCO supports "football system" adjustments
 - **Manual Override**: Always available for black swan events

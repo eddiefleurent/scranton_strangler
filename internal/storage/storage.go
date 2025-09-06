@@ -15,15 +15,15 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
-// JSONStorage implements StorageInterface using JSON file persistence
+// JSONStorage implements Interface using JSON file persistence
 type JSONStorage struct {
-	data     *StorageData
+	data     *Data
 	filepath string
 	mu       sync.RWMutex
 }
 
-// StorageData represents the complete data structure stored in JSON files.
-type StorageData struct {
+// Data represents the complete data structure stored in JSON files.
+type Data struct {
 	LastUpdated     time.Time          `json:"last_updated"`
 	CurrentPosition *models.Position   `json:"current_position"`
 	DailyPnL        map[string]float64 `json:"daily_pnl"`
@@ -48,7 +48,7 @@ type Statistics struct {
 func NewJSONStorage(filePath string) (*JSONStorage, error) {
 	s := &JSONStorage{
 		filepath: filePath,
-		data: &StorageData{
+		data: &Data{
 			DailyPnL:   make(map[string]float64),
 			Statistics: &Statistics{},
 		},
@@ -81,14 +81,14 @@ func (s *JSONStorage) Load() error {
 		return err
 	}
 
-	var loaded StorageData
+	var loaded Data
 	if err := json.Unmarshal(data, &loaded); err != nil {
 		return err
 	}
 	s.data = &loaded
 
 	if s.data == nil {
-		s.data = &StorageData{}
+		s.data = &Data{}
 	}
 	if s.data.Statistics == nil {
 		s.data.Statistics = &Statistics{}
@@ -119,11 +119,16 @@ func (s *JSONStorage) saveUnsafe() error {
 
 	// Create temp file in the same directory as the target file to avoid EXDEV
 	dir := filepath.Dir(s.filepath)
-	f, err := os.CreateTemp(dir, "storage-*")
+	f, err := os.CreateTemp(dir, ".storage-*")
 	if err != nil {
 		return err
 	}
 	tmpFile := f.Name()
+
+	// Set restrictive permissions on the temporary file
+	if err := f.Chmod(0600); err != nil {
+		return fmt.Errorf("failed to set temp file permissions: %w", err)
+	}
 
 	// Ensure cleanup happens even if we return early
 	defer func() {
@@ -198,9 +203,12 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 		}
 	}()
 
-	dstFile, err := os.Create(dst) // #nosec G304 - paths are validated above
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // #nosec G304 - paths are validated above
 	if err != nil {
 		return err
+	}
+	if err := dstFile.Chmod(0600); err != nil {
+		return fmt.Errorf("failed to set file permissions: %w", err)
 	}
 	defer func() {
 		if err := dstFile.Close(); err != nil {

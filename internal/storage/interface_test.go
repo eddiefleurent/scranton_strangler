@@ -9,12 +9,12 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
-// TestStorageInterface tests the storage interface with both implementations
-func TestStorageInterface(t *testing.T) {
+// TestInterface tests the storage interface with both implementations
+func TestInterface(t *testing.T) {
 	// Test with MockStorage
 	t.Run("MockStorage", func(t *testing.T) {
 		storage := NewMockStorage()
-		testStorageInterface(t, storage)
+		testInterface(t, storage)
 	})
 
 	// Test with JSONStorage (using temporary file)
@@ -22,20 +22,20 @@ func TestStorageInterface(t *testing.T) {
 		tmpFile := fmt.Sprintf("/tmp/test_positions_%d.json", time.Now().UnixNano())
 		// Clean up after test
 		defer func() {
-			_ = os.Remove(tmpFile)          //nolint:errcheck // test cleanup
-			_ = os.Remove(tmpFile + ".tmp") //nolint:errcheck // test cleanup
+			_ = os.Remove(tmpFile)
+			_ = os.Remove(tmpFile + ".tmp")
 		}()
 
 		storage, err := NewJSONStorage(tmpFile)
 		if err != nil {
 			t.Fatalf("Failed to create JSON storage: %v", err)
 		}
-		testStorageInterface(t, storage)
+		testInterface(t, storage)
 	})
 }
 
-// testStorageInterface runs common tests on any storage implementation
-func testStorageInterface(t *testing.T, storage StorageInterface) {
+// testInterface runs common tests on any storage implementation
+func testInterface(t *testing.T, storage Interface) {
 	// Test initial state
 	pos := storage.GetCurrentPosition()
 	if pos != nil {
@@ -195,11 +195,11 @@ func (e *MockError) Error() string {
 	return e.message
 }
 
-// TestStorageInterfaceCompliance ensures all implementations satisfy the interface
-func TestStorageInterfaceCompliance(t *testing.T) {
+// TestInterfaceCompliance ensures all implementations satisfy the interface
+func TestInterfaceCompliance(t *testing.T) {
 	// Test that both implementations satisfy the interface
-	var _ StorageInterface = (*MockStorage)(nil)
-	var _ StorageInterface = (*JSONStorage)(nil)
+	var _ Interface = (*MockStorage)(nil)
+	var _ Interface = (*JSONStorage)(nil)
 
 	// Test factory function
 	storage, err := NewStorage("/tmp/test_factory.json")
@@ -208,5 +208,5 @@ func TestStorageInterfaceCompliance(t *testing.T) {
 	}
 
 	// Ensure factory returns the interface
-	var _ StorageInterface = storage
+	var _ Interface = storage
 }

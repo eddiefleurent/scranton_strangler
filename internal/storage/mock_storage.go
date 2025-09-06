@@ -6,7 +6,7 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
-// MockStorage implements StorageInterface for testing
+// MockStorage implements Interface for testing
 type MockStorage struct {
 	saveError       error
 	loadError       error
@@ -160,5 +160,5 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 	}
 }
 
-// Ensure MockStorage implements StorageInterface
-var _ StorageInterface = (*MockStorage)(nil)
+// Ensure MockStorage implements Interface
+var _ Interface = (*MockStorage)(nil)

@@ -174,3 +174,278 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 		return client.PlaceStrangleOrder("SPY", 450.0, 460.0, "2024-12-20", 1, 2.0, false)
 	}
 }
+
+func TestExtractUnderlyingFromOSI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Valid OSI symbols with different underlying lengths
+		{
+			name:     "4-char underlying (SPY)",
+			input:    "SPY241220P00450000",
+			expected: "SPY",
+		},
+		{
+			name:     "5-char underlying (TSLA)",
+			input:    "TSLA241220P00250000",
+			expected: "TSLA",
+		},
+		{
+			name:     "6-char underlying (NVDA)",
+			input:    "NVDA241220P00500000",
+			expected: "NVDA",
+		},
+		{
+			name:     "3-char underlying (AAPL)",
+			input:    "AAPL241220C00150000",
+			expected: "AAPL",
+		},
+		{
+			name:     "7-char underlying (valid)",
+			input:    "ABCDEFG241220P00450000",
+			expected: "ABCDEFG",
+		},
+		// Edge cases and malformed strings
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "too short",
+			input:    "SPY24",
+			expected: "",
+		},
+		{
+			name:     "missing expiration",
+			input:    "SPYP00450000",
+			expected: "",
+		},
+		{
+			name:     "invalid expiration format",
+			input:    "SPY24ABCP00450000",
+			expected: "",
+		},
+		{
+			name:     "missing type char",
+			input:    "SPY24122000450000",
+			expected: "",
+		},
+		{
+			name:     "invalid type char",
+			input:    "SPY241220X00450000",
+			expected: "",
+		},
+		{
+			name:     "missing strike",
+			input:    "SPY241220P",
+			expected: "",
+		},
+		{
+			name:     "short strike",
+			input:    "SPY241220P450000",
+			expected: "",
+		},
+		{
+			name:     "long strike",
+			input:    "SPY241220P004500000",
+			expected: "",
+		},
+		{
+			name:     "strike with non-digits",
+			input:    "SPY241220P00450ABC",
+			expected: "",
+		},
+		{
+			name:     "underlying with spaces",
+			input:    "SP Y241220P00450000",
+			expected: "SP Y",
+		},
+		{
+			name:     "expiration with spaces",
+			input:    "SPY24 220P00450000",
+			expected: "",
+		},
+		{
+			name:     "strike with spaces",
+			input:    "SPY241220P004 0000",
+			expected: "",
+		},
+		{
+			name:     "leading spaces",
+			input:    " SPY241220P00450000",
+			expected: "SPY",
+		},
+		{
+			name:     "trailing spaces",
+			input:    "SPY241220P00450000 ",
+			expected: "SPY",
+		},
+		{
+			name:     "only spaces",
+			input:    "   ",
+			expected: "",
+		},
+		{
+			name:     "mixed case underlying",
+			input:    "SpY241220P00450000",
+			expected: "SpY",
+		},
+		{
+			name:     "numeric underlying with embedded date",
+			input:    "123241220P00450000",
+			expected: "",
+		},
+		{
+			name:     "underlying with numbers",
+			input:    "SPY1241220P00450000",
+			expected: "",
+		},
+		{
+			name:     "very long underlying",
+			input:    "VERYLONGUNDERLYINGSYMBOL241220P00450000",
+			expected: "VERYLONGUNDERLYINGSYMBOL",
+		},
+		{
+			name:     "underlying with special chars",
+			input:    "SPY$241220P00450000",
+			expected: "SPY$",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractUnderlyingFromOSI(tt.input)
+			if result != tt.expected {
+				t.Errorf("extractUnderlyingFromOSI(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestOptionTypeFromSymbol(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Valid OSI symbols
+		{
+			name:     "put option",
+			input:    "SPY241220P00450000",
+			expected: "put",
+		},
+		{
+			name:     "call option",
+			input:    "SPY241220C00450000",
+			expected: "call",
+		},
+		{
+			name:     "put option with different strike",
+			input:    "TSLA241220P00250000",
+			expected: "put",
+		},
+		{
+			name:     "call option with different strike",
+			input:    "NVDA241220C00500000",
+			expected: "call",
+		},
+		// Edge cases and malformed strings
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "too short",
+			input:    "SPY",
+			expected: "",
+		},
+		{
+			name:     "missing 8 digits",
+			input:    "SPY241220P",
+			expected: "",
+		},
+		{
+			name:     "7 digits",
+			input:    "SPY241220P450000",
+			expected: "",
+		},
+		{
+			name:     "9 digits",
+			input:    "SPY241220P004500000",
+			expected: "",
+		},
+		{
+			name:     "non-digit in strike",
+			input:    "SPY241220P00450ABC",
+			expected: "",
+		},
+		{
+			name:     "missing type char",
+			input:    "SPY24122000450000",
+			expected: "",
+		},
+		{
+			name:     "invalid type char",
+			input:    "SPY241220X00450000",
+			expected: "",
+		},
+		{
+			name:     "spaces in strike",
+			input:    "SPY241220P004 0000",
+			expected: "",
+		},
+		{
+			name:     "leading spaces",
+			input:    " SPY241220P00450000",
+			expected: "put",
+		},
+		{
+			name:     "trailing spaces",
+			input:    "SPY241220P00450000 ",
+			expected: "",
+		},
+		{
+			name:     "only spaces",
+			input:    "        ",
+			expected: "",
+		},
+		{
+			name:     "mixed case type char",
+			input:    "SPY241220p00450000",
+			expected: "",
+		},
+		{
+			name:     "very short string",
+			input:    "P",
+			expected: "",
+		},
+		{
+			name:     "no underlying",
+			input:    "241220P00450000",
+			expected: "put",
+		},
+		{
+			name:     "very long strike",
+			input:    "SPY241220P123456789",
+			expected: "",
+		},
+		{
+			name:     "strike with leading zeros",
+			input:    "SPY241220P00000000",
+			expected: "put",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := optionTypeFromSymbol(tt.input)
+			if result != tt.expected {
+				t.Errorf("optionTypeFromSymbol(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

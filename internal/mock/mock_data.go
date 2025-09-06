@@ -11,8 +11,8 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 )
 
-// MockDataProvider provides mock market data for testing.
-type MockDataProvider struct {
+// DataProvider provides mock market data for testing.
+type DataProvider struct {
 	currentPrice float64
 	ivr          float64 // IV rank (percentile)
 	midIV        float64 // Actual IV level for pricing
@@ -39,9 +39,9 @@ func secureInt63n(n int64) int64 {
 	return r.Int64()
 }
 
-// NewMockDataProvider creates a new mock data provider instance.
-func NewMockDataProvider() *MockDataProvider {
-	return &MockDataProvider{
+// NewDataProvider creates a new mock data provider instance.
+func NewDataProvider() *DataProvider {
+	return &DataProvider{
 		currentPrice: 450.0 + secureFloat64()*10, // SPY around 450-460
 		ivr:          35.0 + secureFloat64()*20,  // IVR between 35-55 (rank)
 		midIV:        12.0 + secureFloat64()*18,  // MidIV between 12-30% (actual volatility)
@@ -49,7 +49,7 @@ func NewMockDataProvider() *MockDataProvider {
 }
 
 // GetQuote returns mock quote data for the given symbol.
-func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
+func (m *DataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	// Simulate small price movements
 	m.currentPrice += (secureFloat64() - 0.5) * 2
 
@@ -64,7 +64,7 @@ func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 }
 
 // GetIVR returns a mock implied volatility rank.
-func (m *MockDataProvider) GetIVR() float64 {
+func (m *DataProvider) GetIVR() float64 {
 	// Simulate IV rank changes
 	m.ivr += (secureFloat64() - 0.5) * 2
 	m.ivr = math.Max(10, math.Min(90, m.ivr)) // Keep between 10-90
@@ -72,7 +72,7 @@ func (m *MockDataProvider) GetIVR() float64 {
 }
 
 // GetOptionChain returns mock option chain data.
-func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+func (m *DataProvider) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
 		return nil, fmt.Errorf("invalid expiration format: %w", err)
@@ -165,7 +165,7 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 }
 
 // Find16DeltaStrikes finds put and call strikes closest to 16 delta.
-func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, callStrike float64) {
+func (m *DataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, callStrike float64) {
 	targetDelta := 0.16
 
 	// Find put strike closest to -16 delta
@@ -200,7 +200,7 @@ func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrik
 }
 
 // CalculateStrangleCredit calculates the credit received for a strangle.
-func (m *MockDataProvider) CalculateStrangleCredit(
+func (m *DataProvider) CalculateStrangleCredit(
 	options []broker.Option,
 	putStrike, callStrike float64,
 ) (float64, error) {
@@ -223,7 +223,7 @@ func (m *MockDataProvider) CalculateStrangleCredit(
 }
 
 // GenerateSamplePosition creates a sample position for testing.
-func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
+func (m *DataProvider) GenerateSamplePosition() map[string]interface{} {
 	quote, err := m.GetQuote("SPY")
 	if err != nil {
 		return map[string]interface{}{"error": fmt.Sprintf("quote error: %v", err)}

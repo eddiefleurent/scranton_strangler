@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-func TestMockDataProvider_GetOptionChain_InvalidExpiration(t *testing.T) {
-	provider := NewMockDataProvider()
+func TestDataProvider_GetOptionChain_InvalidExpiration(t *testing.T) {
+	provider := NewDataProvider()
 
 	// Test with invalid expiration format
 	_, err := provider.GetOptionChain("SPY", "invalid-date", true)
@@ -25,8 +25,8 @@ func TestMockDataProvider_GetOptionChain_InvalidExpiration(t *testing.T) {
 	}
 }
 
-func TestMockDataProvider_GenerateSamplePosition_ErrorHandling(t *testing.T) {
-	provider := NewMockDataProvider()
+func TestDataProvider_GenerateSamplePosition_ErrorHandling(t *testing.T) {
+	provider := NewDataProvider()
 
 	// This should not panic even if there are issues
 	result := provider.GenerateSamplePosition()

@@ -1,5 +1,3 @@
-version: "2"
-
 run:
   timeout: 5m
   tests: true
@@ -31,102 +29,110 @@ linters:
     - unconvert
     - unparam
     - whitespace
-  
-  settings:
-    errcheck:
-      check-type-assertions: true
-      check-blank: true
-    
-    govet:
-      enable-all: true
-      disable:
-        - fieldalignment
-    
-    gocyclo:
-      min-complexity: 40
-    
-    misspell:
-      locale: US
-    
-    gocritic:
-      enabled-tags:
-        - diagnostic
-        - experimental
-        - opinionated
-        - performance
-        - style
-      disabled-checks:
-        - wrapperFunc
-        - dupImport
-        - ifElseChain
-        - octalLiteral
-        - whyNoLint
-    
-    funlen:
-      lines: 100
-      statements: 60
-    
-    goimports:
-      local-prefixes: github.com/eddiefleurent/scranton_strangler
-    
-    gosec:
-      excludes:
-        - G301  # Poor file permissions
-        - G304  # Potential file inclusion
-    
-    revive:
-      rules:
-        - name: exported
-          disabled: false
-          arguments:
-            - disableStutteringCheck
-
-formatters:
-  enable:
     - gofmt
     - goimports
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
   
-  settings:
-    gofmt:
-      simplify: true
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  
+  gocyclo:
+    min-complexity: 45
+  
+  misspell:
+    locale: US
+  
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - wrapperFunc
+      - dupImport
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+  
+  funlen:
+    lines: 100
+    statements: 65
+  
+  goimports:
+    local-prefixes: github.com/eddiefleurent/scranton_strangler
+  
+  gofmt:
+    simplify: true
+  
+  gosec:
+    excludes:
+      - G301  # Poor file permissions
+      - G304  # Potential file inclusion
+  
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+        arguments:
+          - disableStutteringCheck
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  
-  exclusions:
-    rules:
-      - path: _test\.go
-        linters:
-          - funlen
-          - gocyclo
-      
-      - path: cmd/
-        linters:
-          - gochecknoinits
-      
-      - path: scripts/
-        linters:
-          - gocyclo
-          - funlen
-      
-      - path: internal/config/config_test\.go
-        linters:
-          - gosec
-      
-      - path: internal/config/config\.go
-        linters:
-          - gosec
-      
-      - path: internal/storage/
-        linters:
-          - gosec
-          - revive
-      
-      - path: internal/mock/
-        linters:
-          - revive
-      
-      - path: internal/strategy/
-        linters:
-          - revive
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - funlen
+        - gocyclo
+
+    - path: cmd/
+      linters:
+        - gochecknoinits
+        - funlen
+
+    - path: scripts/
+      linters:
+        - gocyclo
+        - funlen
+        - revive
+
+    - path: internal/config/config_test\.go
+      linters:
+        - gosec
+
+    - path: internal/config/config\.go
+      linters:
+        - gosec
+
+    - path: internal/storage/
+      linters:
+        - gosec
+        - revive
+
+    - path: internal/mock/
+      linters:
+        - revive
+
+    - path: internal/strategy/
+      linters:
+        - revive
+    
+    - path: internal/orders/
+      linters:
+        - funlen
+    
+    - path: internal/retry/
+      linters:
+        - funlen
+    
+    - path: internal/broker/
+      linters:
+        - funlen

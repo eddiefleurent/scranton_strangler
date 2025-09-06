@@ -153,7 +153,7 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 	ivr := broker.CalculateIVR(currentIV, historicalIVs)
 
 	// Log IV calculation details
-	log.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f",
+	log.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f%%",
 		currentIV*100, getMinIV(historicalIVs)*100, getMaxIV(historicalIVs)*100, ivr)
 
 	return ivr
@@ -182,12 +182,11 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 		return 0, fmt.Errorf("no options available for ATM calculation")
 	}
 	// Try call then put at ATM
-	for _, typ := range []string{"call", "put"} {
-		for _, option := range chain {
-			if option.Strike == atmStrike && option.OptionType == typ && option.Greeks != nil && option.Greeks.MidIV > 0 {
-				return option.Greeks.MidIV, nil
-			}
-		}
+	if opt := broker.GetOptionByStrike(chain, atmStrike, "call"); opt != nil && opt.Greeks != nil && opt.Greeks.MidIV > 0 {
+		return opt.Greeks.MidIV, nil
+	}
+	if opt := broker.GetOptionByStrike(chain, atmStrike, "put"); opt != nil && opt.Greeks != nil && opt.Greeks.MidIV > 0 {
+		return opt.Greeks.MidIV, nil
 	}
 	// Nearest strike with a valid IV
 	bestIV := 0.0

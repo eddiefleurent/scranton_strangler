@@ -2,8 +2,8 @@ package storage
 
 import "github.com/eddiefleurent/scranton_strangler/internal/models"
 
-// StorageInterface defines the contract for position and trade data persistence
-type StorageInterface interface {
+// Interface defines the contract for position and trade data persistence
+type Interface interface {
 	// Position management
 	GetCurrentPosition() *models.Position
 	SetCurrentPosition(pos *models.Position) error
@@ -22,9 +22,9 @@ type StorageInterface interface {
 
 // NewStorage creates a new storage implementation (currently JSON-based)
 // In the future, this can be extended to support different storage backends
-func NewStorage(filepath string) (StorageInterface, error) {
+func NewStorage(filepath string) (Interface, error) {
 	return NewJSONStorage(filepath)
 }
 
-// Ensure JSONStorage implements StorageInterface
-var _ StorageInterface = (*JSONStorage)(nil)
+// Ensure JSONStorage implements Interface
+var _ Interface = (*JSONStorage)(nil)

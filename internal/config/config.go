@@ -282,8 +282,8 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	endClock, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
 	if err1 != nil || err2 != nil {
 		// Safe defaults if misconfigured
-		startClock, _ = time.ParseInLocation("15:04", "09:45", loc) //nolint:errcheck // hardcoded default
-		endClock, _ = time.ParseInLocation("15:04", "15:45", loc)   //nolint:errcheck // hardcoded default
+		startClock = time.Date(0, 1, 1, 9, 45, 0, 0, loc)
+		endClock = time.Date(0, 1, 1, 15, 45, 0, 0, loc)
 	}
 	start := time.Date(today.Year(), today.Month(), today.Day(),
 		startClock.Hour(), startClock.Minute(), 0, 0, loc)

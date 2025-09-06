@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,7 +27,7 @@ type Bot struct {
 	config       *config.Config
 	broker       broker.Broker
 	strategy     *strategy.StrangleStrategy
-	storage      storage.StorageInterface
+	storage      storage.Interface
 	logger       *log.Logger
 	stop         chan struct{}
 	ctx          context.Context // Main bot context for operations
@@ -225,6 +226,13 @@ func (b *Bot) checkExistingPosition() bool {
 	if position.GetCurrentState() == models.StateClosed {
 		// Check if this position was just closed by an exit order and needs completion
 		if position.ExitOrderID != "" && position.ExitReason != "" {
+			// Prevent double-finalization if already recorded in history
+			for _, h := range b.storage.GetHistory() {
+				if h.ID == position.ID {
+					b.logger.Printf("Position %s already finalized in history; skipping completion", position.ID)
+					return false
+				}
+			}
 			b.logger.Printf("Position %s was closed by exit order, completing position close", position.ID)
 			exitReason := strategy.ExitReason(position.ExitReason)
 			b.completePositionClose(position, exitReason)
@@ -240,10 +248,12 @@ func (b *Bot) checkExistingPosition() bool {
 		b.logger.Printf("Warning: Could not calculate real-time P&L: %v", err)
 		realTimePnL = position.CurrentPnL // Fall back to stored value
 	} else {
-		// Update stored P&L with real-time value
-		position.CurrentPnL = realTimePnL
-		if err := b.storage.SetCurrentPosition(position); err != nil {
-			b.logger.Printf("Warning: Failed to update position P&L: %v", err)
+		delta := math.Abs(realTimePnL - position.CurrentPnL)
+		if delta >= 0.01 {
+			position.CurrentPnL = realTimePnL
+			if err := b.storage.SetCurrentPosition(position); err != nil {
+				b.logger.Printf("Warning: Failed to update position P&L: %v", err)
+			}
 		}
 	}
 
@@ -483,19 +493,12 @@ func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.Exit
 
 func (b *Bot) logPnL(position *models.Position, actualPnL float64) {
 	denom := position.CreditReceived * float64(position.Quantity) * 100
-	if denom == 0 {
-		denom = position.CreditReceived * 100
+	if denom <= 0 {
+		b.logger.Printf("Position P&L: $%.2f (credit unknown)", actualPnL)
+		return
 	}
-
-	var percent float64
-	if denom == 0 {
-		percent = 0.0
-	} else {
-		percent = (actualPnL / denom) * 100
-	}
-
-	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
-		actualPnL, percent)
+	percent := (actualPnL / denom) * 100
+	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)", actualPnL, percent)
 }
 
 func (b *Bot) checkAdjustments() {

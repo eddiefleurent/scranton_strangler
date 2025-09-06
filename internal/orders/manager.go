@@ -30,7 +30,7 @@ var DefaultConfig = Config{
 // Manager handles order execution and status polling.
 type Manager struct {
 	broker  broker.Broker
-	storage storage.StorageInterface
+	storage storage.Interface
 	logger  *log.Logger
 	stop    <-chan struct{}
 	config  Config
@@ -39,7 +39,7 @@ type Manager struct {
 // NewManager creates a new order manager instance.
 func NewManager(
 	broker broker.Broker,
-	storage storage.StorageInterface,
+	storage storage.Interface,
 	logger *log.Logger,
 	stop <-chan struct{},
 	config ...Config,
@@ -84,7 +84,7 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 	for {
 		select {
 		case <-ctx.Done():
-			m.logger.Printf("Order polling timeout for position %s", positionID)
+			m.logger.Printf("Order polling timeout for position %s, order %d", positionID, orderID)
 			m.handleOrderTimeout(positionID)
 			return
 		case <-m.stop:
@@ -235,7 +235,19 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		return
 	}
 
-	if err := position.TransitionState(models.StateClosed, "order_timeout"); err != nil {
+	// Detect entry vs exit order timeout
+	isExitOrder := position.ExitOrderID != "" && position.GetCurrentState() != models.StateSubmitted
+
+	var transitionReason string
+	if isExitOrder {
+		// For exit order timeouts, use the stored exit reason to determine transition condition
+		transitionReason = m.exitConditionFromReason(position.ExitReason)
+	} else {
+		// For entry order timeouts, use the standard timeout reason
+		transitionReason = "order_timeout"
+	}
+
+	if err := position.TransitionState(models.StateClosed, transitionReason); err != nil {
 		m.logger.Printf("Failed to transition position %s to closed: %v", positionID, err)
 		return
 	}

@@ -611,8 +611,8 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 	for i := range positions {
 		pos := &positions[i]
 
-		// Check if it's an option for our symbol
-		if !strings.HasPrefix(pos.Symbol, symbol) {
+		// Ensure the OSI underlying matches exactly
+		if extractUnderlyingFromOSI(pos.Symbol) != symbol {
 			continue
 		}
 
