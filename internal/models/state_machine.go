@@ -224,9 +224,14 @@ func (sm *StateMachine) GetStateDescription() string {
 
 // ValidateStateConsistency ensures the state machine is in a valid state
 func (sm *StateMachine) ValidateStateConsistency() error {
-	// Check for impossible state combinations
-	if sm.currentState == sm.previousState && sm.transitionTime.IsZero() {
-		return fmt.Errorf("invalid state: current and previous states are the same with no transition time")
+	// Ensure transitionTime is set
+	if sm.transitionTime.IsZero() {
+		return fmt.Errorf("missing transition time: transitionTime is zero")
+	}
+
+	// Ensure that when currentState equals previousState there is at least one recorded transition for that state
+	if sm.currentState == sm.previousState && sm.transitionCount[sm.currentState] == 0 {
+		return fmt.Errorf("inconsistent transition counts for identical states: current and previous states are the same (%s) but no transitions recorded", sm.currentState)
 	}
 
 	// Check adjustment/roll limits

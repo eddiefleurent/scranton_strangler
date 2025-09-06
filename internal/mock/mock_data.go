@@ -43,8 +43,14 @@ func (m *MockDataProvider) GetIVR() float64 {
 }
 
 func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
-	expDate, _ := time.Parse("2006-01-02", expiration)
+	expDate, err := time.Parse("2006-01-02", expiration)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expiration format: %w", err)
+	}
 	dte := int(time.Until(expDate).Hours() / 24)
+	if dte < 0 {
+		dte = 0 // Clamp to minimum 0 to prevent negative time values
+	}
 
 	var options []broker.Option
 
@@ -69,7 +75,7 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 		}
 
 		// Calculate option prices (simplified Black-Scholes approximation)
-		timeValue := float64(dte) / 365.0
+		timeValue := math.Max(0, float64(dte)/365.0) // Ensure timeValue is never negative
 		vol := m.ivr / 100.0
 		putPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(putDelta))
 		callPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(callDelta))
@@ -180,9 +186,19 @@ func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putS
 
 // Generate sample position for testing
 func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
-	quote, _ := m.GetQuote("SPY")
+	quote, err := m.GetQuote("SPY")
+	if err != nil {
+		// Return empty result on error for testing purposes
+		return map[string]interface{}{}
+	}
+
 	expiration := time.Now().AddDate(0, 0, 45).Format("2006-01-02")
-	options, _ := m.GetOptionChain("SPY", expiration, true)
+	options, err := m.GetOptionChain("SPY", expiration, true)
+	if err != nil {
+		// Return empty result on error for testing purposes
+		return map[string]interface{}{}
+	}
+
 	putStrike, callStrike := m.Find16DeltaStrikes(options)
 	credit := m.CalculateStrangleCredit(options, putStrike, callStrike)
 

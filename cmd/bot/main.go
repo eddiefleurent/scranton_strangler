@@ -238,6 +238,7 @@ func (b *Bot) executeEntry() {
 		order.Expiration,
 		order.Quantity,
 		order.Credit,
+		order.ProfitTarget,
 	)
 
 	if err != nil {

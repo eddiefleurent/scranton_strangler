@@ -61,7 +61,6 @@ func NewPosition(id, symbol string, putStrike, callStrike float64, expiration ti
 		CallStrike:   callStrike,
 		Expiration:   expiration,
 		Quantity:     quantity,
-		EntryDate:    time.Now(),
 		Adjustments:  make([]Adjustment, 0),
 		StateMachine: NewStateMachine(),
 	}
@@ -71,6 +70,11 @@ func NewPosition(id, symbol string, putStrike, callStrike float64, expiration ti
 func (p *Position) TransitionState(to PositionState, condition string) error {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
+	}
+
+	// Set EntryDate when transitioning to open state
+	if to == StateOpen {
+		p.EntryDate = time.Now()
 	}
 
 	err := p.StateMachine.Transition(to, condition)
@@ -108,7 +112,7 @@ func (p *Position) GetManagementPhase() int {
 // CanAdjust returns true if more adjustments are allowed
 func (p *Position) CanAdjust() bool {
 	if p.StateMachine == nil {
-		return true
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.CanAdjust()
 }
@@ -116,7 +120,7 @@ func (p *Position) CanAdjust() bool {
 // CanRoll returns true if time rolls are still allowed
 func (p *Position) CanRoll() bool {
 	if p.StateMachine == nil {
-		return true
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.CanRoll()
 }
@@ -164,41 +168,46 @@ func (p *Position) GetStateDescription() string {
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
-func (p *Position) ShouldEmergencyExit() (bool, string) {
-	if p.StateMachine == nil {
-		return false, ""
-	}
-	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, p.CalculateDTE())
-}
+// TODO: Implement emergency exit logic
+// func (p *Position) ShouldEmergencyExit() (bool, string) {
+// 	if p.StateMachine == nil {
+// 		return false, ""
+// 	}
+// 	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, p.CalculateDTE())
+// }
 
 // SetFourthDownOption sets the Fourth Down strategy option
-func (p *Position) SetFourthDownOption(option FourthDownOption) {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachine()
-	}
-	p.StateMachine.SetFourthDownOption(option)
-}
+// TODO: Implement Fourth Down options
+// func (p *Position) SetFourthDownOption(option FourthDownOption) {
+// 	if p.StateMachine == nil {
+// 		p.StateMachine = NewStateMachine()
+// 	}
+// 	p.StateMachine.SetFourthDownOption(option)
+// }
 
 // GetFourthDownOption returns the selected Fourth Down strategy
-func (p *Position) GetFourthDownOption() FourthDownOption {
-	if p.StateMachine == nil {
-		return ""
-	}
-	return p.StateMachine.GetFourthDownOption()
-}
+// TODO: Implement Fourth Down options
+// func (p *Position) GetFourthDownOption() FourthDownOption {
+// 	if p.StateMachine == nil {
+// 		return ""
+// 	}
+// 	return p.StateMachine.GetFourthDownOption()
+// }
 
 // CanPunt returns true if punt is still allowed
-func (p *Position) CanPunt() bool {
-	if p.StateMachine == nil {
-		return true
-	}
-	return p.StateMachine.CanPunt()
-}
+// TODO: Implement punt functionality
+// func (p *Position) CanPunt() bool {
+// 	if p.StateMachine == nil {
+// 		return true
+// 	}
+// 	return p.StateMachine.CanPunt()
+// }
 
 // ExecutePunt performs punt operation
-func (p *Position) ExecutePunt() error {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachine()
-	}
-	return p.StateMachine.ExecutePunt()
-}
+// TODO: Implement punt functionality
+// func (p *Position) ExecutePunt() error {
+// 	if p.StateMachine == nil {
+// 		p.StateMachine = NewStateMachine()
+// 	}
+// 	return p.StateMachine.ExecutePunt()
+// }

@@ -312,9 +312,8 @@ func TestPosition_StateValidation(t *testing.T) {
 		t.Errorf("New position should be valid: %v", err)
 	}
 
-	// Set up position with credit and entry date
+	// Set up position with credit
 	pos.CreditReceived = 3.50
-	pos.EntryDate = time.Now()
 
 	// Transition to management state (simplified)
 	pos.TransitionState(StateSubmitted, "order_placed")

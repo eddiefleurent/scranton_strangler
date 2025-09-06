@@ -455,7 +455,7 @@ func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 	return options, nil
 }
 
-func (m *mockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit float64) (*broker.OrderResponse, error) {
+func (m *mockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*broker.OrderResponse, error) {
 	return nil, nil
 }
 

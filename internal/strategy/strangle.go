@@ -92,13 +92,14 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	}
 
 	return &StrangleOrder{
-		Symbol:     s.config.Symbol,
-		PutStrike:  putStrike,
-		CallStrike: callStrike,
-		Expiration: targetExp,
-		Credit:     credit,
-		Quantity:   s.calculatePositionSize(credit),
-		SpotPrice:  quote.Last,
+		Symbol:       s.config.Symbol,
+		PutStrike:    putStrike,
+		CallStrike:   callStrike,
+		Expiration:   targetExp,
+		Credit:       credit,
+		Quantity:     s.calculatePositionSize(credit),
+		SpotPrice:    quote.Last,
+		ProfitTarget: s.config.ProfitTarget,
 	}, nil
 }
 
@@ -447,11 +448,12 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 }
 
 type StrangleOrder struct {
-	Symbol     string
-	PutStrike  float64
-	CallStrike float64
-	Expiration string
-	Credit     float64
-	Quantity   int
-	SpotPrice  float64
+	Symbol       string
+	PutStrike    float64
+	CallStrike   float64
+	Expiration   string
+	Credit       float64
+	Quantity     int
+	SpotPrice    float64
+	ProfitTarget float64
 }
