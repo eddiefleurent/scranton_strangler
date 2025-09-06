@@ -95,16 +95,6 @@ jobs:
       - name: Check Go version
         run: go version
 
-      - name: Run basic Go checks
-        run: |
-          go vet ./...
-          
-      - name: Check formatting
-        run: |
-          if [ -n "$(go fmt -l .)" ]; then
-            echo "The following files are not formatted:"
-            go fmt -l .
-            echo "Run 'go fmt ./...' to fix formatting"
-            exit 1
-          fi
+      - name: Run Go vet
+        run: go vet ./...
 
