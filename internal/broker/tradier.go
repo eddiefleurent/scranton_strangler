@@ -3,7 +3,6 @@
 package broker
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -360,47 +359,13 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true)
 }
 
-// PlaceBuyToCloseOrder places a buy-to-close order for a single option
 // GetOrderStatus retrieves the status of an existing order by ID
 func (t *TradierAPI) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
-
-	req, err := http.NewRequestWithContext(context.Background(), "GET", endpoint, http.NoBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+t.apiKey)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := t.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get order status: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			// Log error but don't fail the operation
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("API error (status %d): failed to read error body", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
 	var response OrderResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
+	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, err
 	}
-
 	return &response, nil
 }
 
@@ -597,33 +562,11 @@ func abs(x float64) float64 {
 // extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"
 func extractUnderlyingFromOSI(s string) string {
-	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
-	// We need to find the start of the 6-digit expiration date
-	if len(s) < 15 { // minimum length for a valid option symbol
+	// OSI: UNDERLYING + YYMMDD + (P|C) + 8-digit strike => 15-char suffix
+	if len(s) < 16 {
 		return ""
 	}
-
-	// Look for the first 6-digit sequence (expiration date)
-	for i := 0; i <= len(s)-6; i++ {
-		if isSixDigits(s[i : i+6]) {
-			return s[:i]
-		}
-	}
-
-	return ""
-}
-
-// isSixDigits checks if a string consists of exactly 6 digits
-func isSixDigits(s string) bool {
-	if len(s) != 6 {
-		return false
-	}
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
+	return strings.TrimSpace(s[:len(s)-15])
 }
 
 // optionTypeFromSymbol returns "put" | "call" | "" from OSI-like symbols, e.g. SPY241220P00450000

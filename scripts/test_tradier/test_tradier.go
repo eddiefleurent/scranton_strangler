@@ -210,8 +210,12 @@ func main() {
 					if pos.Quantity < 0 {
 						posType = "SHORT"
 					}
-					fmt.Printf("  %d. %s: %.0f shares (%s), Cost: $%.2f\n",
-						i+1, pos.Symbol, abs(pos.Quantity), posType, pos.CostBasis)
+					unit := "shares"
+					if strings.Contains(strings.ToUpper(pos.Symbol), "P") || strings.Contains(strings.ToUpper(pos.Symbol), "C") {
+						unit = "contracts"
+					}
+					fmt.Printf("  %d. %s: %.0f %s (%s), Cost: $%.2f\n",
+						i+1, pos.Symbol, abs(pos.Quantity), unit, posType, pos.CostBasis)
 				}
 
 				// Check for strangle
@@ -247,7 +251,7 @@ func formatNumber(n int64) string {
 }
 
 func prettyPrint(v interface{}) {
-	b, err := json.MarshalIndent(v, "  ", "  ")
+	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		fmt.Printf("Error marshaling JSON: %v\n", err)
 		return

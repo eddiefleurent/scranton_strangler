@@ -118,7 +118,7 @@ If Experienced/Active Management:
 - Assignment risk becomes imminent
 
 ### Automated Management Policy
-- **Research**: Tastytrade studies show mechanical stops reduce returns (https://www.tastytrade.com/tools/options/backtesting and https://www.tastytrade.com/tools/options/backtesting/research)
+- **Research**: Tastytrade studies show mechanical stops can reduce returns ([Options Backtesting](https://www.tastytrade.com/tools/options/backtesting), [Research](https://www.tastytrade.com/tools/options/backtesting/research))
 - **Philosophy**: Manage through rolling and adjustments with hard limits
 - **Automated System**: Must have definitive stop conditions
 - **Never**: Let losses exceed defined thresholds without action
@@ -155,19 +155,19 @@ If Experienced/Active Management:
 - **Trigger**: Loss > 150% of credit received
 - **Three Actions** (Bot selects based on conditions):
 
-**Option A - Field Goal (Inverted Strangle)**
+##### Option A — Field Goal (Inverted Strangle)
 - Roll untested strike below tested strike (3rd adjustment)
 - **Count**: Strike adjustments = 3 (FINAL ADJUSTMENT)
 - **STOP**: Close at any profit OR at EscalateLossPct (200%) loss (whichever first)
 - **Time Limit**: 5 days maximum
 
-**Option B - Go For It (Hold Straddle)** 
+##### Option B — Go For It (Hold Straddle) 
 - Keep current straddle, wait for recovery (no additional roll)
 - **Count**: Strike adjustments remain at 2
 - **STOP**: Close at 25% profit OR EscalateLossPct (200%) loss (whichever first)
 - **Time Limit**: 3 days maximum
 
-**Option C - Punt (Time Roll)**
+##### Option C — Punt (Time Roll)
 - Roll entire position to next expiration (time adjustment, not strike)
 - **Count**: Strike adjustments reset to 0, but trade marked as "punted"
 - **STOP**: Close at 50% profit OR MaxDTE (21) OR EscalateLossPct (200%) total loss

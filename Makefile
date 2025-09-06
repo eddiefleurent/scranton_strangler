@@ -1,6 +1,10 @@
 # SPY Strangle Bot - Makefile
 
-.PHONY: help build test lint run clean build-test-helper docker-build docker-run deploy-staging deploy-prod
+.PHONY: all help build build-prod test test-coverage lint run clean \
+        docker-build docker-run deploy-staging deploy-prod logs stop \
+        dev-setup test-api security-scan build-test-helper
+
+all: build
 
 # Default target
 help:
@@ -60,16 +64,8 @@ run: build
 # Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	go clean
-	rm -f $(BINARY_NAME)
-	rm -f bot
-	rm -f main
-	rm -f test_otoco
-	rm -f test-tradier
-	rm -f scripts/test_helper/test_helper
-	rm -f coverage.out coverage.html
-	rm -f *.test
-	rm -f *.prof
+	go clean -testcache
+	rm -f $(BINARY_NAME) coverage.out coverage.html *.test *.prof
 
 # Docker commands
 docker-build:
@@ -78,7 +74,7 @@ docker-build:
 
 docker-run:
 	@echo "Starting services with Docker Compose..."
-	docker-compose up -d
+	docker compose up -d
 
 # Deployment commands
 deploy-staging:
@@ -92,11 +88,11 @@ deploy-prod:
 # Utility commands
 logs:
 	@echo "Showing container logs..."
-	docker-compose logs -f strangle-bot
+	docker compose logs -f strangle-bot
 
 stop:
 	@echo "Stopping all containers..."
-	docker-compose down
+	docker compose down
 
 # Development helpers
 dev-setup:

@@ -57,5 +57,7 @@ temp/
 
 # Coverage
 coverage.txt
+coverage.out
+coverage.html
 *.cover
 *.coverprofile

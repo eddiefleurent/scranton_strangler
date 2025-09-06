@@ -34,7 +34,7 @@ func TestCalculateIVR(t *testing.T) {
 			name:         "no range (all same)",
 			currentIV:    20.0,
 			historicalIV: []float64{20.0, 20.0, 20.0},
-			expected:     50.0, // Default when no range
+			expected:     0.0, // Return 0 when no range to avoid masking scenarios
 		},
 		{
 			name:         "empty history",

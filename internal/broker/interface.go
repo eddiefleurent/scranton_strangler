@@ -37,6 +37,12 @@ type TradierClient struct {
 
 // NewTradierClient creates a new Tradier broker client
 func NewTradierClient(apiKey, accountID string, sandbox bool, useOTOCO bool, profitTarget float64) *TradierClient {
+	if profitTarget > 1 {
+		profitTarget = profitTarget / 100 // allow "50" meaning 50%
+	}
+	if profitTarget < 0 {
+		profitTarget = 0
+	}
 	return &TradierClient{
 		TradierAPI:   NewTradierAPI(apiKey, accountID, sandbox),
 		useOTOCO:     useOTOCO,
@@ -115,10 +121,16 @@ func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 
 	// IVR = (Current IV - 52 week low) / (52 week high - 52 week low) * 100
 	if maxIV == minIV {
-		return 50 // Default to middle if no range
+		return 0
 	}
-
-	return ((currentIV - minIV) / (maxIV - minIV)) * 100
+	r := ((currentIV - minIV) / (maxIV - minIV)) * 100
+	if r < 0 {
+		return 0
+	}
+	if r > 100 {
+		return 100
+	}
+	return r
 }
 
 // GetOptionByStrike finds an option with a specific strike price
@@ -133,5 +145,7 @@ func GetOptionByStrike(options []Option, strike float64, optionType string) *Opt
 
 // DaysBetween calculates the number of days between two dates
 func DaysBetween(from, to time.Time) int {
-	return int(to.Sub(from).Hours() / 24)
+	f := from.UTC().Truncate(24 * time.Hour)
+	t := to.UTC().Truncate(24 * time.Hour)
+	return int(t.Sub(f).Hours() / 24)
 }

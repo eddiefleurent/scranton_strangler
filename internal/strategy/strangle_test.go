@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
-
 
 func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 	tests := []struct {
@@ -143,7 +143,7 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 	config := &StrategyConfig{
 		Symbol:       "SPY",
-		ProfitTarget: 0.50,         // 50%
+		ProfitTarget: 0.50,          // 50%
 		MaxDTE:       config.MaxDTE, // Use constant instead of hardcoded
 	}
 
@@ -157,7 +157,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			name:           "no position",
 			position:       nil,
 			expectedExit:   false,
-			expectedReason: "",
+			expectedReason: "none",
 		},
 		{
 			name: "profit target reached",
@@ -232,7 +232,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				DTE:            35,   // Still have time
 			},
 			expectedExit:   false,
-			expectedReason: "",
+			expectedReason: "none",
 		},
 	}
 
@@ -280,8 +280,6 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
 				}
 			}
-
-			strategy.currentPos = tt.position
 
 			shouldExit, reason := strategy.CheckExitConditions(tt.position)
 
@@ -386,9 +384,10 @@ func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
 		t.Fatalf("findTargetExpiration() returned invalid date format: %s", result)
 	}
 
-	// Should be a Friday
-	if expDate.Weekday() != time.Friday {
-		t.Errorf("findTargetExpiration() returned %s (%s), want Friday",
+	// Should be M/W/F (options expire on Monday, Wednesday, Friday)
+	weekday := expDate.Weekday()
+	if weekday != time.Monday && weekday != time.Wednesday && weekday != time.Friday {
+		t.Errorf("findTargetExpiration() returned %s (%s), want Monday/Wednesday/Friday",
 			result, expDate.Weekday())
 	}
 
@@ -400,24 +399,7 @@ func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
 	}
 }
 
-// Helper function for substring matching
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) &&
-		(s == substr ||
-			(len(s) > len(substr) &&
-				(s[:len(substr)] == substr ||
-					s[len(s)-len(substr):] == substr ||
-					containsInMiddle(s, substr))))
-}
-
-func containsInMiddle(s, substr string) bool {
-	for i := 1; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
+func containsSubstring(s, substr string) bool { return strings.Contains(s, substr) }
 
 // Mock Broker for testing
 type mockBroker struct {

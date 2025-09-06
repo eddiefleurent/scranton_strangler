@@ -100,14 +100,32 @@ func (s *JSONStorage) saveUnsafe() error {
 		return err
 	}
 
-	// Write to temp file first
-	tmpFile := s.filepath + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+	// Write to temp file first with fsync
+	f, err := os.CreateTemp("", "storage-*")
+	if err != nil {
 		return err
 	}
-
+	tmpFile := f.Name()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		os.Remove(tmpFile)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		os.Remove(tmpFile)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpFile)
+		return err
+	}
 	// Atomic rename
-	return os.Rename(tmpFile, s.filepath)
+	if err := os.Rename(tmpFile, s.filepath); err != nil {
+		os.Remove(tmpFile)
+		return err
+	}
+	return nil
 }
 
 func (s *JSONStorage) GetCurrentPosition() *models.Position {

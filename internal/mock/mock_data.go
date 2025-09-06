@@ -168,7 +168,7 @@ func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrik
 	return bestPutStrike, bestCallStrike
 }
 
-func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putStrike, callStrike float64) float64 {
+func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putStrike, callStrike float64) (float64, error) {
 	putCredit := 0.0
 	callCredit := 0.0
 
@@ -181,26 +181,33 @@ func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putS
 		}
 	}
 
-	return putCredit + callCredit
+	if putCredit == 0 || callCredit == 0 {
+		return 0, fmt.Errorf("no matching strikes: put=%.2f call=%.2f", putStrike, callStrike)
+	}
+	return putCredit + callCredit, nil
 }
 
 // Generate sample position for testing
 func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
 	quote, err := m.GetQuote("SPY")
 	if err != nil {
-		// Return empty result on error for testing purposes
-		return map[string]interface{}{}
+		return map[string]interface{}{"error": fmt.Sprintf("quote error: %v", err)}
 	}
 
 	expiration := time.Now().AddDate(0, 0, 45).Format("2006-01-02")
 	options, err := m.GetOptionChain("SPY", expiration, true)
 	if err != nil {
-		// Return empty result on error for testing purposes
-		return map[string]interface{}{}
+		return map[string]interface{}{"error": fmt.Sprintf("chain error: %v", err)}
 	}
 
 	putStrike, callStrike := m.Find16DeltaStrikes(options)
-	credit := m.CalculateStrangleCredit(options, putStrike, callStrike)
+	credit, err := m.CalculateStrangleCredit(options, putStrike, callStrike)
+	if err != nil {
+		return map[string]interface{}{"error": fmt.Sprintf("credit calculation error: %v", err)}
+	}
+
+	expTime, _ := time.Parse("2006-01-02", expiration)
+	dte := int(time.Until(expTime).Hours() / 24)
 
 	return map[string]interface{}{
 		"symbol":      "SPY",
@@ -210,6 +217,6 @@ func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
 		"call_strike": callStrike,
 		"credit":      credit,
 		"expiration":  expiration,
-		"dte":         45,
+		"dte":         dte,
 	}
 }

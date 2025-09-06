@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -11,20 +12,20 @@ import (
 )
 
 type StrangleStrategy struct {
-	broker     broker.Broker
-	config     *StrategyConfig
-	currentPos *models.Position
+	broker broker.Broker
+	config *StrategyConfig
 }
 
 type StrategyConfig struct {
-	Symbol        string
-	DTETarget     int     // 45 days
-	DeltaTarget   float64 // 0.16 for 16 delta
-	ProfitTarget  float64 // 0.50 for 50%
-	MaxDTE        int     // 21 days to exit
-	AllocationPct float64 // 0.35 for 35%
-	MinIVR        float64 // 30
-	MinCredit     float64 // $2.00
+	Symbol           string
+	DTETarget        int     // 45 days
+	DeltaTarget      float64 // 0.16 for 16 delta
+	ProfitTarget     float64 // 0.50 for 50%
+	MaxDTE           int     // 21 days to exit
+	AllocationPct    float64 // 0.35 for 35%
+	MinIVR           float64 // 30
+	MinCredit        float64 // $2.00
+	StopLossMultiple float64 // 2.0 for 200% loss
 }
 
 // ExitReason represents the reason for exiting a position
@@ -37,6 +38,7 @@ const (
 	ExitReasonStopLoss     ExitReason = "stop_loss"
 	ExitReasonManual       ExitReason = "manual"
 	ExitReasonError        ExitReason = "error"
+	ExitReasonNone         ExitReason = "none"
 )
 
 func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrategy {
@@ -47,10 +49,7 @@ func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrat
 }
 
 func (s *StrangleStrategy) CheckEntryConditions() (bool, string) {
-	// Check if we already have a position
-	if s.currentPos != nil && s.currentPos.GetCurrentState() != models.StateIdle && s.currentPos.GetCurrentState() != models.StateClosed {
-		return false, "already have open position"
-	}
+	// Position existence is enforced by storage layer
 
 	// Check IVR (simplified - would need historical IV data)
 	ivr := s.calculateIVR()
@@ -94,6 +93,10 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	// Calculate expected credit
 	credit := s.calculateExpectedCredit(options, putStrike, callStrike)
 
+	if credit <= 0 {
+		return nil, fmt.Errorf("expected credit is non-positive: %.2f - aborting to prevent loss-making trade", credit)
+	}
+
 	if credit < s.config.MinCredit {
 		return nil, fmt.Errorf("credit too low: %.2f < %.2f", credit, s.config.MinCredit)
 	}
@@ -120,7 +123,7 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 	currentIV, err := s.getCurrentImpliedVolatility()
 	if err != nil {
 		// Fallback to 0.0 for fail-closed behavior - block entries on IV errors
-		fmt.Printf("Warning: Using 0.0 IVR due to error: %v\n", err)
+		log.Printf("Warning: Using 0.0 IVR due to error: %v", err)
 		return 0.0
 	}
 
@@ -128,7 +131,7 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 	historicalIVs, err := s.getHistoricalImpliedVolatility(20)
 	if err != nil || len(historicalIVs) == 0 {
 		// Fallback to 0.0 for fail-closed behavior - block entries on insufficient data
-		fmt.Printf("Warning: Using 0.0 IVR due to insufficient historical data\n")
+		log.Printf("Warning: Using 0.0 IVR due to insufficient historical data")
 		return 0.0
 	}
 
@@ -136,7 +139,7 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 	ivr := broker.CalculateIVR(currentIV, historicalIVs)
 
 	// Log IV calculation details
-	fmt.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f\n",
+	log.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f",
 		currentIV*100, getMinIV(historicalIVs)*100, getMaxIV(historicalIVs)*100, ivr)
 
 	return ivr
@@ -344,8 +347,13 @@ func (s *StrangleStrategy) hasMajorEventsNearby() bool {
 
 func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 	target := time.Now().AddDate(0, 0, targetDTE)
-	// Find the Friday closest to target
-	for target.Weekday() != time.Friday {
+
+	// SPY options expire on M/W/F - find the closest expiration
+	for {
+		weekday := target.Weekday()
+		if weekday == time.Monday || weekday == time.Wednesday || weekday == time.Friday {
+			break
+		}
 		target = target.AddDate(0, 0, 1)
 	}
 	return target.Format("2006-01-02")
@@ -411,7 +419,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int 
 // CheckExitConditions checks if a position should be exited
 func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool, ExitReason) {
 	if position == nil {
-		return false, ExitReasonError
+		return false, ExitReasonNone
 	}
 
 	// Calculate real-time P&L
@@ -419,7 +427,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	if err != nil {
 		// Fall back to stored P&L if real-time calculation fails
 		currentPnL = position.CurrentPnL
-		fmt.Printf("Warning: Using stored P&L due to calculation error: %v\n", err)
+		log.Printf("Warning: Using stored P&L due to calculation error: %v", err)
 	}
 
 	// Check profit target
@@ -434,9 +442,13 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	}
 
 	// Check escalate loss threshold (200% loss) - prepare for action
-	if profitPct <= -config.EscalateLossPct {
-		// First check if we've reached the stop loss threshold (250%)
-		if profitPct <= -config.StopLossPct {
+	if profitPct <= -2.0 {
+		// First check if we've reached the stop loss threshold
+		sl := s.config.StopLossMultiple
+		if sl <= 0 {
+			sl = 2.5
+		} // Default to 250% to match old behavior
+		if profitPct <= -sl {
 			return true, ExitReasonStopLoss
 		}
 		// Otherwise trigger escalate action at 200% loss
@@ -449,32 +461,17 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		return true, ExitReasonTime
 	}
 
-	return false, ""
+	return false, ExitReasonNone
 }
 
 func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
-	// Get current option prices
-	options, err := s.broker.GetOptionChain(s.config.Symbol, pos.Expiration.Format("2006-01-02"), false)
+	// Use the unified CalculatePositionPnL implementation
+	pnl, err := s.CalculatePositionPnL(pos)
 	if err != nil {
-		// Return current P&L if we can't get fresh prices
+		// Return stored P&L if calculation fails
 		return pos.CurrentPnL
 	}
-
-	currentCost := 0.0
-	for _, option := range options {
-		if option.Strike == pos.PutStrike && option.OptionType == "put" {
-			currentCost += (option.Bid + option.Ask) / 2 * float64(pos.Quantity) * 100
-		}
-		if option.Strike == pos.CallStrike && option.OptionType == "call" {
-			currentCost += (option.Bid + option.Ask) / 2 * float64(pos.Quantity) * 100
-		}
-	}
-
-	// Get aggregated credit received (per-contract credit * quantity * 100)
-	aggregatedCreditReceived := pos.CreditReceived * float64(pos.Quantity) * 100
-
-	// P&L = aggregated credit received - aggregated current cost
-	return aggregatedCreditReceived - currentCost
+	return pnl
 }
 
 type StrangleOrder struct {

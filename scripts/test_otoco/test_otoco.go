@@ -60,7 +60,7 @@ func main() {
 	}
 
 	// Find expiration closest to 45 DTE
-	targetDate := time.Now().AddDate(0, 0, 45)
+	targetDate := time.Now().UTC().AddDate(0, 0, 45)
 	var bestExpiration string
 	bestDiff := 999
 
@@ -88,7 +88,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse selected expiration %s: %v", bestExpiration, err)
 	}
-	dte := int(time.Until(expDate).Hours() / 24)
+	dte := int(time.Until(expDate.UTC()).Hours() / 24)
 	fmt.Printf("   Selected expiration: %s (%d DTE)\n", bestExpiration, dte)
 
 	// 3. Get option chain with Greeks
@@ -113,6 +113,9 @@ func main() {
 	// 5. Calculate expected credit
 	credit := broker.CalculateStrangleCredit(options, putStrike, callStrike)
 	fmt.Printf("   Expected Credit: $%.2f per contract\n", credit)
+	if credit <= 0 {
+		log.Fatal("Expected credit is non-positive; aborting")
+	}
 
 	// 6. Test OTOCO order
 	fmt.Println("\n5. Testing OTOCO strangle order...")

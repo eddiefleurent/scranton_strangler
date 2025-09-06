@@ -77,7 +77,7 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 
 	// Set EntryDate when transitioning to open state (only if not already set)
 	if to == StateOpen && p.EntryDate.IsZero() {
-		p.EntryDate = time.Now()
+		p.EntryDate = time.Now().UTC()
 	}
 
 	return nil
@@ -140,9 +140,9 @@ func (p *Position) ValidateState() error {
 	// Check if position data is consistent with state
 	switch currentState {
 	case StateIdle:
-		// For new positions, allow entry date but zero credit
-		if p.CreditReceived > 0 {
-			return fmt.Errorf("position %s: should not have credit in state %s", p.ID, currentState)
+		// New positions: no credit and no entry timestamp yet
+		if !p.EntryDate.IsZero() || p.CreditReceived > 0 {
+			return fmt.Errorf("position %s: should not have credit or entry date in state %s", p.ID, currentState)
 		}
 	case StateOpen, StateFirstDown, StateSecondDown, StateThirdDown, StateFourthDown:
 		if p.CreditReceived <= 0 || p.EntryDate.IsZero() {

@@ -20,7 +20,7 @@ import (
 
 type Bot struct {
 	config   *config.Config
-	broker   *broker.TradierClient
+	broker   broker.Broker
 	strategy *strategy.StrangleStrategy
 	storage  storage.StorageInterface
 	logger   *log.Logger
@@ -67,11 +67,11 @@ func main() {
 	)
 
 	// Initialize storage
-	storage, err := storage.NewStorage("positions.json")
+	store, err := storage.NewStorage("positions.json")
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	bot.storage = storage
+	bot.storage = store
 
 	// Initialize strategy
 	strategyConfig := &strategy.StrategyConfig{
@@ -312,16 +312,25 @@ func (b *Bot) executeExit(reason strategy.ExitReason) {
 
 	// Calculate maximum debit willing to pay (based on exit reason)
 	var maxDebit float64
+	currentVal, cvErr := b.strategy.GetCurrentPositionValue(position)
 	switch reason {
 	case strategy.ExitReasonProfitTarget:
 		// For profit target, pay up to 50% of credit received
 		maxDebit = position.CreditReceived * 0.5
 	case strategy.ExitReasonTime:
-		// For time-based exits, pay up to current market value
-		maxDebit = position.CreditReceived * 2.0 // Max 2x credit as stop loss
+		// For time exits, aim near market to get filled
+		if cvErr == nil {
+			maxDebit = currentVal / (float64(position.Quantity) * 100)
+		} else {
+			maxDebit = position.CreditReceived
+		}
 	case strategy.ExitReasonStopLoss:
-		// For stop loss, be more aggressive
-		maxDebit = position.CreditReceived * 1.5 // Max 1.5x credit
+		// For stop loss, prioritize exit at market
+		if cvErr == nil {
+			maxDebit = currentVal / (float64(position.Quantity) * 100)
+		} else {
+			maxDebit = position.CreditReceived * 3.0
+		}
 	default:
 		// Default conservative approach
 		maxDebit = position.CreditReceived * 1.0
@@ -399,6 +408,9 @@ func (b *Bot) pollOrderStatus(positionID string, orderID int) {
 		case <-ctx.Done():
 			b.logger.Printf("Order polling timeout for position %s", positionID)
 			b.handleOrderTimeout(positionID)
+			return
+		case <-b.stop:
+			b.logger.Printf("Shutdown signal received during order polling for position %s", positionID)
 			return
 		case <-ticker.C:
 			// Check order status
@@ -479,8 +491,8 @@ func (b *Bot) handleOrderTimeout(positionID string) {
 		return
 	}
 
-	if err := position.TransitionState(models.StateClosed, "order_timeout"); err != nil {
-		b.logger.Printf("Failed to transition position %s to closed: %v", positionID, err)
+	if err := position.TransitionState(models.StateError, "order_timeout"); err != nil {
+		b.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
 		return
 	}
 
@@ -489,7 +501,7 @@ func (b *Bot) handleOrderTimeout(positionID string) {
 		return
 	}
 
-	b.logger.Printf("Position %s closed due to order timeout", positionID)
+	b.logger.Printf("Position %s marked as error due to order timeout", positionID)
 }
 
 func (b *Bot) checkAdjustments() {
@@ -502,8 +514,8 @@ func generatePositionID() string {
 	// Simple ID generation using timestamp and random bytes
 	now := time.Now().Format("20060102-150405")
 
-	// Add 4 random bytes for uniqueness
-	randomBytes := make([]byte, 2)
+	// Add 8 random bytes for uniqueness
+	randomBytes := make([]byte, 8)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// Fallback if random fails
 		return fmt.Sprintf("%s-%d", now, time.Now().UnixNano()%10000)
