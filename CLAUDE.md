@@ -17,8 +17,9 @@ go build -o strangle-bot cmd/bot/main.go
 
 # Test Tradier API connection
 export TRADIER_API_KEY='your_sandbox_token_here'
-cd scripts
-go run test_tradier_api.go
+export TRADIER_ACCOUNT_ID='your_account_id_here'
+cd scripts/test_tradier
+go run test_tradier.go
 
 # Run all tests
 go test ./...
@@ -27,6 +28,7 @@ go test ./...
 go test ./internal/models -v
 go test ./internal/strategy -v
 go test ./internal/storage -v
+go test ./internal/broker -v
 
 # Run tests with coverage
 go test ./... -cover
@@ -79,10 +81,15 @@ internal/
 │   ├── storage.go          # JSON file storage implementation
 │   ├── mock_storage.go     # Mock storage for testing
 │   └── interface_test.go   # Storage tests
-└── config/config.go        # Configuration management
+├── orders/
+│   └── manager.go          # Order management logic
+├── retry/
+│   └── client.go           # HTTP retry client
+├── config/config.go        # Configuration management
+└── mock/                   # Mock implementations for testing
 
-cmd/bot/main.go             # Application entry point and scheduler
-scripts/test_tradier_api.go # API connection testing utility
+cmd/bot/main.go                    # Application entry point and scheduler
+scripts/test_tradier/test_tradier.go # API connection testing utility
 ```
 
 ## Key Implementation Notes
@@ -135,7 +142,12 @@ go test ./internal/broker -v      # Broker interface tests
 ```bash
 # Test API connectivity
 export TRADIER_API_KEY='your_sandbox_token'
-cd scripts && go run test_tradier_api.go
+export TRADIER_ACCOUNT_ID='your_account_id'
+cd scripts/test_tradier && go run test_tradier.go
+
+# Test with specific flags
+go run test_tradier.go --sandbox=true    # Use sandbox (default)
+go run test_tradier.go --sandbox=false   # Use production (careful!)
 ```
 
 ### Key Test Scenarios
@@ -171,16 +183,27 @@ go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 ### GitHub Actions
 The project uses GitHub Actions for CI/CD with the following jobs:
-- **Test**: Unit tests with race detection and coverage
-- **Build**: Binary compilation and Docker image build
-- **Lint**: Code quality checks with golangci-lint
-- **Security**: Vulnerability scanning with gosec and govulncheck
-- **Deploy**: Automated staging/production deployments
+- **Test**: Unit tests with race detection and coverage reporting
+- **Lint**: Code quality checks with golangci-lint (timeout: 5m)
+- **Security Scan**: Vulnerability scanning with gosec and SARIF upload
+
+Triggers:
+- Push to `main` or `feature/*` branches
+- Pull requests to `main`
+
+All jobs use concurrency control to cancel in-progress runs when new commits are pushed.
 
 ### Common CI Issues & Fixes
 When running CI checks, watch for these common issues:
 
-1. **Unchecked errors** (`errcheck`):
+1. **Undefined package errors** (`typecheck`):
+   ```bash
+   # Error: undefined: yaml
+   # Fix: Run go mod tidy to resolve dependencies
+   go mod tidy
+   ```
+
+2. **Unchecked errors** (`errcheck`):
    ```go
    // Bad
    resp.Body.Close()
@@ -193,22 +216,37 @@ When running CI checks, watch for these common issues:
    }()
    ```
 
-2. **Missing package comments** (`stylecheck`):
+3. **Missing package comments** (`stylecheck`):
    ```go
    // Package broker provides trading API clients for executing options trades.
    package broker
    ```
 
-3. **HTTP context usage** (`noctx`):
+4. **HTTP context usage** (`noctx`):
    ```go
    // Use http.NewRequestWithContext instead of http.NewRequest
    req, err := http.NewRequestWithContext(context.Background(), "GET", url, nil)
    ```
 
-4. **Magic numbers/strings** (`goconst`):
+5. **Magic numbers/strings** (`goconst`):
    ```go
    const (
        optionTypePut  = "put"
        optionTypeCall = "call"
    )
    ```
+
+### Dependency Management
+**Important**: Always run `go mod tidy` after adding new dependencies or when encountering "undefined" errors in CI. This ensures all dependencies are properly downloaded and resolved.
+
+### Module Information
+- **Module**: `github.com/eddiefleurent/scranton_strangler`
+- **Go Version**: 1.25.1
+- **Key Dependencies**: `gopkg.in/yaml.v3` for configuration
+
+### Local Development Setup
+1. Clone the repository
+2. Run `go mod download` to fetch dependencies
+3. Copy `config.yaml` and update with your Tradier credentials
+4. Test connection: `cd scripts/test_tradier && go run test_tradier.go`
+5. Run tests: `go test ./...`
