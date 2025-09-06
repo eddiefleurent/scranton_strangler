@@ -69,7 +69,6 @@ linters:
     - nolintlint
     - revive
     - rowserrcheck
-    - shadow
     - staticcheck
     - stylecheck
     - typecheck
