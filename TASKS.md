@@ -1,27 +1,28 @@
 # SPY Strangle Bot - MVP Tasks
 
-## 📈 **Progress Update (Latest)**
+## 📈 **Latest Progress Update**
 
-### ✅ **Major Infrastructure Milestone Completed**
-**Date**: September 6, 2025
-**Status**: **MVP Core Architecture Complete** - Ready for API Testing
+### ✅ **Advanced Trading Features Completed**
+**Date**: September 6, 2025 (Session 2)
+**Status**: **Week 1 Core Foundation Complete** - Ready for API Testing
 
-**Completed This Session:**
-- 🔗 **Storage Integration** - Connected JSON storage layer to main bot
-- 🔧 **Position Management** - Fixed `checkExistingPosition()` and full state tracking  
-- 🚪 **Exit Logic** - Complete `executeExit()` with P&L calculation and statistics
-- 💾 **Entry Persistence** - `executeEntry()` now saves positions with state machine
-- ⚙️ **Configuration** - Working `config.yaml` ready for API credentials
-- ✅ **Compilation Verified** - Bot builds and starts correctly (9.5MB binary)
+**New Features Added:**
+- 📊 **Real IVR Calculator** - Proper IV Rank calculation using live ATM option data (20-day historical)
+- 💰 **Live P&L Tracking** - Real-time position P&L from current option quotes  
+- 🔄 **Buy-to-Close Orders** - Complete order execution for closing strangle positions
+- 🎯 **Dynamic Profit Targets** - Real-time 50% profit target detection with live quotes
+- 📈 **Enhanced Exit Logic** - Intelligent debit pricing based on exit reason
+- 🔍 **Position Monitoring** - Live P&L updates during trading cycles
 
-**Architecture Quality**: 
-- ✅ Interface-based design with proper dependency injection
-- ✅ State machine for position lifecycle management  
-- ✅ Atomic file operations with error handling
-- ✅ Graceful error handling and structured logging
-- ✅ Risk management and allocation limits enforced
+**Technical Quality:**
+- ✅ Proper option chain integration with Greeks data
+- ✅ Robust error handling with fallback mechanisms  
+- ✅ Real-time market data integration
+- ✅ Professional logging with detailed calculations
+- ✅ Multi-leg order support (buy-to-close strangles)
 
-**Next Steps**: Add Tradier API credentials to test paper trading end-to-end
+**Week 1 Status**: **COMPLETE** ✅ - All core foundation requirements met
+**Next Milestone**: Paper trading validation with live API credentials
 
 ---
 
@@ -35,7 +36,7 @@
   - [x] OTOCO order placement
   - [ ] Test with paper trading account
 - [x] **Entry Logic**  
-  - [ ] Calculate IVR > 30 (simple 20-day lookback) - *placeholder implemented*
+  - [x] Calculate IVR > 30 (simple 20-day lookback) - *real IV rank calculation implemented*
   - [x] Find 45 DTE expiration (±5 days acceptable)
   - [x] Select 16 delta strikes (or closest available)
   - [x] Check minimum $2.00 credit requirement

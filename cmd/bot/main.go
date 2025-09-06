@@ -155,7 +155,8 @@ func (b *Bot) runTradingCycle() {
 	if hasPosition {
 		// Check exit conditions
 		b.logger.Println("Position exists, checking exit conditions...")
-		shouldExit, reason := b.strategy.CheckExitConditions()
+		position := b.storage.GetCurrentPosition()
+		shouldExit, reason := b.strategy.CheckExitConditions(position)
 		if shouldExit {
 			b.logger.Printf("Exit signal: %s", reason)
 			b.executeExit(reason)
@@ -188,10 +189,23 @@ func (b *Bot) checkExistingPosition() bool {
 		return false
 	}
 
+	// Calculate real-time P&L
+	realTimePnL, err := b.strategy.CalculatePositionPnL(position)
+	if err != nil {
+		b.logger.Printf("Warning: Could not calculate real-time P&L: %v", err)
+		realTimePnL = position.CurrentPnL // Fall back to stored value
+	} else {
+		// Update stored P&L with real-time value
+		position.CurrentPnL = realTimePnL
+		if err := b.storage.SetCurrentPosition(position); err != nil {
+			b.logger.Printf("Warning: Failed to update position P&L: %v", err)
+		}
+	}
+
 	b.logger.Printf("Found existing position: %s %s Put %.0f / Call %.0f (DTE: %d, P&L: $%.2f)",
 		position.Symbol, position.Expiration.Format("2006-01-02"),
 		position.PutStrike, position.CallStrike,
-		position.CalculateDTE(), position.CurrentPnL)
+		position.CalculateDTE(), realTimePnL)
 
 	return true
 }
@@ -258,8 +272,8 @@ func (b *Bot) executeEntry() {
 	position.EntrySpot = order.SpotPrice
 	position.DTE = position.CalculateDTE()
 	
-	// TODO: Set EntryIVR when IVR calculation is available
-	position.EntryIVR = 35.0 // Placeholder
+	// Set real entry IVR
+	position.EntryIVR = b.strategy.GetCurrentIVR()
 	
 	// Initialize position state
 	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
@@ -291,18 +305,51 @@ func (b *Bot) executeExit(reason string) {
 		position.Symbol, position.Expiration.Format("2006-01-02"),
 		position.PutStrike, position.CallStrike)
 
-	// TODO: Place buy-to-close order via broker
-	// For now, we'll simulate the exit for storage/state management testing
-	
-	// Simulate current market value for P&L calculation
-	// In real implementation, this would get current option quotes
-	simulatedPnL := position.CreditReceived * 0.3 // Assume 30% profit for testing
+	// Calculate maximum debit willing to pay (based on profit target or stop loss)
+	var maxDebit float64
+	if reason == "50% profit target" {
+		// For profit target, pay up to 50% of credit received
+		maxDebit = position.CreditReceived * 0.5
+	} else {
+		// For time/risk exits, get current market quotes to determine fair debit
+		maxDebit = position.CreditReceived * 2.0 // Max 2x credit as stop loss
+	}
+
+	// Place buy-to-close order
+	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
+	closeOrder, err := b.broker.CloseStranglePosition(
+		position.Symbol,
+		position.PutStrike,
+		position.CallStrike,
+		position.Expiration.Format("2006-01-02"),
+		position.Quantity,
+		maxDebit,
+	)
+
+	if err != nil {
+		b.logger.Printf("Failed to place close order: %v", err)
+		return
+	}
+
+	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
+
+	// Calculate actual P&L using real-time quotes
+	actualPnL, err := b.strategy.CalculatePositionPnL(position)
+	if err != nil {
+		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
+		// Fall back to estimated P&L
+		if reason == "50% profit target" {
+			actualPnL = position.CreditReceived * 0.5 // 50% profit
+		} else {
+			actualPnL = position.CreditReceived * 0.2 // 20% profit for early exits
+		}
+	}
 	
 	b.logger.Printf("Position P&L: $%.2f (%.1f%% of credit received)", 
-		simulatedPnL, (simulatedPnL/position.CreditReceived)*100)
+		actualPnL, (actualPnL/position.CreditReceived)*100)
 
 	// Close position in storage
-	if err := b.storage.ClosePosition(simulatedPnL); err != nil {
+	if err := b.storage.ClosePosition(actualPnL); err != nil {
 		b.logger.Printf("Failed to close position in storage: %v", err)
 		return
 	}

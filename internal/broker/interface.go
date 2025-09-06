@@ -16,6 +16,10 @@ type Broker interface {
 	// Order placement
 	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit float64) (*OrderResponse, error)
 	PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error)
+	
+	// Position closing
+	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*OrderResponse, error)
+	PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error)
 }
 
 // TradierClient wraps TradierAPI to implement the Broker interface
@@ -54,6 +58,16 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders
 func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error) {
 	return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, credit, profitTarget, false)
+}
+
+// CloseStranglePosition closes an existing strangle position with a buy-to-close order
+func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceStrangleBuyToClose(symbol, putStrike, callStrike, expiration, quantity, maxDebit)
+}
+
+// PlaceBuyToCloseOrder places a buy-to-close order for a specific option
+func (t *TradierClient) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice)
 }
 
 // CalculateIVR calculates Implied Volatility Rank from historical data

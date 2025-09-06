@@ -252,8 +252,20 @@ func (t *TradierAPI) PlaceStrangleOrder(
 	putStrike, callStrike float64,
 	expiration string,
 	quantity int,
-	limitCredit float64,
+	limitPrice float64,
 	preview bool,
+) (*OrderResponse, error) {
+	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview, false)
+}
+
+func (t *TradierAPI) placeStrangleOrderInternal(
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	limitPrice float64,
+	preview bool,
+	buyToClose bool,
 ) (*OrderResponse, error) {
 	
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
@@ -271,23 +283,65 @@ func (t *TradierAPI) PlaceStrangleOrder(
 	params := url.Values{}
 	params.Add("class", "multileg")
 	params.Add("symbol", symbol)
-	params.Add("type", "credit")
 	params.Add("duration", "day")
-	params.Add("price", fmt.Sprintf("%.2f", limitCredit))
+	params.Add("price", fmt.Sprintf("%.2f", limitPrice))
+	
+	// Determine order type and side based on buyToClose flag
+	var orderType, side string
+	if buyToClose {
+		orderType = "debit"
+		side = "buy_to_close"
+	} else {
+		orderType = "credit"
+		side = "sell_to_open"
+	}
+	params.Add("type", orderType)
 	
 	if preview {
 		params.Add("preview", "true")
 	}
 	
-	// Leg 0: Sell put
+	// Leg 0: Put option
 	params.Add("option_symbol[0]", putSymbol)
-	params.Add("side[0]", "sell_to_open")
+	params.Add("side[0]", side)
 	params.Add("quantity[0]", fmt.Sprintf("%d", quantity))
 	
-	// Leg 1: Sell call
+	// Leg 1: Call option  
 	params.Add("option_symbol[1]", callSymbol)
-	params.Add("side[1]", "sell_to_open")
+	params.Add("side[1]", side)
 	params.Add("quantity[1]", fmt.Sprintf("%d", quantity))
+	
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	
+	var response OrderResponse
+	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+		return nil, err
+	}
+	
+	return &response, nil
+}
+
+// PlaceStrangleBuyToClose places a buy-to-close order for a strangle position
+func (t *TradierAPI) PlaceStrangleBuyToClose(
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	maxDebit float64,
+) (*OrderResponse, error) {
+	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true)
+}
+
+// PlaceBuyToCloseOrder places a buy-to-close order for a single option
+func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error) {
+	params := url.Values{}
+	params.Add("class", "option")
+	params.Add("option_symbol", optionSymbol)
+	params.Add("side", "buy_to_close")
+	params.Add("quantity", fmt.Sprintf("%d", quantity))
+	params.Add("type", "limit")
+	params.Add("duration", "day")
+	params.Add("price", fmt.Sprintf("%.2f", maxPrice))
 	
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
 	
