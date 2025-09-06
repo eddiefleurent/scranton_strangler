@@ -496,13 +496,13 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
 
 	// Test above MaxDTE - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, config.MaxDTE+4) // 142.9% loss, above MaxDTE
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, config.MaxDTE+4) // 2.9% loss, above MaxDTE
 	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit at %d DTE, but got: %s", config.MaxDTE+4, reason)
 	}
 
 	// Test exactly at MaxDTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, config.MaxDTE) // 142.9% loss, MaxDTE
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, config.MaxDTE) // 2.9% loss, MaxDTE
 	if !shouldExit {
 		t.Errorf("Should emergency exit at %d DTE for Option C", config.MaxDTE)
 	}
@@ -512,9 +512,12 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	}
 
 	// Test below MaxDTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, config.MaxDTE-6) // 142.9% loss, 15 DTE
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, config.MaxDTE-6) // 2.9% loss, 15 DTE
 	if !shouldExit {
 		t.Errorf("Should emergency exit at %d DTE for Option C", config.MaxDTE-6)
+	}
+	if !contains(reason, expectedDTEMsg) {
+		t.Errorf("Expected Option C DTE limit message, got: %s", reason)
 	}
 }
 
