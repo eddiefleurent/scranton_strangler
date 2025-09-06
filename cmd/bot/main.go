@@ -381,6 +381,11 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 
 	maxDebit := b.calculateMaxDebit(position, reason)
 
+	if maxDebit <= 0 {
+		b.logger.Printf("Skipping close order for position %s: calculated maxDebit $%.2f is invalid (must be > 0)", position.ID, maxDebit)
+		return
+	}
+
 	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
 	closeOrder, err := b.retryClient.ClosePositionWithRetry(ctx, position, maxDebit)
 	if err != nil {

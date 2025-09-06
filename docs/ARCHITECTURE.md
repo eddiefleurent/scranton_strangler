@@ -113,7 +113,7 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 
 #### 4. Order Executor
 - Translates signals to Tradier API calls
-- **OTOCO Orders**: Entry + 50% profit exit automatically
+- **OTOCO Orders**: Planned feature - currently unsupported for multi-leg orders (see `internal/broker/tradier.go`)
 - **OCO Orders**: Emergency exits and rolling scenarios
 - Handles multi-leg orders (strangles)
 - Manages partial fills and order status
@@ -232,12 +232,13 @@ type RiskManager interface {
 
 ## Order Types & Automation Strategy
 
-### OTOCO Orders (One-Triggers-One-Cancels-Other)
-**Primary Use**: Entry with automatic profit taking
-- **Entry Order**: Sell strangle for credit
-- **Exit Order**: Buy back at 50% profit (GTC)
-- **Benefit**: "Set and forget" profit taking
-- **Configuration**: `use_otoco: true` in config.yaml
+### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Planned Feature**
+**Status**: Currently unsupported for multi-leg strangle orders
+- **Limitation**: Tradier API does not support OTOCO for multi-leg orders
+- **Current Behavior**: `use_otoco: true` in config has no runtime effect
+- **Fallback**: System automatically uses regular multi-leg orders with monitoring
+- **Implementation**: See `internal/broker/tradier.go` - returns `ErrOTOCOUnsupported`
+- **Future**: Planned implementation may use separate entry + linked exit orders
 
 ### OCO Orders (One-Cancels-Other) 
 **Use Cases**:

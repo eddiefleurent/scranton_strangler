@@ -948,3 +948,61 @@ func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
 		t.Errorf("Expected circuit breaker open error but got: %v", err)
 	}
 }
+
+func TestNormalizeDuration(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+		hasError bool
+	}{
+		// Valid standard values
+		{"valid day", "day", "day", false},
+		{"valid gtc", "gtc", "gtc", false},
+		{"valid gtd", "gtd", "gtd", false},
+
+		// Case normalization
+		{"uppercase day", "DAY", "day", false},
+		{"mixed case gtc", "Gtc", "gtc", false},
+		{"mixed case gtd", "GtD", "gtd", false},
+
+		// Whitespace trimming
+		{"leading spaces", " day", "day", false},
+		{"trailing spaces", "day ", "day", false},
+		{"both spaces", " gtc ", "gtc", false},
+
+		// Common variants mapping
+		{"good-til-cancelled", "good-til-cancelled", "gtc", false},
+		{"goodtilcancelled", "goodtilcancelled", "gtc", false},
+		{"GOOD-TIL-CANCELLED", "GOOD-TIL-CANCELLED", "gtc", false},
+		{"good-til-date", "good-til-date", "gtd", false},
+		{"goodtildate", "goodtildate", "gtd", false},
+		{"GOOD-TIL-DATE", "GOOD-TIL-DATE", "gtd", false},
+
+		// Invalid values
+		{"empty string", "", "", true},
+		{"invalid duration", "week", "", true},
+		{"invalid duration with spaces", " week ", "", true},
+		{"invalid duration mixed case", "Week", "", true},
+		{"numeric duration", "30", "", true},
+		{"special chars", "day!", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := normalizeDuration(tt.input)
+			if tt.hasError {
+				if err == nil {
+					t.Errorf("normalizeDuration(%q) expected error but got nil", tt.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("normalizeDuration(%q) unexpected error: %v", tt.input, err)
+				}
+				if result != tt.expected {
+					t.Errorf("normalizeDuration(%q) = %q, want %q", tt.input, result, tt.expected)
+				}
+			}
+		})
+	}
+}

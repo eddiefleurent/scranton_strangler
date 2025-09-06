@@ -341,6 +341,34 @@ func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	return &response, nil
 }
 
+// normalizeDuration normalizes and validates duration parameter
+func normalizeDuration(duration string) (string, error) {
+	if duration == "" {
+		return "", fmt.Errorf("duration cannot be empty")
+	}
+
+	// Normalize: lowercase and trim whitespace
+	normalized := strings.ToLower(strings.TrimSpace(duration))
+
+	// Map common variants to standard values
+	switch normalized {
+	case "good-til-cancelled", "goodtilcancelled", "gtc":
+		return "gtc", nil
+	case "good-til-date", "goodtildate", "gtd":
+		return "gtd", nil
+	case "day":
+		return "day", nil
+	}
+
+	// Check against allowed values
+	switch normalized {
+	case "day", "gtc", "gtd":
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("invalid duration '%s': must be one of 'day', 'gtc', or 'gtd'", duration)
+	}
+}
+
 // PlaceStrangleOrder places a short strangle order with the specified parameters.
 func (t *TradierAPI) PlaceStrangleOrder(
 	symbol string,
@@ -351,9 +379,15 @@ func (t *TradierAPI) PlaceStrangleOrder(
 	preview bool,
 	duration string,
 ) (*OrderResponse, error) {
+	// Validate and normalize duration
+	normalizedDuration, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
+	}
+
 	return t.placeStrangleOrderInternal(
 		symbol, putStrike, callStrike, expiration,
-		quantity, limitPrice, preview, false, duration,
+		quantity, limitPrice, preview, false, normalizedDuration,
 	)
 }
 
@@ -367,6 +401,14 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	buyToClose bool,
 	duration string,
 ) (*OrderResponse, error) {
+	// Validate duration (should be normalized by caller)
+	switch duration {
+	case "day", "gtc", "gtd":
+		// Valid duration
+	default:
+		return nil, fmt.Errorf("invalid duration '%s': must be one of 'day', 'gtc', or 'gtd'", duration)
+	}
+
 	// Validate price for credit/debit orders
 	if limitPrice <= 0 {
 		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",

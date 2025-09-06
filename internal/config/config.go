@@ -237,6 +237,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("schedule trading window invalid (start/end parse/order)")
 	}
 
+	// Storage validation
+	if strings.TrimSpace(c.Storage.Path) == "" {
+		return fmt.Errorf("storage.path is required when persistence is enabled")
+	}
+
 	return nil
 }
 

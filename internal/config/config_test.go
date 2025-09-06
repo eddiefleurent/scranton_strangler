@@ -317,3 +317,101 @@ func TestConfig_AfterHoursCheck(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_StoragePath(t *testing.T) {
+	// Create a base valid config
+	baseConfig := &Config{
+		Environment: EnvironmentConfig{
+			Mode:     "paper",
+			LogLevel: "info",
+		},
+		Broker: BrokerConfig{
+			Provider:    "tradier",
+			APIKey:      "test-key",
+			APIEndpoint: "https://sandbox.tradier.com/v1",
+			AccountID:   "test-account",
+			UseOTOCO:    true,
+		},
+		Strategy: StrategyConfig{
+			Symbol:              "SPY",
+			AllocationPct:       0.35,
+			EscalateLossPct:     2.0,
+			UseMockHistoricalIV: false,
+			Entry: EntryConfig{
+				MinIVR:    30,
+				TargetDTE: 45,
+				DTERange:  []int{40, 50},
+				Delta:     16,
+				MinCredit: 2.00,
+			},
+			Exit: ExitConfig{
+				ProfitTarget: 0.50,
+				MaxDTE:       21,
+				StopLossPct:  2.5,
+			},
+			Adjustments: AdjustmentConfig{
+				Enabled:             false,
+				SecondDownThreshold: 10,
+			},
+		},
+		Risk: RiskConfig{
+			MaxContracts:    1,
+			MaxDailyLoss:    500,
+			MaxPositionLoss: 3.0,
+		},
+		Schedule: ScheduleConfig{
+			MarketCheckInterval: "15m",
+			TradingStart:        "09:45",
+			TradingEnd:          "15:45",
+			AfterHoursCheck:     false,
+		},
+	}
+
+	t.Run("valid storage path", func(t *testing.T) {
+		config := *baseConfig
+		config.Storage.Path = "positions.json"
+
+		err := config.Validate()
+		if err != nil {
+			t.Errorf("Expected valid config with storage path, got error: %v", err)
+		}
+	})
+
+	t.Run("empty storage path - invalid", func(t *testing.T) {
+		config := *baseConfig
+		config.Storage.Path = ""
+
+		err := config.Validate()
+		if err == nil {
+			t.Error("Expected error when storage path is empty")
+		}
+		expectedMsg := "storage.path is required when persistence is enabled"
+		if !strings.Contains(err.Error(), expectedMsg) {
+			t.Errorf("Expected error message to contain '%s', got: %v", expectedMsg, err)
+		}
+	})
+
+	t.Run("whitespace-only storage path - invalid", func(t *testing.T) {
+		config := *baseConfig
+		config.Storage.Path = "   "
+
+		err := config.Validate()
+		if err == nil {
+			t.Error("Expected error when storage path is whitespace-only")
+		}
+		expectedMsg := "storage.path is required when persistence is enabled"
+		if !strings.Contains(err.Error(), expectedMsg) {
+			t.Errorf("Expected error message to contain '%s', got: %v", expectedMsg, err)
+		}
+	})
+
+	t.Run("valid storage path with spaces", func(t *testing.T) {
+		config := *baseConfig
+		config.Storage.Path = "my positions.json"
+
+		err := config.Validate()
+		if err != nil {
+			t.Errorf("Expected valid config with storage path containing spaces, got error: %v", err)
+		}
+	})
+}
