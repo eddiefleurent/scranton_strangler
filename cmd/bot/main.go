@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"log"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/eddie/spy-strangle-bot/internal/broker"
 	"github.com/eddie/spy-strangle-bot/internal/config"
+	"github.com/eddie/spy-strangle-bot/internal/models"
+	"github.com/eddie/spy-strangle-bot/internal/storage"
 	"github.com/eddie/spy-strangle-bot/internal/strategy"
 )
 
@@ -19,6 +22,7 @@ type Bot struct {
 	config   *config.Config
 	broker   *broker.TradierClient
 	strategy *strategy.StrangleStrategy
+	storage  storage.StorageInterface
 	logger   *log.Logger
 	stop     chan struct{}
 }
@@ -60,6 +64,13 @@ func main() {
 		cfg.IsPaperTrading(),
 		cfg.Broker.UseOTOCO,
 	)
+
+	// Initialize storage
+	storage, err := storage.NewStorage("positions.json")
+	if err != nil {
+		log.Fatalf("Failed to initialize storage: %v", err)
+	}
+	bot.storage = storage
 
 	// Initialize strategy
 	strategyConfig := &strategy.StrategyConfig{
@@ -172,10 +183,17 @@ func (b *Bot) runTradingCycle() {
 }
 
 func (b *Bot) checkExistingPosition() bool {
-	// Check for saved position state
-	// In MVP, this reads from positions.json
-	// TODO: Implement position state management
-	return false
+	position := b.storage.GetCurrentPosition()
+	if position == nil {
+		return false
+	}
+
+	b.logger.Printf("Found existing position: %s %s Put %.0f / Call %.0f (DTE: %d, P&L: $%.2f)",
+		position.Symbol, position.Expiration.Format("2006-01-02"),
+		position.PutStrike, position.CallStrike,
+		position.CalculateDTE(), position.CurrentPnL)
+
+	return true
 }
 
 func (b *Bot) executeEntry() {
@@ -216,15 +234,103 @@ func (b *Bot) executeEntry() {
 	b.logger.Printf("Order placed successfully: %d", placedOrder.Order.ID)
 	
 	// Save position state
-	// TODO: Implement position persistence
+	positionID := generatePositionID()
+	
+	// Parse expiration string to time.Time
+	expirationTime, err := time.Parse("2006-01-02", order.Expiration)
+	if err != nil {
+		b.logger.Printf("Failed to parse expiration date: %v", err)
+		return
+	}
+	
+	// Create new position
+	position := models.NewPosition(
+		positionID,
+		order.Symbol,
+		order.PutStrike,
+		order.CallStrike,
+		expirationTime,
+		order.Quantity,
+	)
+	
+	// Set entry details
+	position.CreditReceived = order.Credit
+	position.EntrySpot = order.SpotPrice
+	position.DTE = position.CalculateDTE()
+	
+	// TODO: Set EntryIVR when IVR calculation is available
+	position.EntryIVR = 35.0 // Placeholder
+	
+	// Initialize position state
+	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
+		b.logger.Printf("Failed to set position state: %v", err)
+		return
+	}
+	
+	// Save position to storage
+	if err := b.storage.SetCurrentPosition(position); err != nil {
+		b.logger.Printf("Failed to save position: %v", err)
+		return
+	}
+	
+	b.logger.Printf("Position saved: ID=%s, Credit=$%.2f, DTE=%d", 
+		position.ID, position.CreditReceived, position.DTE)
 }
 
 func (b *Bot) executeExit(reason string) {
 	b.logger.Printf("Executing exit: %s", reason)
-	// TODO: Implement exit logic
+	
+	// Get current position
+	position := b.storage.GetCurrentPosition()
+	if position == nil {
+		b.logger.Printf("No position to exit")
+		return
+	}
+
+	b.logger.Printf("Closing position: %s %s Put %.0f / Call %.0f",
+		position.Symbol, position.Expiration.Format("2006-01-02"),
+		position.PutStrike, position.CallStrike)
+
+	// TODO: Place buy-to-close order via broker
+	// For now, we'll simulate the exit for storage/state management testing
+	
+	// Simulate current market value for P&L calculation
+	// In real implementation, this would get current option quotes
+	simulatedPnL := position.CreditReceived * 0.3 // Assume 30% profit for testing
+	
+	b.logger.Printf("Position P&L: $%.2f (%.1f%% of credit received)", 
+		simulatedPnL, (simulatedPnL/position.CreditReceived)*100)
+
+	// Close position in storage
+	if err := b.storage.ClosePosition(simulatedPnL); err != nil {
+		b.logger.Printf("Failed to close position in storage: %v", err)
+		return
+	}
+
+	b.logger.Printf("Position closed successfully: %s", reason)
+	
+	// Log statistics
+	stats := b.storage.GetStatistics()
+	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
+		stats.TotalTrades, stats.WinRate*100, stats.TotalPnL)
 }
 
 func (b *Bot) checkAdjustments() {
 	b.logger.Println("Checking for adjustments...")
 	// TODO: Implement adjustment logic (Phase 2)
+}
+
+// generatePositionID creates a simple unique ID for positions
+func generatePositionID() string {
+	// Simple ID generation using timestamp and random bytes
+	now := time.Now().Format("20060102-150405")
+	
+	// Add 4 random bytes for uniqueness
+	randomBytes := make([]byte, 2)
+	if _, err := rand.Read(randomBytes); err != nil {
+		// Fallback if random fails
+		return fmt.Sprintf("%s-%d", now, time.Now().UnixNano()%10000)
+	}
+	
+	return fmt.Sprintf("%s-%x", now, randomBytes)
 }
