@@ -205,6 +205,12 @@ func (b *Bot) checkExistingPosition() bool {
 		return false
 	}
 
+	// Check if position is already closed
+	if position.GetCurrentState() == models.StateClosed {
+		b.logger.Printf("Position %s is already closed, treating as no active position", position.ID)
+		return false
+	}
+
 	// Calculate real-time P&L
 	realTimePnL, err := b.strategy.CalculatePositionPnL(position)
 	if err != nil {
@@ -292,6 +298,9 @@ func (b *Bot) executeEntry() {
 	// Set real entry IVR
 	position.EntryIVR = b.strategy.GetCurrentIVR()
 
+	// Set the broker order ID
+	position.EntryOrderID = fmt.Sprintf("%d", placedOrder.Order.ID)
+
 	// Initialize position state to submitted
 	if err := position.TransitionState(models.StateSubmitted, "order_placed"); err != nil {
 		b.logger.Printf("Failed to set position state: %v", err)
@@ -346,12 +355,22 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 		return false
 	}
 
-	if currentState == models.StateError || currentState == models.StateAdjusting || currentState == models.StateRolling {
-		b.logger.Printf("Position %s is in state %s, not eligible for close", position.ID, currentState)
-		return false
+	// Helper function to check if state is a management state
+	isManagementState := func(state models.PositionState) bool {
+		return state == models.StateFirstDown ||
+			state == models.StateSecondDown ||
+			state == models.StateThirdDown ||
+			state == models.StateFourthDown
 	}
 
-	return true
+	// Only allow exits from Open state or management states
+	if currentState == models.StateOpen || isManagementState(currentState) {
+		return true
+	}
+
+	// For all other states (including Submitted, Idle, Error, Adjusting, Rolling)
+	b.logger.Printf("Position %s is in state %s, not eligible for close (only Open and management states allowed)", position.ID, currentState)
+	return false
 }
 
 func (b *Bot) logPositionClose(position *models.Position) {
@@ -417,8 +436,16 @@ func (b *Bot) logPnL(position *models.Position, actualPnL float64) {
 	if denom == 0 {
 		denom = position.CreditReceived * 100
 	}
+
+	var percent float64
+	if denom == 0 {
+		percent = 0.0
+	} else {
+		percent = (actualPnL / denom) * 100
+	}
+
 	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
-		actualPnL, (actualPnL/denom)*100)
+		actualPnL, percent)
 }
 
 func (b *Bot) checkAdjustments() {

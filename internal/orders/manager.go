@@ -85,8 +85,8 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int) {
 		case <-ticker.C:
 			// Create a child context with short timeout for the GetOrderStatus call
 			statusCtx, statusCancel := context.WithTimeout(ctx, 5*time.Second)
-			orderStatus, err := m.broker.GetOrderStatus(orderID)
-			statusCancel() // Cancel the child context immediately after the call
+			defer statusCancel() // Defer cancel so it runs when this case exits
+			orderStatus, err := m.broker.GetOrderStatusCtx(statusCtx, orderID)
 
 			if err != nil {
 				if statusCtx.Err() == context.DeadlineExceeded {

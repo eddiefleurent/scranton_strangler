@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -538,6 +539,10 @@ func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) 
 			Status: "filled",
 		},
 	}, nil
+}
+
+func (m *mockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return m.GetOrderStatus(orderID)
 }
 
 func (m *mockBroker) PlaceBuyToCloseOrder(

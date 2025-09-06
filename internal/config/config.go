@@ -130,8 +130,11 @@ func (c *Config) Validate() error {
 	if c.Strategy.Symbol == "" {
 		return fmt.Errorf("strategy.symbol is required")
 	}
-	if c.Strategy.AllocationPct <= 0 || c.Strategy.AllocationPct > 0.5 {
-		return fmt.Errorf("strategy.allocation_pct must be between 0 and 0.5")
+	if c.Strategy.AllocationPct <= 0 || c.Strategy.AllocationPct > 1.0 {
+		return fmt.Errorf("strategy.allocation_pct must be between 0 and 1.0")
+	}
+	if c.Strategy.EscalateLossPct <= 0 {
+		return fmt.Errorf("strategy.escalate_loss_pct must be > 0")
 	}
 	if c.Strategy.Entry.MinIVR < 0 || c.Strategy.Entry.MinIVR > 100 {
 		return fmt.Errorf("strategy.entry.min_ivr must be between 0 and 100")
@@ -162,6 +165,18 @@ func (c *Config) Validate() error {
 
 	// Normalize exit configuration
 	c.normalizeExitConfig()
+
+	// Exit configuration validation
+	if c.Strategy.Exit.ProfitTarget <= 0 {
+		return fmt.Errorf("strategy.exit.profit_target must be > 0")
+	}
+	if c.Strategy.Exit.StopLossPct <= 0 {
+		return fmt.Errorf("strategy.exit.stop_loss_pct must be > 0")
+	}
+	if c.Strategy.Exit.StopLossPct <= c.Strategy.EscalateLossPct {
+		return fmt.Errorf("strategy.exit.stop_loss_pct (%f) must be greater than strategy.escalate_loss_pct (%f)",
+			c.Strategy.Exit.StopLossPct, c.Strategy.EscalateLossPct)
+	}
 
 	// Risk validation
 	if c.Risk.MaxContracts <= 0 {

@@ -70,7 +70,35 @@
   - [ ] No critical bugs in 1 week of running
   - [ ] All logs make sense and are useful
 
-### 5. Bug Fixes & Polish
+### 5. Critical Test Coverage (MVP Blocker)
+- [ ] **Core Strategy Testing - 0% Coverage**
+  - [ ] Test `CheckEntryConditions()` - validates IVR > 30, DTE, delta logic
+  - [ ] Test `FindStrangleStrikes()` - strike selection and credit validation  
+  - [ ] Test `CheckExitConditions()` - 50% profit, 21 DTE, 250% loss conditions
+  - [ ] Test `CalculatePnL()` - position value calculations with live quotes
+  - [ ] Test `GetCurrentIVR()` - IV rank calculation with historical data
+- [ ] **Broker API Integration Testing - 0% Coverage** 
+  - [ ] Test `GetQuote()` - quote fetching with error handling
+  - [ ] Test `GetOptionChain()` - option data parsing and greeks
+  - [ ] Test `PlaceStrangleOrder()` - OTOCO order creation and validation
+  - [ ] Test `PlaceBuyToCloseOrder()` - exit order execution
+  - [ ] Test `GetOrderStatus()` - order fill verification and status tracking
+- [ ] **Main Bot Loop Testing - 0% Coverage**
+  - [ ] Test `runTradingCycle()` - complete entry/exit workflow 
+  - [ ] Test `executeEntry()` - position opening with risk checks
+  - [ ] Test `executeExit()` - position closing logic
+  - [ ] Test `checkExistingPosition()` - position monitoring and P&L updates
+  - [ ] Test error handling and graceful shutdown scenarios
+- [ ] **Order Management Testing - 0% Coverage**
+  - [ ] Test `PollOrderStatus()` - order fill verification with timeouts
+  - [ ] Test order failure handling and retry logic
+  - [ ] Test partial fill scenarios and position state updates
+- [ ] **Retry Client Testing - 0% Coverage**
+  - [ ] Test exponential backoff logic with API failures
+  - [ ] Test transient error detection and retry triggers
+  - [ ] Test timeout handling and circuit breaker behavior
+
+### 6. Bug Fixes & Polish
 - [ ] **Historical IV Data Storage**
   - [ ] Replace mock historical IV with real data collection
   - [ ] Store daily IV readings for accurate IVR calculation
@@ -106,43 +134,46 @@
 
 ## Implementation Priority (Week by Week)
 
-### Week 1: Core Foundation
-- [ ] **Get Paper Trading Working**
-  - [ ] Verify Tradier sandbox credentials
-  - [ ] Test OTOCO order with $1 credit strangle
-  - [ ] Confirm orders appear in Tradier dashboard
-- [ ] **Build IVR Calculator**
-  - [ ] Simple 20-day historical volatility lookup
-  - [ ] Current IV from option chain
-  - [ ] Basic IVR = (current IV - 20d avg) / 20d avg  
-- [ ] **Position Management**
-  - [ ] Simple JSON file storage
-  - [ ] Load/save position state on startup/shutdown
-  - [ ] Calculate P&L from current quotes
+### Week 1: Critical Test Foundation (MVP Blocker - 29.5% Overall Coverage)
+- [ ] **Strategy Function Tests (Currently 0% Coverage)**
+  - [ ] Create test suite for `CheckEntryConditions()` with mock data
+  - [ ] Create test suite for `FindStrangleStrikes()` with various market scenarios
+  - [ ] Create test suite for `CheckExitConditions()` covering all exit triggers
+  - [ ] Create test suite for `GetCurrentIVR()` with historical IV data
+- [ ] **Broker Integration Tests (Currently 0% Coverage)**
+  - [ ] Create mock broker tests for all API methods 
+  - [ ] Test error handling for API failures and timeouts
+  - [ ] Test order placement validation and response parsing
+  - [ ] Test quote and option chain data processing
+- [ ] **Main Bot Loop Tests (Currently 0% Coverage)**
+  - [ ] Create integration tests for complete trading cycle
+  - [ ] Test position monitoring and P&L calculation logic
+  - [ ] Test entry/exit execution with mocked broker responses
 
-### Week 2: Trading Logic  
-- [ ] **Entry Scanner**
-  - [ ] Check market hours (9:30 AM - 4:00 PM ET)
-  - [ ] Calculate IVR and check > 30
-  - [ ] Find closest expiration to 45 DTE
-  - [ ] Get 16 delta strikes (or nearest available)
-  - [ ] Validate minimum $2.00 credit
-  - [ ] Place OTOCO order if all conditions met
-- [ ] **Exit Monitor**
-  - [ ] Check existing positions every 15 minutes  
-  - [ ] Calculate days to expiration
-  - [ ] Close position at 21 DTE (market order)
-  - [ ] Emergency close at 250% loss
+### Week 2: Core Functionality with Test Coverage
+- [ ] **Entry Logic (Test While Building)**
+  - [ ] Check market hours with comprehensive test cases
+  - [ ] Calculate IVR with unit tests for edge cases
+  - [ ] Find DTE/strike logic with boundary condition tests
+  - [ ] OTOCO order placement with mock broker verification
+- [ ] **Exit Logic (Test While Building)**
+  - [ ] Monitor existing positions with test scenarios
+  - [ ] Test all exit condition triggers (profit, time, loss)
+  - [ ] Test emergency exit scenarios and error recovery
+- [ ] **Order Management (Currently 0% Coverage)**
+  - [ ] Create tests for order polling and status checking
+  - [ ] Test timeout handling and retry scenarios
+  - [ ] Test partial fill detection and position updates
 
-### Week 3: Polish & Test
-- [ ] **Error Handling**
-  - [ ] Retry API calls 3x with backoff
-  - [ ] Log all errors with context
-  - [ ] Graceful shutdown on critical errors
+### Week 3: Integration Testing & Polish
+- [ ] **Error Handling (Test All Scenarios)**
+  - [ ] Test retry client with various failure modes
+  - [ ] Test API downtime recovery with circuit breaker
+  - [ ] Test graceful shutdown with position preservation
 - [ ] **End-to-End Testing**
-  - [ ] Run bot for 1 week without manual intervention
-  - [ ] Complete at least 1 full trade cycle
-  - [ ] Verify all logs are useful for debugging
+  - [ ] Complete trade cycle tests in sandbox environment  
+  - [ ] Test bot restart/recovery after crashes
+  - [ ] Validate all error scenarios are properly logged
 
 ## Success Criteria for MVP
 
@@ -155,6 +186,12 @@ A bot that can automatically:
 5. Complete 3 successful trade cycles
 
 ### Must Have for Launch
+- [ ] **Minimum 60% Test Coverage** (Currently 29.5% - CRITICAL GAP)
+  - [ ] Core strategy functions fully tested (0% → 80%+ target)
+  - [ ] Broker integration tested with mocks (0% → 70%+ target)  
+  - [ ] Main bot loop tested (0% → 60%+ target)
+  - [ ] Order management tested (0% → 70%+ target)
+  - [ ] Retry logic tested (0% → 80%+ target)
 - [ ] Tradier API integration working in sandbox
 - [ ] IVR calculation (simple 20-day method)
 - [ ] Entry logic: find strikes, check credit, place OTOCO
@@ -196,3 +233,56 @@ A bot that can automatically:
 - ✅ Console logging with timestamps
 - ✅ SPY only
 - ✅ Forward testing only
+
+## CRITICAL TEST COVERAGE ANALYSIS (Current: 29.5%)
+
+### 🚨 IMMEDIATE MVP BLOCKERS - 0% Coverage:
+1. **Core Strategy Logic** (`internal/strategy/strangle.go`)
+   - `CheckEntryConditions()` - Entry signal validation
+   - `FindStrangleStrikes()` - Strike selection and credit validation  
+   - `CheckExitConditions()` - All exit condition logic
+   - `GetCurrentIVR()` - IV rank calculation
+   - `CalculatePnL()` - Position value calculations
+
+2. **Broker API Integration** (`internal/broker/tradier.go`)
+   - `GetQuote()` - Quote fetching with error handling
+   - `GetOptionChain()` - Option data parsing and validation
+   - `PlaceStrangleOrder()` - OTOCO order creation
+   - `GetOrderStatus()` - Order fill verification
+
+3. **Main Bot Loop** (`cmd/bot/main.go`)
+   - `runTradingCycle()` - Complete trading workflow
+   - `executeEntry()` - Position opening logic
+   - `executeExit()` - Position closing logic
+   - `checkExistingPosition()` - Position monitoring
+
+4. **Order Management** (`internal/orders/manager.go`)
+   - `PollOrderStatus()` - Order status polling
+   - Order timeout and retry handling
+   - Partial fill scenarios
+
+5. **Retry Client** (`internal/retry/client.go`)
+   - Exponential backoff implementation
+   - Error classification and retry logic
+   - Timeout and circuit breaker behavior
+
+### ✅ Well-Tested Components (>70% Coverage):
+- State Machine (73.1%) - Position state transitions
+- Mock Data Provider (90.5%) - Testing infrastructure
+- Storage Interface (57.0%) - Position persistence
+
+### 🎯 Test Coverage Targets for MVP Launch:
+- **Overall Coverage**: 29.5% → **60%+** (minimum)
+- **Strategy Functions**: 0% → **80%+** (critical path)
+- **Broker Integration**: 0% → **70%+** (API reliability)
+- **Main Bot Loop**: 0% → **60%+** (core functionality)
+- **Orders & Retry**: 0% → **70%+** (resilience)
+
+### 📋 Testing Priority Order:
+1. **Week 1**: Strategy function unit tests (highest impact)
+2. **Week 2**: Broker integration tests with mocks 
+3. **Week 3**: Main bot loop integration tests
+4. **Week 4**: Order management and retry logic tests
+5. **Week 5**: End-to-end testing in sandbox environment
+
+**Bottom Line**: The current 29.5% test coverage is insufficient for a reliable trading bot. The 0% coverage on core strategy and broker functions represents significant risk. Testing must be prioritized before any production deployment.

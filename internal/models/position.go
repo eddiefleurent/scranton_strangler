@@ -20,6 +20,7 @@ type Position struct {
 	DTE            int           `json:"dte"`
 	CallStrike     float64       `json:"call_strike"`
 	PutStrike      float64       `json:"put_strike"`
+	EntryOrderID   string        `json:"entry_order_id"`
 }
 
 type Adjustment struct {

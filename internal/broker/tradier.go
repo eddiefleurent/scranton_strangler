@@ -3,6 +3,7 @@
 package broker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -370,6 +371,16 @@ func (t *TradierAPI) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	return &response, nil
 }
 
+// GetOrderStatusCtx retrieves the status of an existing order by ID with context
+func (t *TradierAPI) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
+	var response OrderResponse
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error) {
 	// Extract underlying symbol from option OCC/OSI code
 	symbol := extractUnderlyingFromOSI(optionSymbol)
@@ -426,6 +437,55 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	} else {
 		req, err = http.NewRequest(method, endpoint, http.NoBody)
+		if err != nil {
+			return err
+		}
+	}
+
+	req.Header.Add("Authorization", "Bearer "+t.apiKey)
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the operation
+			log.Printf("Failed to close response body: %v", err)
+		}
+	}()
+
+	// Check rate limit headers
+	if remaining := resp.Header.Get("X-Ratelimit-Available"); remaining != "" {
+		// Could log or track rate limit usage here
+		log.Printf("Rate limit remaining: %s", remaining)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("API error %d: failed to read error body", resp.StatusCode)
+		}
+		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	return json.NewDecoder(resp.Body).Decode(response)
+}
+
+// makeRequestCtx makes an HTTP request with context support for timeout/cancellation
+func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string, params url.Values, response interface{}) error {
+	var req *http.Request
+	var err error
+
+	if method == "POST" && params != nil {
+		req, err = http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(params.Encode()))
+		if err != nil {
+			return err
+		}
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		req, err = http.NewRequestWithContext(ctx, method, endpoint, http.NoBody)
 		if err != nil {
 			return err
 		}

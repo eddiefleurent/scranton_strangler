@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"context"
 	"log"
 	"math"
 	"strings"
@@ -26,6 +27,7 @@ type Broker interface {
 
 	// Order status
 	GetOrderStatus(orderID int) (*OrderResponse, error)
+	GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error)
 
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
@@ -108,6 +110,11 @@ func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStri
 // GetOrderStatus retrieves the status of an existing order
 func (t *TradierClient) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	return t.TradierAPI.GetOrderStatus(orderID)
+}
+
+// GetOrderStatusCtx retrieves the status of an existing order with context
+func (t *TradierClient) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	return t.TradierAPI.GetOrderStatusCtx(ctx, orderID)
 }
 
 // PlaceBuyToCloseOrder places a buy-to-close order for a specific option
