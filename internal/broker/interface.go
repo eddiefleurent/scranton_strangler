@@ -14,7 +14,7 @@ type Broker interface {
 	GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
 
 	// Order placement
-	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error)
+	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool) (*OrderResponse, error)
 	PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error)
 
 	// Order status
@@ -49,13 +49,13 @@ func (t *TradierClient) GetAccountBalance() (float64, error) {
 }
 
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
-func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error) {
+func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool) (*OrderResponse, error) {
 	if t.useOTOCO {
 		// Use OTOCO order with specified profit target
-		return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, credit, profitTarget, false)
+		return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, limitPrice, 0.5, preview) // 50% profit target for OTOCO
 	}
 	// Use regular strangle order
-	return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, credit, false)
+	return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview)
 }
 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders

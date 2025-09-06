@@ -70,6 +70,16 @@ func (s *JSONStorage) Load() error {
 		return err
 	}
 
+	if s.data == nil {
+		s.data = &StorageData{}
+	}
+	if s.data.Statistics == nil {
+		s.data.Statistics = &Statistics{}
+	}
+	if s.data.DailyPnL == nil {
+		s.data.DailyPnL = make(map[string]float64)
+	}
+
 	return nil
 }
 

@@ -237,8 +237,8 @@ func (b *Bot) executeEntry() {
 		order.CallStrike,
 		order.Expiration,
 		order.Quantity,
-		order.Credit,
-		order.ProfitTarget,
+		order.Credit, // limit price
+		false,        // not preview
 	)
 
 	if err != nil {

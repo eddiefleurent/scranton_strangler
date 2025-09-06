@@ -145,10 +145,23 @@ func (c *Config) GetCheckInterval() time.Duration {
 }
 
 func (c *Config) IsWithinTradingHours(now time.Time) bool {
-	startTime, _ := time.Parse("15:04", c.Schedule.TradingStart)
-	endTime, _ := time.Parse("15:04", c.Schedule.TradingEnd)
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		loc = time.FixedZone("ET", -5*60*60) // fallback, DST-agnostic
+	}
+	todayET := now.In(loc)
 
-	currentTime, _ := time.Parse("15:04", now.Format("15:04"))
+	startClock, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
+	endClock,   err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
+	if err1 != nil || err2 != nil {
+		// Safe defaults if misconfigured
+		startClock, _ = time.ParseInLocation("15:04", "09:45", loc)
+		endClock,   _ = time.ParseInLocation("15:04", "15:45", loc)
+	}
+	start := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
+		startClock.Hour(), startClock.Minute(), 0, 0, loc)
+	end := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
+		endClock.Hour(), endClock.Minute(), 0, 0, loc)
 
-	return currentTime.After(startTime) && currentTime.Before(endTime)
+	return todayET.After(start) && todayET.Before(end)
 }

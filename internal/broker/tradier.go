@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -59,10 +60,27 @@ func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
 
 // ============ EXACT API Response Structures ============
 
+// Handle single-object vs array responses from Tradier
+type singleOrArray[T any] []T
+func (s *singleOrArray[T]) UnmarshalJSON(b []byte) error {
+	if len(b) == 0 || string(b) == "null" {
+		return nil
+	}
+	if b[0] == '[' {
+		return json.Unmarshal(b, (*[]T)(s))
+	}
+	var one T
+	if err := json.Unmarshal(b, &one); err != nil {
+		return err
+	}
+	*s = append(*s, one)
+	return nil
+}
+
 // Option chain response - matches API exactly
 type OptionChainResponse struct {
 	Options struct {
-		Option []Option `json:"option"`
+		Option singleOrArray[Option] `json:"option"`
 	} `json:"options"`
 }
 
@@ -101,7 +119,7 @@ type Greeks struct {
 // Positions response - matches API exactly
 type PositionsResponse struct {
 	Positions struct {
-		Position []PositionItem `json:"position"`
+		Position singleOrArray[PositionItem] `json:"position"`
 	} `json:"positions"`
 }
 
@@ -276,8 +294,9 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	expFormatted := expDate.Format("060102")
 
 	// Build option symbols: SYMBOL + YYMMDD + P/C + 8-digit strike
-	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(putStrike*1000))
-	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(callStrike*1000))
+	// Use rounded 1/1000th dollars to build OCC strike field
+	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(math.Round(putStrike*1000)))
+	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(math.Round(callStrike*1000)))
 
 	// Build form data
 	params := url.Values{}
@@ -407,8 +426,8 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	expFormatted := expDate.Format("060102")
 
 	// Build option symbols
-	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(putStrike*1000))
-	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(callStrike*1000))
+	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(math.Round(putStrike*1000)))
+	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(math.Round(callStrike*1000)))
 
 	// Calculate exit price (50% of credit received)
 	exitPrice := limitCredit * (1 - profitTarget)
@@ -585,10 +604,10 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 			continue
 		}
 
-		// Check if it's a put or call
-		if strings.Contains(pos.Symbol, "P") {
+		switch optionTypeFromSymbol(pos.Symbol) {
+		case "put":
 			putPos = pos
-		} else if strings.Contains(pos.Symbol, "C") {
+		case "call":
 			callPos = pos
 		}
 	}
@@ -602,4 +621,35 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// optionTypeFromSymbol returns "put" | "call" | "" from OSI-like symbols, e.g. SPY241220P00450000
+func optionTypeFromSymbol(s string) string {
+	// Find the type char immediately before the 8-digit strike suffix.
+	// E.g., ...P######## or ...C########
+	if len(s) < 9 {
+		return ""
+	}
+	// Walk backward to locate the 8 trailing digits
+	i := len(s) - 1
+	digits := 0
+	for i >= 0 && digits < 8 {
+		if s[i] < '0' || s[i] > '9' {
+			return ""
+		}
+		i--
+		digits++
+	}
+	if i < 0 {
+		return ""
+	}
+	// The char at i should be 'P' or 'C'
+	switch s[i] {
+	case 'P':
+		return "put"
+	case 'C':
+		return "call"
+	default:
+		return ""
+	}
 }

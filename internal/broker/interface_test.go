@@ -171,6 +171,6 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 	// accepts the profitTarget parameter without panicking
 	// In a real test, we'd mock the API call
 	_ = func() (*OrderResponse, error) {
-		return client.PlaceStrangleOrder("SPY", 450.0, 460.0, "2024-12-20", 1, 2.0, 0.5)
+		return client.PlaceStrangleOrder("SPY", 450.0, 460.0, "2024-12-20", 1, 2.0, false)
 	}
 }

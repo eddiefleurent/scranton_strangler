@@ -17,8 +17,7 @@ Automated options trading bot implementing the SPY short strangle strategy with 
 export TRADIER_API_KEY='your_sandbox_token_here'
 
 # Run the test script
-cd scripts
-go run test_tradier_api.go
+go run ./scripts/test_tradier
 ```
 
 You should see:
@@ -55,7 +54,7 @@ go build -o strangle-bot cmd/bot/main.go
 ## Project Structure
 
 ```
-spy-strangle-bot/
+scranton_strangler/
 ├── cmd/bot/          # Main application entry
 ├── internal/         # Core business logic
 │   ├── broker/       # Tradier API client

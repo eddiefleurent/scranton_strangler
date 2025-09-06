@@ -84,6 +84,11 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	putStrike := s.findStrikeByDelta(options, -s.config.DeltaTarget, true)
 	callStrike := s.findStrikeByDelta(options, s.config.DeltaTarget, false)
 
+	// Validate strikes
+	if putStrike == 0 || callStrike == 0 {
+		return nil, fmt.Errorf("no strikes found near target delta")
+	}
+
 	// Calculate expected credit
 	credit := s.calculateExpectedCredit(options, putStrike, callStrike)
 
@@ -372,23 +377,21 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 }
 
 func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putStrike, callStrike float64) float64 {
-	putCredit := 0.0
-	callCredit := 0.0
-
-	for _, option := range options {
-		if option.Strike == putStrike && option.OptionType == "put" {
-			putCredit = (option.Bid + option.Ask) / 2
-		}
-		if option.Strike == callStrike && option.OptionType == "call" {
-			callCredit = (option.Bid + option.Ask) / 2
-		}
+	put := broker.GetOptionByStrike(options, putStrike, "put")
+	call := broker.GetOptionByStrike(options, callStrike, "call")
+	if put == nil || call == nil {
+		return 0
 	}
-
+	putCredit := (put.Bid + put.Ask) / 2
+	callCredit := (call.Bid + call.Ask) / 2
 	return putCredit + callCredit
 }
 
 func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int {
-	balance, _ := s.broker.GetAccountBalance()
+	balance, err := s.broker.GetAccountBalance()
+	if err != nil {
+		return 0
+	}
 	allocatedCapital := balance * s.config.AllocationPct
 
 	// Estimate buying power requirement (simplified)
@@ -397,7 +400,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int 
 
 	maxContracts := int(allocatedCapital / bprPerContract)
 	if maxContracts < 1 {
-		maxContracts = 1
+		return 0
 	}
 
 	return maxContracts
