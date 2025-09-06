@@ -409,7 +409,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int 
 // CheckExitConditions checks if a position should be exited
 func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool, ExitReason) {
 	if position == nil {
-		return false, ""
+		return false, ExitReasonError
 	}
 
 	// Calculate real-time P&L
@@ -424,11 +424,16 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	// Calculate profit percentage against total credit received (in dollars)
 	totalCredit := position.GetTotalCredit() * float64(position.Quantity) * 100
 	if totalCredit == 0 {
-		return false, ""
+		return false, ExitReasonError
 	}
 	profitPct := currentPnL / totalCredit
 	if profitPct >= s.config.ProfitTarget {
 		return true, ExitReasonProfitTarget
+	}
+
+	// Check 250% stop-loss
+	if profitPct <= -2.5 {
+		return true, ExitReasonStopLoss
 	}
 
 	// Check DTE

@@ -36,9 +36,9 @@ func main() {
 	}
 
 	// Initialize client (sandbox mode)
-	client := broker.NewTradierClient(apiKey, accountID, true /* useOTOCO */, false, 0.5 /* profitTarget */)
+	client := broker.NewTradierClient(apiKey, accountID, true /* sandbox */, true /* useOTOCO */, 0.5 /* profitTarget */)
 	fmt.Printf("✓ Initialized Tradier client (Sandbox mode)\n")
-	fmt.Printf("  API Key: %s...%s\n", apiKey[:8], apiKey[len(apiKey)-4:])
+	fmt.Printf("  API Key: %s\n", maskAPIKey(apiKey))
 	if accountID != "" {
 		fmt.Printf("  Account: %s\n", accountID)
 	}
@@ -236,6 +236,22 @@ func formatNumber(n int64) string {
 func prettyPrint(v interface{}) {
 	b, _ := json.MarshalIndent(v, "  ", "  ")
 	fmt.Printf("%s\n", string(b))
+}
+
+func maskAPIKey(apiKey string) string {
+	const minLength = 12 // Minimum length to show partial key
+	const showFirst = 4  // Show first 4 characters
+	const showLast = 4   // Show last 4 characters
+
+	if apiKey == "" {
+		return "<redacted>"
+	}
+
+	if len(apiKey) < minLength {
+		return "<redacted>"
+	}
+
+	return fmt.Sprintf("%s...%s", apiKey[:showFirst], apiKey[len(apiKey)-showLast:])
 }
 
 func abs[T float64 | int](x T) T {

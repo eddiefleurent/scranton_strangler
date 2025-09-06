@@ -189,6 +189,21 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			expectedReason: "time",
 		},
 		{
+			name: "250% stop-loss triggered",
+			position: &models.Position{
+				Symbol:         "SPY",
+				PutStrike:      400.0,
+				CallStrike:     420.0,
+				Expiration:     time.Now().AddDate(0, 0, 35),
+				Quantity:       1,
+				CreditReceived: 3.50,
+				CurrentPnL:     -875.0, // -250% loss (-$875 on $350 credit)
+				DTE:            35,     // Still have time but losses are too high
+			},
+			expectedExit:   true,
+			expectedReason: "stop_loss",
+		},
+		{
 			name: "no exit conditions met",
 			position: &models.Position{
 				Symbol:         "SPY",
@@ -230,6 +245,12 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
 					mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
 					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
+				case "250% stop-loss triggered":
+					// For -250% loss: credit 3.50, current value should be 12.25
+					// P&L = $350 - $1225 = -$875 (-250% loss)
+					mockClient.setOptionPrice(expiration, 400.0, "put", 6.00)
+					mockClient.setOptionPrice(expiration, 420.0, "call", 6.25)
+					// Total: 12.25, P&L = 3.50 - 12.25 = -8.75 per contract = -$875
 				case "no exit conditions met":
 					// Same as max DTE but different DTE in position
 					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
