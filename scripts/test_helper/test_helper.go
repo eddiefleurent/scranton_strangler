@@ -1,5 +1,4 @@
 //go:build test
-
 // +build test
 
 package main
@@ -19,7 +18,7 @@ func extractUnderlyingFromOSI(s string) string {
 
 	// Look for the first 6-digit sequence (expiration date) with proper validation
 	for i := 0; i <= len(s)-15; i++ { // need at least 15 chars after start for YYMMDD + P/C + 8 digits
-		if isSixDigits(s[i:i+6]) {
+		if isSixDigits(s[i : i+6]) {
 			// Check that the 6-digit sequence is not part of a longer numeric run
 			if i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
 				continue // previous char is digit, skip

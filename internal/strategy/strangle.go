@@ -16,16 +16,16 @@ type StrangleStrategy struct {
 }
 
 type StrategyConfig struct {
-	Symbol           string
-	DTETarget        int     // 45 days
-	DeltaTarget      float64 // 0.16 for 16 delta
-	ProfitTarget     float64 // 0.50 for 50%
-	MaxDTE           int     // 21 days to exit
-	AllocationPct    float64 // 0.35 for 35%
-	MinIVR           float64 // 30
-	MinCredit        float64 // $2.00
-	EscalateLossPct  float64 // e.g., 2.0 (200% loss triggers escalation)
-	StopLossPct      float64 // e.g., 2.5 (250% loss triggers hard stop)
+	Symbol          string
+	DTETarget       int     // 45 days
+	DeltaTarget     float64 // 0.16 for 16 delta
+	ProfitTarget    float64 // 0.50 for 50%
+	MaxDTE          int     // 21 days to exit
+	AllocationPct   float64 // 0.35 for 35%
+	MinIVR          float64 // 30
+	MinCredit       float64 // $2.00
+	EscalateLossPct float64 // e.g., 2.0 (200% loss triggers escalation)
+	StopLossPct     float64 // e.g., 2.5 (250% loss triggers hard stop)
 }
 
 // ExitReason represents the reason for exiting a position

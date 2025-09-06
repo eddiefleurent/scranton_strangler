@@ -1,9 +1,10 @@
 package mock
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/big"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -14,16 +15,37 @@ type MockDataProvider struct {
 	ivr          float64
 }
 
+// secureFloat64 generates a cryptographically secure random float64 between 0 and 1
+func secureFloat64() float64 {
+	n, err := rand.Int(rand.Reader, big.NewInt(1<<53))
+	if err != nil {
+		// Fallback to a reasonable default if crypto/rand fails
+		return 0.5
+	}
+	return float64(n.Int64()) / (1 << 53)
+}
+
+// secureInt63n generates a cryptographically secure random int64 between 0 and n-1
+func secureInt63n(n int64) int64 {
+	max := big.NewInt(n)
+	r, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		// Fallback to a reasonable default if crypto/rand fails
+		return n / 2
+	}
+	return r.Int64()
+}
+
 func NewMockDataProvider() *MockDataProvider {
 	return &MockDataProvider{
-		currentPrice: 450.0 + rand.Float64()*10, // SPY around 450-460
-		ivr:          35.0 + rand.Float64()*20,  // IVR between 35-55
+		currentPrice: 450.0 + secureFloat64()*10, // SPY around 450-460
+		ivr:          35.0 + secureFloat64()*20,  // IVR between 35-55
 	}
 }
 
 func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	// Simulate small price movements
-	m.currentPrice += (rand.Float64() - 0.5) * 2
+	m.currentPrice += (secureFloat64() - 0.5) * 2
 
 	spread := 0.02 // 2 cent spread
 	return &broker.QuoteItem{
@@ -31,13 +53,13 @@ func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 		Last:   m.currentPrice,
 		Bid:    m.currentPrice - spread/2,
 		Ask:    m.currentPrice + spread/2,
-		Volume: rand.Int63n(100000000),
+		Volume: secureInt63n(100000000),
 	}, nil
 }
 
 func (m *MockDataProvider) GetIVR() float64 {
 	// Simulate IV rank changes
-	m.ivr += (rand.Float64() - 0.5) * 2
+	m.ivr += (secureFloat64() - 0.5) * 2
 	m.ivr = math.Max(10, math.Min(90, m.ivr)) // Keep between 10-90
 	return m.ivr
 }
@@ -91,8 +113,8 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 			Bid:            putPrice - 0.05,
 			Ask:            putPrice + 0.05,
 			Last:           putPrice,
-			Volume:         rand.Int63n(10000),
-			OpenInterest:   rand.Int63n(50000),
+			Volume:         secureInt63n(10000),
+			OpenInterest:   secureInt63n(50000),
 			Underlying:     symbol,
 		}
 
@@ -107,8 +129,8 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 			Bid:            callPrice - 0.05,
 			Ask:            callPrice + 0.05,
 			Last:           callPrice,
-			Volume:         rand.Int63n(10000),
-			OpenInterest:   rand.Int63n(50000),
+			Volume:         secureInt63n(10000),
+			OpenInterest:   secureInt63n(50000),
 			Underlying:     symbol,
 		}
 

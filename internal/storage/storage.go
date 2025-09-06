@@ -106,25 +106,34 @@ func (s *JSONStorage) saveUnsafe() error {
 		return err
 	}
 	tmpFile := f.Name()
-	if _, err := f.Write(data); err != nil {
-		f.Close()
+
+	// Ensure cleanup happens even if we return early
+	defer func() {
+		if f != nil {
+			f.Close()
+		}
 		os.Remove(tmpFile)
+	}()
+
+	if _, err := f.Write(data); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmpFile)
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmpFile)
+		f = nil // Prevent double close in defer
 		return err
 	}
+	f = nil // Prevent close in defer since we closed successfully
+
 	// Atomic rename
 	if err := os.Rename(tmpFile, s.filepath); err != nil {
-		os.Remove(tmpFile)
 		return err
 	}
+
+	// Clear tmpFile so defer doesn't try to remove it
+	tmpFile = ""
 	return nil
 }
 
