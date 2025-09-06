@@ -98,5 +98,13 @@ jobs:
       - name: Run basic Go checks
         run: |
           go vet ./...
-          go fmt -l . | (! grep -q .)
+          
+      - name: Check formatting
+        run: |
+          if [ -n "$(go fmt -l .)" ]; then
+            echo "The following files are not formatted:"
+            go fmt -l .
+            echo "Run 'go fmt ./...' to fix formatting"
+            exit 1
+          fi
 
