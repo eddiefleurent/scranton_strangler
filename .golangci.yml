@@ -9,7 +9,6 @@ linters-settings:
     check-blank: true
   
   govet:
-    check-shadowing: true
     enable-all: true
   
   gocyclo:
@@ -70,6 +69,7 @@ linters:
     - nolintlint
     - revive
     - rowserrcheck
+    - shadow
     - staticcheck
     - stylecheck
     - typecheck
