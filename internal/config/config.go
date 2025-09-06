@@ -162,6 +162,11 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	}
 	todayET := now.In(loc)
 
+	// Only allow Monday–Friday trading
+	if todayET.Weekday() == time.Saturday || todayET.Weekday() == time.Sunday {
+		return false
+	}
+
 	startClock, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
 	endClock, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
 	if err1 != nil || err2 != nil {
@@ -174,5 +179,5 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	end := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
 		endClock.Hour(), endClock.Minute(), 0, 0, loc)
 
-	return todayET.After(start) && todayET.Before(end)
+	return !todayET.Before(start) && !todayET.After(end)
 }
