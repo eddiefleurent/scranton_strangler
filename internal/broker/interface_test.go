@@ -3,7 +3,6 @@ package broker
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
