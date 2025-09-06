@@ -79,9 +79,6 @@ func main() {
 
 	// Initialize storage
 	storagePath := cfg.Storage.Path
-	if storagePath == "" {
-		storagePath = "positions.json"
-	}
 	store, err := storage.NewStorage(storagePath)
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
@@ -450,7 +447,7 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 
 	switch reason {
 	case strategy.ExitReasonProfitTarget:
-		return position.CreditReceived * 0.5
+		return position.CreditReceived * (1.0 - b.config.Strategy.Exit.ProfitTarget)
 	case strategy.ExitReasonTime:
 		if cvErr == nil {
 			return currentVal / (float64(position.Quantity) * 100)

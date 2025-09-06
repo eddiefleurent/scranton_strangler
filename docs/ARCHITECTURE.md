@@ -278,15 +278,15 @@ type RiskManager interface {
 ### Automated Order Flow Decision Tree
 ```
 Position Entry:
-  use_otoco=true? → OTOCO (entry + 50% exit)
-  use_bracket=true? → Bracket (entry + profit + stop)
-  Default → Regular strangle + monitoring
+  use_otoco=true? → OTOCO (entry + 50% exit) ⭐ CURRENT RUNTIME
+  use_bracket=true? → Bracket (entry + profit + stop) [PLANNED/IGNORED]
+  Default → Regular strangle + monitoring [PLANNED/IGNORED]
 
 Position Management:
-  First Down → Monitor via OTOCO exit order
-  Second Down → OCO (70% profit OR roll untested)  
-  Third Down → OCO (25% profit OR continue)
-  Fourth Down → OCO (any profit OR 200% stop)
+  First Down → Monitor via OTOCO exit order ⭐ CURRENT RUNTIME
+  Second Down → OCO (70% profit OR roll untested) ⭐ CURRENT RUNTIME
+  Third Down → OCO (25% profit OR continue) [PLANNED/IGNORED]
+  Fourth Down → OCO (any profit OR 200% stop) [PLANNED/IGNORED]
   
 Hard Stops (Immediate):
   Loss > 250%? → Market close order
@@ -302,7 +302,7 @@ Next Trade:
 
 ### Strategy Alignment
 - **Risk Controls**: Escalation and stop-loss thresholds supported
-- **50% Profit Target**: Automated via OTOCO exit orders
+- **50% Profit Target**: Monitored and exited via programmatic monitoring and single-leg orders
 - **Rolling Management**: OCO supports "football system" adjustments
 - **Manual Override**: Always available for black swan events
 
@@ -365,16 +365,25 @@ type PositionStateMachine struct {
 func (sm *PositionStateMachine) TransitionTo(newState PositionState) error {
     sm.mu.Lock()
     defer sm.mu.Unlock()
-    
+
     if !sm.isValidTransition(sm.current, newState) {
         return ErrInvalidStateTransition
     }
-    
-    // Atomic update with rollback capability
-    if err := sm.storage.UpdateState(newState); err != nil {
+
+    // Get current position, update its state, and persist atomically
+    position := sm.storage.GetCurrentPosition()
+    if position == nil {
+        return fmt.Errorf("no current position to update")
+    }
+
+    if err := position.TransitionState(newState, "state_machine_transition"); err != nil {
+        return fmt.Errorf("failed to transition position state: %w", err)
+    }
+
+    if err := sm.storage.SetCurrentPosition(position); err != nil {
         return fmt.Errorf("failed to persist state: %w", err)
     }
-    
+
     sm.current = newState
     return nil
 }
@@ -384,14 +393,21 @@ func (sm *PositionStateMachine) TransitionTo(newState PositionState) error {
 ```go
 // Retry with exponential backoff
 func (b *ResilientBroker) GetQuoteWithRetry(symbol string) (*Quote, error) {
-    return retry.Do(
+    var q *Quote
+    err := retry.Do(
         func() error {
-            return b.broker.GetQuote(symbol)
+            quote, err := b.broker.GetQuote(symbol)
+            if err != nil {
+                return err
+            }
+            q = quote
+            return nil
         },
         retry.Attempts(3),
         retry.Delay(time.Second),
         retry.DelayType(retry.BackOffDelay),
     )
+    return q, err
 }
 
 // Circuit breaker implementation - IMPLEMENTED ✅
@@ -632,7 +648,7 @@ broker:
   api_key: "${TRADIER_API_KEY}"  # From environment
   api_endpoint: "https://sandbox.tradier.com/v1/"
   account_id: "${TRADIER_ACCOUNT}"
-  use_otoco: true  # OTOCO orders for preset exits
+  use_otoco: false  # OTOCO orders are currently ignored/not implemented
   
 strategy:
   symbol: "SPY"

@@ -939,13 +939,8 @@ func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
 
 	// Next call should return circuit breaker error
 	_, err := cb.GetAccountBalance()
-	if err == nil {
-		t.Error("Expected circuit breaker error but got nil")
-	}
-
-	// Error should contain circuit breaker open message
-	if !strings.Contains(err.Error(), "circuit breaker is open") {
-		t.Errorf("Expected circuit breaker open error but got: %v", err)
+	if !errors.Is(err, gobreaker.ErrOpenState) {
+		t.Errorf("Expected gobreaker.ErrOpenState but got: %v", err)
 	}
 }
 

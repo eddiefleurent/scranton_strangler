@@ -616,7 +616,7 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 		log.Printf("Rate limit remaining: %s", remaining)
 	}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return &APIError{Status: resp.StatusCode, Body: "failed to read error body"}
