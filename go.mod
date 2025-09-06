@@ -1,4 +1,4 @@
-module github.com/eddie/scranton_strangler
+module github.com/eddiefleurent/scranton_strangler
 
 go 1.25.1
 

@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/eddie/scranton_strangler/internal/broker"
+	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 )
 
 type MockDataProvider struct {

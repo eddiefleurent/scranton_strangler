@@ -3,7 +3,7 @@ package storage
 import (
 	"fmt"
 
-	"github.com/eddie/scranton_strangler/internal/models"
+	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
 // MockStorage implements StorageInterface for testing

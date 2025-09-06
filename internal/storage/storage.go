@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eddie/scranton_strangler/internal/models"
+	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
 // JSONStorage implements StorageInterface using JSON file persistence
@@ -152,7 +152,7 @@ func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.data.CurrentPosition = pos
+	s.data.CurrentPosition = clonePosition(pos)
 	return s.saveUnsafe()
 }
 
@@ -248,9 +248,15 @@ func (s *JSONStorage) GetDailyPnL(date string) float64 {
 func (s *JSONStorage) GetHistory() []models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	// Return a copy to prevent external mutation of internal state
+	// Return a deep copy to prevent external mutation of internal state
 	history := make([]models.Position, len(s.data.History))
-	copy(history, s.data.History)
+	for i, pos := range s.data.History {
+		// Create a deep copy of each position
+		cloned := clonePosition(&pos)
+		if cloned != nil {
+			history[i] = *cloned
+		}
+	}
 	return history
 }
 
@@ -264,4 +270,40 @@ func (s *JSONStorage) AddAdjustment(adj models.Adjustment) error {
 
 	s.data.CurrentPosition.Adjustments = append(s.data.CurrentPosition.Adjustments, adj)
 	return s.saveUnsafe()
+}
+
+// clonePosition creates a deep copy of a Position to prevent mutable state leakage
+func clonePosition(pos *models.Position) *models.Position {
+	if pos == nil {
+		return nil
+	}
+
+	// Create a new Position and copy all primitive fields
+	cloned := &models.Position{
+		ID:             pos.ID,
+		Symbol:         pos.Symbol,
+		PutStrike:      pos.PutStrike,
+		CallStrike:     pos.CallStrike,
+		Expiration:     pos.Expiration,
+		Quantity:       pos.Quantity,
+		CreditReceived: pos.CreditReceived,
+		EntryDate:      pos.EntryDate,
+		EntryIVR:       pos.EntryIVR,
+		EntrySpot:      pos.EntrySpot,
+		CurrentPnL:     pos.CurrentPnL,
+		DTE:            pos.DTE,
+	}
+
+	// Deep copy Adjustments slice
+	if len(pos.Adjustments) > 0 {
+		cloned.Adjustments = make([]models.Adjustment, len(pos.Adjustments))
+		copy(cloned.Adjustments, pos.Adjustments)
+	}
+
+	// Deep copy StateMachine
+	if pos.StateMachine != nil {
+		cloned.StateMachine = pos.StateMachine.Copy()
+	}
+
+	return cloned
 }

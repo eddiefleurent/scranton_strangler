@@ -389,8 +389,15 @@ func (t *TradierAPI) GetOrderStatus(orderID int) (*OrderResponse, error) {
 }
 
 func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error) {
+	// Extract underlying symbol from option OCC/OSI code
+	symbol := extractUnderlyingFromOSI(optionSymbol)
+	if symbol == "" {
+		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
+	}
+
 	params := url.Values{}
 	params.Add("class", "option")
+	params.Add("symbol", symbol) // Required underlying symbol
 	params.Add("option_symbol", optionSymbol)
 	params.Add("side", "buy_to_close")
 	params.Add("quantity", fmt.Sprintf("%d", quantity))
@@ -417,67 +424,9 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	profitTarget float64, // percentage as decimal (0.5 for 50%)
 	preview bool,
 ) (*OrderResponse, error) {
-	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
-	expDate, err := time.Parse("2006-01-02", expiration)
-	if err != nil {
-		return nil, fmt.Errorf("invalid expiration format: %w", err)
-	}
-	expFormatted := expDate.Format("060102")
-
-	// Build option symbols
-	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(math.Round(putStrike*1000)))
-	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(math.Round(callStrike*1000)))
-
-	// Calculate exit price (50% of credit received)
-	exitPrice := limitCredit * (1 - profitTarget)
-
-	// Build OTOCO form data
-	params := url.Values{}
-	params.Add("class", "otoco")
-	params.Add("duration", "gtc") // Good-till-canceled for the overall order
-
-	if preview {
-		params.Add("preview", "true")
-	}
-
-	// Primary order: Open the strangle
-	params.Add("type[0]", "credit")
-	params.Add("duration[0]", "day")
-	params.Add("price[0]", fmt.Sprintf("%.2f", limitCredit))
-
-	// Primary order Leg 0: Sell put
-	params.Add("option_symbol[0][0]", putSymbol)
-	params.Add("side[0][0]", "sell_to_open")
-	params.Add("quantity[0][0]", fmt.Sprintf("%d", quantity))
-
-	// Primary order Leg 1: Sell call
-	params.Add("option_symbol[0][1]", callSymbol)
-	params.Add("side[0][1]", "sell_to_open")
-	params.Add("quantity[0][1]", fmt.Sprintf("%d", quantity))
-
-	// OTO Order 1: Close at profit target (50% of credit)
-	params.Add("type[1]", "debit")
-	params.Add("duration[1]", "gtc")
-	params.Add("price[1]", fmt.Sprintf("%.2f", exitPrice))
-
-	// OTO Order 1 Leg 0: Buy back put
-	params.Add("option_symbol[1][0]", putSymbol)
-	params.Add("side[1][0]", "buy_to_close")
-	params.Add("quantity[1][0]", fmt.Sprintf("%d", quantity))
-
-	// OTO Order 1 Leg 1: Buy back call
-	params.Add("option_symbol[1][1]", callSymbol)
-	params.Add("side[1][1]", "buy_to_close")
-	params.Add("quantity[1][1]", fmt.Sprintf("%d", quantity))
-
-	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
-
-	var response OrderResponse
-	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
-		return nil, err
-	}
-
-	return &response, nil
+	// OTOCO orders in Tradier API do not support multi-leg orders like strangles
+	// The API documentation specifies that OTOCO is for single-leg orders only
+	return nil, fmt.Errorf("OTOCO orders do not support multi-leg strangle orders in Tradier API - use separate orders for opening and closing positions, or implement a polling mechanism to monitor fills and submit individual close orders")
 }
 
 // Helper method for making HTTP requests
@@ -620,6 +569,38 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
+// e.g., "SPY241220P00450000" -> "SPY"
+func extractUnderlyingFromOSI(s string) string {
+	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
+	// We need to find the start of the 6-digit expiration date
+	if len(s) < 15 { // minimum length for a valid option symbol
+		return ""
+	}
+
+	// Look for the first 6-digit sequence (expiration date)
+	for i := 0; i <= len(s)-6; i++ {
+		if isSixDigits(s[i : i+6]) {
+			return s[:i]
+		}
+	}
+
+	return ""
+}
+
+// isSixDigits checks if a string consists of exactly 6 digits
+func isSixDigits(s string) bool {
+	if len(s) != 6 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // optionTypeFromSymbol returns "put" | "call" | "" from OSI-like symbols, e.g. SPY241220P00450000

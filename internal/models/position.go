@@ -70,14 +70,14 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 		p.StateMachine = NewStateMachine()
 	}
 
-	// Set EntryDate when transitioning to open state
-	if to == StateOpen {
-		p.EntryDate = time.Now()
-	}
-
 	err := p.StateMachine.Transition(to, condition)
 	if err != nil {
 		return fmt.Errorf("position %s state transition failed: %w", p.ID, err)
+	}
+
+	// Set EntryDate when transitioning to open state (only if not already set)
+	if to == StateOpen && p.EntryDate.IsZero() {
+		p.EntryDate = time.Now()
 	}
 
 	return nil

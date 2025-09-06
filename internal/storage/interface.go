@@ -1,6 +1,6 @@
 package storage
 
-import "github.com/eddie/scranton_strangler/internal/models"
+import "github.com/eddiefleurent/scranton_strangler/internal/models"
 
 // StorageInterface defines the contract for position and trade data persistence
 type StorageInterface interface {

@@ -166,7 +166,10 @@ func TestStateMachine_TimeRollLimits(t *testing.T) {
 	}
 
 	for _, tr := range setupTransitions {
-		sm.Transition(tr.to, tr.condition)
+		err := sm.Transition(tr.to, tr.condition)
+		if err != nil {
+			t.Fatalf("Setup transition failed: %v", err)
+		}
 	}
 
 	// First time roll should succeed
@@ -181,10 +184,22 @@ func TestStateMachine_TimeRollLimits(t *testing.T) {
 	}
 
 	// Complete the roll and get back to critical state
-	sm.Transition(StateFirstDown, "roll_complete")
-	sm.Transition(StateSecondDown, "strike_challenged")
-	sm.Transition(StateThirdDown, "strike_breached")
-	sm.Transition(StateFourthDown, "adjustment_failed")
+	err = sm.Transition(StateFirstDown, "roll_complete")
+	if err != nil {
+		t.Fatalf("Roll complete transition failed: %v", err)
+	}
+	err = sm.Transition(StateSecondDown, "strike_challenged")
+	if err != nil {
+		t.Fatalf("Strike challenged transition failed: %v", err)
+	}
+	err = sm.Transition(StateThirdDown, "strike_breached")
+	if err != nil {
+		t.Fatalf("Strike breached transition failed: %v", err)
+	}
+	err = sm.Transition(StateFourthDown, "adjustment_failed")
+	if err != nil {
+		t.Fatalf("Adjustment failed transition failed: %v", err)
+	}
 
 	// Second time roll should fail (max 1 allowed)
 	err = sm.Transition(StateRolling, "punt_decision")
@@ -239,8 +254,18 @@ func TestStateMachine_StateValidation(t *testing.T) {
 	}
 
 	// Test validation after normal transitions
-	sm.Transition(StateOpen, "position_filled")
-	sm.Transition(StateFirstDown, "start_management")
+	err = sm.Transition(StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Transition to Submitted failed: %v", err)
+	}
+	err = sm.Transition(StateOpen, "order_filled")
+	if err != nil {
+		t.Fatalf("Transition to Open failed: %v", err)
+	}
+	err = sm.Transition(StateFirstDown, "start_management")
+	if err != nil {
+		t.Fatalf("Transition to FirstDown failed: %v", err)
+	}
 
 	err = sm.ValidateStateConsistency()
 	if err != nil {
