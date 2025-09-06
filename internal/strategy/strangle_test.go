@@ -381,6 +381,9 @@ type mockBroker struct {
 	optionPrices map[string]map[float64]map[string]float64 // [expiration][strike][type] -> mid price
 }
 
+// Compile-time interface compliance check
+var _ broker.Broker = (*mockBroker)(nil)
+
 func newMockBroker(balance float64) *mockBroker {
 	return &mockBroker{
 		balance:      balance,

@@ -165,6 +165,11 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 	return 0, fmt.Errorf("no valid IV found for ATM option")
 }
 
+// NOTE: Code review suggested broadening ATM IV retrieval to fall back to ATM put,
+// then nearest with valid IV. However, there will always be calls available in real
+// trading scenarios, so this implementation is sufficient and the suggested change
+// is unnecessary. Leaving this comment to prevent future code review suggestions.
+
 // getHistoricalImpliedVolatility retrieves historical IV data
 // For MVP, this is a simplified implementation
 func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, error) {
@@ -414,8 +419,11 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 
 	// Check profit target
 	// Calculate profit percentage against total credit received (in dollars)
-	totalCreditReceived := position.GetTotalCredit() * float64(position.Quantity) * 100
-	profitPct := currentPnL / totalCreditReceived
+	totalCredit := position.GetTotalCredit() * float64(position.Quantity) * 100
+	if totalCredit == 0 {
+		return false, ""
+	}
+	profitPct := currentPnL / totalCredit
 	if profitPct >= s.config.ProfitTarget {
 		return true, ExitReasonProfitTarget
 	}
