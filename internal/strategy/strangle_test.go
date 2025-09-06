@@ -435,15 +435,15 @@ func (m *mockBroker) GetPositions() ([]broker.PositionItem, error) {
 	return nil, nil
 }
 
-func (m *mockBroker) GetQuote(symbol string) (*broker.QuoteItem, error) {
+func (m *mockBroker) GetQuote(_ string) (*broker.QuoteItem, error) {
 	return &broker.QuoteItem{Last: 420.0}, nil
 }
 
-func (m *mockBroker) GetExpirations(symbol string) ([]string, error) {
+func (m *mockBroker) GetExpirations(_ string) ([]string, error) {
 	return nil, nil
 }
 
-func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+func (m *mockBroker) GetOptionChain(_, expiration string, _ bool) ([]broker.Option, error) {
 	var options []broker.Option
 
 	// Check if we have custom prices set for this expiration
@@ -485,12 +485,12 @@ func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 }
 
 func (m *mockBroker) PlaceStrangleOrder(
-	symbol string,
-	putStrike, callStrike float64,
-	expiration string,
-	quantity int,
-	limitPrice float64,
-	preview bool,
+	_ string,
+	_, _ float64,
+	_ string,
+	_ int,
+	_ float64,
+	_ bool,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }

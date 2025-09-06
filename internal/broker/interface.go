@@ -2,9 +2,9 @@ package broker
 
 import (
 	"context"
+	"errors"
 	"log"
 	"math"
-	"strings"
 	"time"
 )
 
@@ -47,9 +47,12 @@ type TradierClient struct {
 // profitTarget should be a ratio between 0.0 and 1.0 (e.g., 0.5 for 50% profit target)
 func NewTradierClient(apiKey, accountID string, sandbox bool,
 	useOTOCO bool, profitTarget float64) *TradierClient {
-	if profitTarget < 0 || profitTarget > 1 {
-		// Reset to 0 instead of panicking - let caller handle invalid values
+	if profitTarget < 0 {
+		log.Printf("invalid profitTarget %.3f; clamping to 0", profitTarget)
 		profitTarget = 0
+	} else if profitTarget > 1 {
+		log.Printf("invalid profitTarget %.3f; clamping to 1", profitTarget)
+		profitTarget = 1
 	}
 	return &TradierClient{
 		TradierAPI:   NewTradierAPI(apiKey, accountID, sandbox),
@@ -76,7 +79,7 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 			expiration, quantity, limitPrice, t.profitTarget, preview)
 		if err != nil {
 			// Check if error indicates OTOCO unsupported - fall back to regular order
-			if strings.Contains(err.Error(), "unsupported") || strings.Contains(err.Error(), "OTOCO") {
+			if errors.Is(err, ErrOTOCOUnsupported) {
 				// Log OTOCO-specific error and fall back to regular order
 				log.Printf("warning: OTOCO unavailable, falling back to regular multileg: %v", err)
 				// Use regular strangle order as fallback
@@ -170,5 +173,9 @@ func GetOptionByStrike(options []Option, strike float64, optionType string) *Opt
 func DaysBetween(from, to time.Time) int {
 	f := from.UTC().Truncate(24 * time.Hour)
 	t := to.UTC().Truncate(24 * time.Hour)
-	return int(t.Sub(f).Hours() / 24)
+	d := int(t.Sub(f).Hours() / 24)
+	if d < 0 {
+		return -d
+	}
+	return d
 }

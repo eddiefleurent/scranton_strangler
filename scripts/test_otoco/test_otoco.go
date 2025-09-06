@@ -1,3 +1,4 @@
+// Package main provides a test utility for OTOCO order functionality.
 package main
 
 import (

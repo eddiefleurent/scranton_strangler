@@ -1,3 +1,4 @@
+// Package strategy implements trading strategies for options.
 package strategy
 
 import (
@@ -10,11 +11,13 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
+// StrangleStrategy implements a short strangle options strategy.
 type StrangleStrategy struct {
 	broker broker.Broker
 	config *StrategyConfig
 }
 
+// StrategyConfig contains configuration parameters for the strangle strategy.
 type StrategyConfig struct {
 	Symbol              string
 	DTETarget           int     // 45 days
@@ -33,6 +36,7 @@ type StrategyConfig struct {
 type ExitReason string
 
 const (
+	// ExitReasonProfitTarget indicates position closed due to profit target hit
 	ExitReasonProfitTarget ExitReason = "profit_target"
 	ExitReasonTime         ExitReason = "time"
 	ExitReasonEscalate     ExitReason = "escalate"
@@ -42,6 +46,7 @@ const (
 	ExitReasonNone         ExitReason = "none"
 )
 
+// NewStrangleStrategy creates a new strangle strategy instance.
 func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrategy {
 	return &StrangleStrategy{
 		broker: b,
@@ -49,6 +54,7 @@ func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrat
 	}
 }
 
+// CheckEntryConditions evaluates whether current market conditions are suitable for entry.
 func (s *StrangleStrategy) CheckEntryConditions() (bool, string) {
 	// Position existence is enforced by storage layer
 
@@ -66,6 +72,7 @@ func (s *StrangleStrategy) CheckEntryConditions() (bool, string) {
 	return true, "entry conditions met"
 }
 
+// FindStrangleStrikes identifies optimal put and call strikes for the strangle.
 func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	// Get current SPY price
 	quote, err := s.broker.GetQuote(s.config.Symbol)
@@ -479,6 +486,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	return false, ExitReasonNone
 }
 
+// CalculatePnL calculates the current profit/loss for a position.
 func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 	// Use the unified CalculatePositionPnL implementation
 	pnl, err := s.CalculatePositionPnL(pos)
@@ -489,6 +497,7 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 	return pnl
 }
 
+// StrangleOrder represents the details of a strangle order to be placed.
 type StrangleOrder struct {
 	Symbol       string
 	Expiration   string

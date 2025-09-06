@@ -107,7 +107,7 @@ func NewStateMachine() *StateMachine {
 	return &StateMachine{
 		currentState:    StateIdle,
 		previousState:   StateIdle,
-		transitionTime:  time.Now(),
+		transitionTime:  time.Now().UTC(),
 		transitionCount: make(map[PositionState]int),
 		maxAdjustments:  3, // Max 3 strike adjustments per trade
 		maxTimeRolls:    1, // Max 1 time roll per trade
@@ -126,36 +126,57 @@ func (sm *StateMachine) GetPreviousState() PositionState {
 
 // IsValidTransition checks if a transition is valid
 func (sm *StateMachine) IsValidTransition(to PositionState, condition string) error {
-	// Check if this transition is defined
-	var foundTransition bool
-	for _, transition := range ValidTransitions {
-		if transition.From == sm.currentState && transition.To == to {
-			foundTransition = true
-			// If a condition is specified on the allowed transition, check if it matches
-			if transition.Condition != "" && condition != "" && condition == transition.Condition {
-				// Condition matches, proceed with additional validation
-				break
-			} else if transition.Condition == "" {
-				// No condition required for this transition, it's valid
-				break
-			}
-			// If condition doesn't match, continue checking other transitions
-		}
-	}
-
-	if !foundTransition {
+	if !sm.isTransitionDefined(to, condition) {
 		return fmt.Errorf("invalid transition from %s to %s with condition '%s'",
 			sm.currentState, to, condition)
 	}
 
-	// Additional validation for adjustment limits
+	return sm.validateTransitionLimits(to)
+}
+
+// isTransitionDefined checks if the transition is defined in ValidTransitions
+func (sm *StateMachine) isTransitionDefined(to PositionState, condition string) bool {
+	for _, transition := range ValidTransitions {
+		if sm.matchesTransition(transition, to, condition) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesTransition checks if a transition matches the given state and condition
+func (sm *StateMachine) matchesTransition(transition StateTransition, to PositionState, condition string) bool {
+	if transition.From != sm.currentState || transition.To != to {
+		return false
+	}
+	return sm.conditionMatches(transition.Condition, condition)
+}
+
+// conditionMatches checks if the condition requirements are satisfied
+func (sm *StateMachine) conditionMatches(transitionCondition, providedCondition string) bool {
+	// No condition required and none provided
+	if transitionCondition == "" && providedCondition == "" {
+		return true
+	}
+	// Condition required and matches
+	if transitionCondition != "" && providedCondition != "" && providedCondition == transitionCondition {
+		return true
+	}
+	// No condition required but one provided (allowed)
+	if transitionCondition == "" && providedCondition != "" {
+		return true
+	}
+	return false
+}
+
+// validateTransitionLimits checks if transition limits are respected
+func (sm *StateMachine) validateTransitionLimits(to PositionState) error {
 	if to == StateAdjusting && sm.transitionCount[StateAdjusting] >= sm.maxAdjustments {
 		return fmt.Errorf("maximum adjustments (%d) exceeded", sm.maxAdjustments)
 	}
 	if to == StateRolling && sm.transitionCount[StateRolling] >= sm.maxTimeRolls {
 		return fmt.Errorf("maximum time rolls (%d) exceeded", sm.maxTimeRolls)
 	}
-
 	return nil
 }
 
@@ -169,12 +190,12 @@ func (sm *StateMachine) Transition(to PositionState, condition string) error {
 	// Perform transition
 	sm.previousState = sm.currentState
 	sm.currentState = to
-	sm.transitionTime = time.Now()
+	sm.transitionTime = time.Now().UTC()
 	sm.transitionCount[to]++
 
 	// Set Fourth Down start time
 	if to == StateFourthDown {
-		sm.fourthDownStartTime = time.Now()
+		sm.fourthDownStartTime = time.Now().UTC()
 	}
 
 	return nil
@@ -189,7 +210,7 @@ func (sm *StateMachine) GetTransitionCount(state PositionState) int {
 func (sm *StateMachine) Reset() {
 	sm.currentState = StateIdle
 	sm.previousState = StateIdle
-	sm.transitionTime = time.Now()
+	sm.transitionTime = time.Now().UTC()
 	sm.transitionCount = make(map[PositionState]int)
 	sm.fourthDownOption = ""
 	sm.fourthDownStartTime = time.Time{}

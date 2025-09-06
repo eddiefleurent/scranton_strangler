@@ -1,7 +1,9 @@
+// Package orders provides order management functionality for the trading bot.
 package orders
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,18 +12,22 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
+	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 )
 
+// Config contains configuration for the order manager.
 type Config struct {
 	PollInterval time.Duration
 	Timeout      time.Duration
 }
 
+// DefaultConfig is the default configuration for the order manager.
 var DefaultConfig = Config{
 	PollInterval: 5 * time.Second,
 	Timeout:      5 * time.Minute,
 }
 
+// Manager handles order execution and status polling.
 type Manager struct {
 	broker  broker.Broker
 	storage storage.StorageInterface
@@ -30,6 +36,7 @@ type Manager struct {
 	config  Config
 }
 
+// NewManager creates a new order manager instance.
 func NewManager(
 	broker broker.Broker,
 	storage storage.StorageInterface,
@@ -64,6 +71,7 @@ func NewManager(
 	}
 }
 
+// PollOrderStatus polls the status of an order until it's filled or fails.
 func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder bool) {
 	m.logger.Printf("Starting order status polling for position %s, order %d", positionID, orderID)
 
@@ -85,11 +93,11 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 		case <-ticker.C:
 			// Create a child context with short timeout for the GetOrderStatus call
 			statusCtx, statusCancel := context.WithTimeout(ctx, 5*time.Second)
-			defer statusCancel() // Defer cancel so it runs when this case exits
 			orderStatus, err := m.broker.GetOrderStatusCtx(statusCtx, orderID)
+			statusCancel() // Explicitly cancel the context after the call
 
 			if err != nil {
-				if statusCtx.Err() == context.DeadlineExceeded {
+				if errors.Is(err, context.DeadlineExceeded) {
 					m.logger.Printf("GetOrderStatus timeout for position %s, order %d", positionID, orderID)
 					continue // Continue the loop on timeout so ticker keeps running
 				}
@@ -101,6 +109,12 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 				m.logger.Printf("Nil order status for %d", orderID)
 				continue
 			}
+
+			if orderStatus.Order.Status == "" {
+				m.logger.Printf("Order %d has empty status field, cannot determine status", orderID)
+				continue
+			}
+
 			m.logger.Printf("Order %d status: %s", orderID, orderStatus.Order.Status)
 
 			switch orderStatus.Order.Status {
@@ -136,8 +150,26 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 		targetState = models.StateOpen
 		transitionReason = "entry_order_filled"
 	} else {
+		// For exit orders, transition to a special state that indicates
+		// the exit order is filled but needs completion (P&L calculation, etc.)
 		targetState = models.StateClosed
-		transitionReason = "exit_order_filled"
+		transitionReason = "exit_order_filled_pending_completion"
+
+		// Parse exit reason from stored value
+		exitReason := strategy.ExitReason(position.ExitReason)
+		m.logger.Printf("Exit order filled for position %s with reason: %s", positionID, exitReason)
+
+		// Calculate final P&L (simplified version)
+		// Note: This is a simplified calculation. The full P&L calculation
+		// should be done by the bot with access to strategy methods
+		totalCredit := position.CreditReceived * float64(position.Quantity) * 100
+		if position.CurrentPnL != 0 {
+			// Use current P&L if available
+			m.logger.Printf("Position %s exit order filled. Final P&L: $%.2f", positionID, position.CurrentPnL)
+		} else {
+			// Fallback to credit received
+			m.logger.Printf("Position %s exit order filled. Estimated P&L: $%.2f", positionID, totalCredit)
+		}
 	}
 
 	if err := position.TransitionState(targetState, transitionReason); err != nil {
@@ -160,9 +192,23 @@ func (m *Manager) handleOrderFailed(positionID string, reason string) {
 		return
 	}
 
-	if err := position.TransitionState(models.StateError, fmt.Sprintf("order_%s", reason)); err != nil {
-		m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
-		return
+	// Check if this is an exit order failure
+	isExitOrder := position.ExitOrderID != "" && position.GetCurrentState() == models.StateAdjusting
+
+	if isExitOrder {
+		m.logger.Printf("Exit order failed for position %s: %s, reverting to previous state", positionID, reason)
+		// For exit order failures, revert to the previous state (likely Open or management state)
+		// and clear the exit order ID
+		position.ExitOrderID = ""
+		position.ExitReason = ""
+		if err := position.TransitionState(models.StateOpen, fmt.Sprintf("exit_order_%s", reason)); err != nil {
+			m.logger.Printf("Failed to revert position %s state: %v", positionID, err)
+		}
+	} else {
+		if err := position.TransitionState(models.StateError, fmt.Sprintf("order_%s", reason)); err != nil {
+			m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
+			return
+		}
 	}
 
 	if err := m.storage.SetCurrentPosition(position); err != nil {
@@ -170,7 +216,11 @@ func (m *Manager) handleOrderFailed(positionID string, reason string) {
 		return
 	}
 
-	m.logger.Printf("Position %s marked as error due to order failure: %s", positionID, reason)
+	if isExitOrder {
+		m.logger.Printf("Position %s reverted to active state due to exit order failure: %s", positionID, reason)
+	} else {
+		m.logger.Printf("Position %s marked as error due to order failure: %s", positionID, reason)
+	}
 }
 
 func (m *Manager) handleOrderTimeout(positionID string) {

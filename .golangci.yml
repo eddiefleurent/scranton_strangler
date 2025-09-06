@@ -49,6 +49,7 @@ linters:
     - dogsled
     - errcheck
     - copyloopvar
+    - revive
     - funlen
     - gochecknoinits
     - goconst
@@ -72,7 +73,7 @@ linters:
     - whitespace
 
   disable:
-    - mnd  
+    # empty
 
 issues:
   exclude-rules:

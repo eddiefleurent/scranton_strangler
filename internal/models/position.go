@@ -11,6 +11,8 @@ type Position struct {
 	ID             string        `json:"id"`
 	Symbol         string        `json:"symbol"`
 	EntryOrderID   string        `json:"entry_order_id"`
+	ExitOrderID    string        `json:"exit_order_id"`
+	ExitReason     string        `json:"exit_reason"`
 	Expiration     time.Time     `json:"expiration"`
 	EntryDate      time.Time     `json:"entry_date"`
 	CreditReceived float64       `json:"credit_received"`
@@ -33,7 +35,9 @@ type Adjustment struct {
 }
 
 func (p *Position) CalculateDTE() int {
-	return int(time.Until(p.Expiration).Hours() / 24)
+	now := time.Now().UTC().Truncate(24 * time.Hour)
+	exp := p.Expiration.UTC().Truncate(24 * time.Hour)
+	return int(exp.Sub(now).Hours() / 24)
 }
 
 func (p *Position) GetTotalCredit() float64 {
@@ -97,7 +101,7 @@ func (p *Position) GetCurrentState() PositionState {
 // IsInManagement returns true if position is in football management states
 func (p *Position) IsInManagement() bool {
 	if p.StateMachine == nil {
-		return false
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.IsManagementState()
 }

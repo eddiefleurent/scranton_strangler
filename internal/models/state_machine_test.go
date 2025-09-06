@@ -5,13 +5,11 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 // Test constants for repeated strings
 var (
-	emergencyExitMessage = fmt.Sprintf("emergency exit: loss 142.9%% >= %.0f%% threshold", config.EscalateLossPct*100)
+	emergencyExitMessage = "emergency exit: loss 142.9% >= 200% threshold"
 )
 
 func TestStateMachine_BasicTransitions(t *testing.T) {
@@ -666,6 +664,71 @@ func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	}
 	if sm.puntCount != 0 {
 		t.Errorf("Punt count should be 0 after reset, got %d", sm.puntCount)
+	}
+}
+
+// Test ProfitPercent calculation with different quantities
+func TestPosition_ProfitPercent(t *testing.T) {
+	expiration := time.Now().AddDate(0, 0, 45)
+
+	testCases := []struct {
+		name           string
+		quantity       int
+		creditReceived float64
+		currentPnL     float64
+		expectedPct    float64
+	}{
+		{
+			name:           "Single quantity, positive P&L",
+			quantity:       1,
+			creditReceived: 3.50,
+			currentPnL:     175.0,  // 50% of total credit (3.50 * 1 * 100 = 350)
+			expectedPct:    50.0,
+		},
+		{
+			name:           "Single quantity, negative P&L",
+			quantity:       1,
+			creditReceived: 3.50,
+			currentPnL:     -175.0, // -50% of total credit
+			expectedPct:    -50.0,
+		},
+		{
+			name:           "Multiple quantity, positive P&L",
+			quantity:       5,
+			creditReceived: 3.50,
+			currentPnL:     437.5, // 25% of total credit (3.50 * 5 * 100 = 1750)
+			expectedPct:    25.0,
+		},
+		{
+			name:           "Multiple quantity, zero P&L",
+			quantity:       3,
+			creditReceived: 2.00,
+			currentPnL:     0,
+			expectedPct:    0,
+		},
+		{
+			name:           "Zero credit received",
+			quantity:       1,
+			creditReceived: 0,
+			currentPnL:     100,
+			expectedPct:    0,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pos := NewPosition("TEST-1", "SPY", 400.0, 420.0, expiration, tc.quantity)
+			pos.CreditReceived = tc.creditReceived
+			pos.CurrentPnL = tc.currentPnL
+
+			actualPct := pos.ProfitPercent()
+
+			// Use a small epsilon for floating point comparison
+			epsilon := 0.001
+			if diff := actualPct - tc.expectedPct; diff < -epsilon || diff > epsilon {
+				t.Errorf("ProfitPercent() = %.3f, expected %.3f", actualPct, tc.expectedPct)
+			}
+		})
 	}
 }
 

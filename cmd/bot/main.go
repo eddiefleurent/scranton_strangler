@@ -211,6 +211,13 @@ func (b *Bot) checkExistingPosition() bool {
 
 	// Check if position is already closed
 	if position.GetCurrentState() == models.StateClosed {
+		// Check if this position was just closed by an exit order and needs completion
+		if position.ExitOrderID != "" && position.ExitReason != "" {
+			b.logger.Printf("Position %s was closed by exit order, completing position close", position.ID)
+			exitReason := strategy.ExitReason(position.ExitReason)
+			b.completePositionClose(position, exitReason)
+			return false
+		}
 		b.logger.Printf("Position %s is already closed, treating as no active position", position.ID)
 		return false
 	}
@@ -255,6 +262,19 @@ func (b *Bot) executeEntry() {
 		b.logger.Printf("Position size limited to %d contracts", order.Quantity)
 	}
 
+	// Guard against non-positive sizes after risk limiting
+	if order.Quantity <= 0 {
+		b.logger.Printf("ERROR: Computed order size is non-positive (%d), aborting order placement", order.Quantity)
+		return
+	}
+
+	// Parse expiration early to fail-fast before any live order is placed
+	expirationTime, err := time.Parse("2006-01-02", order.Expiration)
+	if err != nil {
+		b.logger.Printf("Failed to parse expiration date %q: %v", order.Expiration, err)
+		return
+	}
+
 	// Place order
 	b.logger.Printf("Placing strangle order for %d contracts...", order.Quantity)
 	placedOrder, err := b.broker.PlaceStrangleOrder(
@@ -276,13 +296,6 @@ func (b *Bot) executeEntry() {
 
 	// Save position state
 	positionID := generatePositionID()
-
-	// Parse expiration string to time.Time
-	expirationTime, err := time.Parse("2006-01-02", order.Expiration)
-	if err != nil {
-		b.logger.Printf("Failed to parse expiration date: %v", err)
-		return
-	}
 
 	// Create new position
 	position := models.NewPosition(
@@ -349,7 +362,23 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 	}
 
 	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
-	b.completePositionClose(position, reason)
+
+	// Store close order metadata and set position to closing state
+	position.ExitOrderID = fmt.Sprintf("%d", closeOrder.Order.ID)
+	position.ExitReason = string(reason)
+	if err := position.TransitionState(models.StateAdjusting, "close_order_placed"); err != nil {
+		b.logger.Printf("Warning: failed to transition to closing state: %v", err)
+	}
+
+	if err := b.storage.SetCurrentPosition(position); err != nil {
+		b.logger.Printf("Failed to save position with close order ID: %v", err)
+		return
+	}
+
+	b.logger.Printf("Position %s set to closing state, monitoring close order %d", position.ID, closeOrder.Order.ID)
+
+	// Start order status polling for close order in background
+	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)
 }
 
 func (b *Bot) isPositionReadyForExit(position *models.Position) bool {

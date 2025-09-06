@@ -11,6 +11,8 @@ broker:
   api_endpoint: "https://sandbox.tradier.com/v1"  # Sandbox endpoint
   account_id: "YOUR_ACCOUNT_ID_HERE"  # Get from Tradier dashboard
   use_otoco: true  # Use OTOCO orders to preset exit at 50% profit
+  otoco_preview: true  # Use /orders/preview?preview=true to validate OTOCO before placement
+  otoco_fallback: true  # Fall back to separate entry + linked exits if OTOCO validation fails
   
 strategy:
   symbol: "SPY"
@@ -28,7 +30,7 @@ strategy:
   exit:
     profit_target: 0.50  # Exit at 50% profit
     max_dte: 21  # Exit with 21 days remaining
-    stop_loss_pct: 2.5  # Exit if loss exceeds 250% of credit (precedence over risk.max_position_loss)
+    stop_loss_pct: 2.5  # Exit if loss exceeds 250% of credit (canonical stop loss setting)
     
   adjustments:
     enabled: false  # Start with false, enable after MVP proven
@@ -41,9 +43,10 @@ risk:
   
 schedule:
   market_check_interval: "15m"  # How often to check market
+  timezone: "America/New_York"  # Market timezone (handles DST)
   trading_start: "09:45"  # Start 15 min after open
   trading_end: "15:45"  # Stop 15 min before close
   after_hours_check: false
 
 storage:
-  path: "positions.json"  # Path to store position data
+  path: "data/positions.json"  # Persistent path; mount as a volume in Docker

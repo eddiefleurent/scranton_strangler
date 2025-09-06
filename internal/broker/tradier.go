@@ -5,6 +5,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -20,6 +21,9 @@ const (
 	optionTypePut  = "put"
 	optionTypeCall = "call"
 )
+
+// ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
+var ErrOTOCOUnsupported = errors.New("otoco unsupported for multi-leg strangle")
 
 // TradierAPI - Accurate implementation based on actual API docs
 type TradierAPI struct {
@@ -95,6 +99,7 @@ type OptionChainResponse struct {
 	} `json:"options"`
 }
 
+// Option represents an option contract from the Tradier API.
 type Option struct {
 	Greeks         *Greeks `json:"greeks,omitempty"`
 	Symbol         string  `json:"symbol"`
@@ -113,6 +118,7 @@ type Option struct {
 	Strike         float64 `json:"strike"`
 }
 
+// Greeks contains option Greeks data from the Tradier API.
 type Greeks struct {
 	UpdatedAt string  `json:"updated_at"`
 	Delta     float64 `json:"delta"`
@@ -127,13 +133,14 @@ type Greeks struct {
 	SmvVol    float64 `json:"smv_vol"`
 }
 
-// Positions response - matches API exactly
+// PositionsResponse represents the positions response from the Tradier API.
 type PositionsResponse struct {
 	Positions struct {
 		Position singleOrArray[PositionItem] `json:"position"`
 	} `json:"positions"`
 }
 
+// PositionItem represents a single position item from the Tradier API.
 type PositionItem struct {
 	DateAcquired time.Time `json:"date_acquired"`
 	Symbol       string    `json:"symbol"`
@@ -142,13 +149,14 @@ type PositionItem struct {
 	Quantity     float64   `json:"quantity"`
 }
 
-// Quotes response
+// QuotesResponse represents the quotes response from the Tradier API.
 type QuotesResponse struct {
 	Quotes struct {
 		Quote QuoteItem `json:"quote"`
 	} `json:"quotes"`
 }
 
+// QuoteItem represents a single quote item from the Tradier API.
 type QuoteItem struct {
 	Symbol           string  `json:"symbol"`
 	Description      string  `json:"description"`
@@ -174,14 +182,14 @@ type QuoteItem struct {
 	Last             float64 `json:"last"`
 }
 
-// Expirations response
+// ExpirationsResponse represents the expirations response from the Tradier API.
 type ExpirationsResponse struct {
 	Expirations struct {
 		Date []string `json:"date"`
 	} `json:"expirations"`
 }
 
-// Account balance response
+// BalanceResponse represents the account balance response from the Tradier API.
 type BalanceResponse struct {
 	Balances struct {
 		OptionBuyingPower  float64 `json:"option_buying_power"`
@@ -195,7 +203,7 @@ type BalanceResponse struct {
 	} `json:"balances"`
 }
 
-// Order response
+// OrderResponse represents the order response from the Tradier API.
 type OrderResponse struct {
 	Order struct {
 		CreateDate        string  `json:"create_date"`
@@ -219,6 +227,7 @@ type OrderResponse struct {
 
 // ============ API Methods ============
 
+// GetQuote retrieves the current market quote for a symbol.
 func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 	endpoint := fmt.Sprintf("%s/markets/quotes?symbols=%s&greeks=false", t.baseURL, symbol)
 
@@ -230,6 +239,7 @@ func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 	return &response.Quotes.Quote, nil
 }
 
+// GetExpirations retrieves available expiration dates for options on a symbol.
 func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
 	endpoint := fmt.Sprintf("%s/markets/options/expirations?symbol=%s&includeAllRoots=true&strikes=false",
 		t.baseURL, symbol)
@@ -242,6 +252,7 @@ func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
 	return response.Expirations.Date, nil
 }
 
+// GetOptionChain retrieves the option chain for a symbol and expiration date.
 func (t *TradierAPI) GetOptionChain(symbol, expiration string, greeks bool) ([]Option, error) {
 	endpoint := fmt.Sprintf("%s/markets/options/chains?symbol=%s&expiration=%s&greeks=%t",
 		t.baseURL, symbol, expiration, greeks)
@@ -254,6 +265,7 @@ func (t *TradierAPI) GetOptionChain(symbol, expiration string, greeks bool) ([]O
 	return response.Options.Option, nil
 }
 
+// GetPositions retrieves current positions from the account.
 func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/positions", t.baseURL, t.accountID)
 
@@ -265,6 +277,7 @@ func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
 	return response.Positions.Position, nil
 }
 
+// GetBalance retrieves account balance information.
 func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/balances", t.baseURL, t.accountID)
 
@@ -276,6 +289,7 @@ func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	return &response, nil
 }
 
+// PlaceStrangleOrder places a short strangle order with the specified parameters.
 func (t *TradierAPI) PlaceStrangleOrder(
 	symbol string,
 	putStrike, callStrike float64,
@@ -296,6 +310,12 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	preview bool,
 	buyToClose bool,
 ) (*OrderResponse, error) {
+	// Validate price for credit/debit orders
+	if limitPrice <= 0 {
+		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
+			map[bool]string{true: "debit", false: "credit"}[buyToClose], limitPrice)
+	}
+
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
@@ -381,7 +401,13 @@ func (t *TradierAPI) GetOrderStatusCtx(ctx context.Context, orderID int) (*Order
 	return &response, nil
 }
 
+// PlaceBuyToCloseOrder places a buy-to-close order for an option position.
 func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error) {
+	// Validate price for limit orders
+	if maxPrice <= 0 {
+		return nil, fmt.Errorf("invalid price for limit order: %.2f, price must be positive", maxPrice)
+	}
+
 	// Extract underlying symbol from option OCC/OSI code
 	symbol := extractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
@@ -408,20 +434,19 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	return &response, nil
 }
 
+// PlaceStrangleOTOCO attempts to place an OTOCO strangle order but returns an error as it's not supported.
 func (t *TradierAPI) PlaceStrangleOTOCO(
-	symbol string,
-	putStrike, callStrike float64,
-	expiration string,
-	quantity int,
-	limitCredit float64,
-	profitTarget float64, // percentage as decimal (0.5 for 50%)
-	preview bool,
+	_ string,
+	_, _ float64,
+	_ string,
+	_ int,
+	_ float64,
+	_ float64, // percentage as decimal (0.5 for 50%)
+	_ bool,
 ) (*OrderResponse, error) {
 	// OTOCO orders in Tradier API do not support multi-leg orders like strangles
 	// The API documentation specifies that OTOCO is for single-leg orders only
-	return nil, fmt.Errorf("OTOCO orders do not support multi-leg strangle orders in Tradier API - " +
-		"use separate orders for opening and closing positions, or implement a polling mechanism to " +
-		"monitor fills and submit individual close orders")
+	return nil, ErrOTOCOUnsupported
 }
 
 // Helper method for making HTTP requests
@@ -457,8 +482,14 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 	}()
 
 	// Check rate limit headers
-	if remaining := resp.Header.Get("X-Ratelimit-Available"); remaining != "" {
-		// Could log or track rate limit usage here
+	remaining := resp.Header.Get("X-Ratelimit-Available")
+	if remaining == "" {
+		remaining = resp.Header.Get("X-RateLimit-Available")
+		if remaining == "" {
+			remaining = resp.Header.Get("X-RateLimit-Remaining")
+		}
+	}
+	if remaining != "" {
 		log.Printf("Rate limit remaining: %s", remaining)
 	}
 
@@ -470,7 +501,11 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 
-	return json.NewDecoder(resp.Body).Decode(response)
+	decErr := json.NewDecoder(resp.Body).Decode(response)
+	if decErr == io.EOF {
+		return nil
+	}
+	return decErr
 }
 
 // makeRequestCtx makes an HTTP request with context support for timeout/cancellation
@@ -507,8 +542,14 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 	}()
 
 	// Check rate limit headers
-	if remaining := resp.Header.Get("X-Ratelimit-Available"); remaining != "" {
-		// Could log or track rate limit usage here
+	remaining := resp.Header.Get("X-Ratelimit-Available")
+	if remaining == "" {
+		remaining = resp.Header.Get("X-RateLimit-Available")
+		if remaining == "" {
+			remaining = resp.Header.Get("X-RateLimit-Remaining")
+		}
+	}
+	if remaining != "" {
 		log.Printf("Rate limit remaining: %s", remaining)
 	}
 
@@ -520,7 +561,11 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
 
-	return json.NewDecoder(resp.Body).Decode(response)
+	decErr := json.NewDecoder(resp.Body).Decode(response)
+	if decErr == io.EOF {
+		return nil
+	}
+	return decErr
 }
 
 // ============ Helper Functions ============

@@ -11,10 +11,10 @@ import (
 
 // Risk Management Constants
 const (
-	// EscalateLossPct represents the 200% loss threshold for escalating/preparing for action
-	EscalateLossPct = 2.0
-	// StopLossPct represents the 250% loss threshold for immediate position closure
-	StopLossPct = 2.5
+	// defaultEscalateLossPct is used when strategy.escalate_loss_pct is unset
+	defaultEscalateLossPct = 2.0
+	// defaultStopLossPct is used when strategy.exit.stop_loss_pct is unset
+	defaultStopLossPct = 2.5
 	// defaultMaxDTE represents the default maximum days to expiration before forced exit (21 days)
 	defaultMaxDTE = 21
 )
@@ -172,15 +172,24 @@ func (c *Config) Validate() error {
 	c.normalizeExitConfig()
 
 	// Exit configuration validation
-	if c.Strategy.Exit.ProfitTarget <= 0 {
-		return fmt.Errorf("strategy.exit.profit_target must be > 0")
+	if c.Strategy.Exit.ProfitTarget <= 0 || c.Strategy.Exit.ProfitTarget >= 1 {
+		return fmt.Errorf("strategy.exit.profit_target must be in (0,1)")
 	}
 	if c.Strategy.Exit.StopLossPct <= 0 {
 		return fmt.Errorf("strategy.exit.stop_loss_pct must be > 0")
 	}
-	if c.Strategy.Exit.StopLossPct <= c.Strategy.EscalateLossPct {
-		return fmt.Errorf("strategy.exit.stop_loss_pct (%f) must be greater than strategy.escalate_loss_pct (%f)",
-			c.Strategy.Exit.StopLossPct, c.Strategy.EscalateLossPct)
+
+	// Validate loss percentage constraints
+	if c.Strategy.EscalateLossPct >= c.Strategy.Exit.StopLossPct {
+		return fmt.Errorf("strategy.escalate_loss_pct (%.2f) must be < strategy.exit.stop_loss_pct (%.2f)",
+			c.Strategy.EscalateLossPct, c.Strategy.Exit.StopLossPct)
+	}
+	// Note: strategy.exit.stop_loss_pct takes precedence over risk.max_position_loss when both are configured
+	// This allows for different loss thresholds at strategy vs risk management levels
+	if c.Strategy.Exit.StopLossPct < c.Risk.MaxPositionLoss {
+		return fmt.Errorf("strategy.exit.stop_loss_pct (%.2f) should be >= risk.max_position_loss (%.2f) - "+
+			"strategy exit threshold takes precedence but should not be more restrictive than risk limit",
+			c.Strategy.Exit.StopLossPct, c.Risk.MaxPositionLoss)
 	}
 
 	// Risk validation
@@ -200,7 +209,8 @@ func (c *Config) Validate() error {
 	}
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		return fmt.Errorf("failed to load timezone: %w", err)
+		// Fallback for minimal containers
+		loc = time.FixedZone("ET", -5*60*60)
 	}
 	s, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
 	e, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
@@ -255,6 +265,12 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 func (c *Config) normalizeExitConfig() {
 	if c.Strategy.Exit.MaxDTE == 0 {
 		c.Strategy.Exit.MaxDTE = defaultMaxDTE
+	}
+	if c.Strategy.EscalateLossPct == 0 {
+		c.Strategy.EscalateLossPct = defaultEscalateLossPct
+	}
+	if c.Strategy.Exit.StopLossPct == 0 {
+		c.Strategy.Exit.StopLossPct = defaultStopLossPct
 	}
 }
 

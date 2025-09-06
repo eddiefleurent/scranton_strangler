@@ -1,3 +1,4 @@
+// Package main provides a test utility for Tradier API connection testing.
 package main
 
 import (

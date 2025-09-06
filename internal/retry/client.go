@@ -1,3 +1,4 @@
+// Package retry provides retry logic for broker operations with exponential backoff.
 package retry
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
+// Config contains retry configuration parameters.
 type Config struct {
 	MaxRetries     int
 	InitialBackoff time.Duration
@@ -20,6 +22,7 @@ type Config struct {
 	Timeout        time.Duration
 }
 
+// DefaultConfig provides sensible defaults for retry operations.
 var DefaultConfig = Config{
 	MaxRetries:     3,
 	InitialBackoff: 1 * time.Second,
@@ -27,12 +30,14 @@ var DefaultConfig = Config{
 	Timeout:        2 * time.Minute,
 }
 
+// Client wraps a broker with retry logic for operations.
 type Client struct {
 	broker broker.Broker
 	logger *log.Logger
 	config Config
 }
 
+// NewClient creates a new retry client with the given broker and optional config.
 func NewClient(broker broker.Broker, logger *log.Logger, config ...Config) *Client {
 	cfg := DefaultConfig
 	if len(config) > 0 {
@@ -65,6 +70,7 @@ func NewClient(broker broker.Broker, logger *log.Logger, config ...Config) *Clie
 	}
 }
 
+// ClosePositionWithRetry attempts to close a position with retry logic and exponential backoff.
 func (c *Client) ClosePositionWithRetry(
 	ctx context.Context,
 	position *models.Position,
