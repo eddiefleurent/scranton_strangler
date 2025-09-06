@@ -33,15 +33,15 @@ type Data struct {
 
 // Statistics represents performance metrics and analytics data.
 type Statistics struct {
-	TotalTrades   int     `json:"total_trades"`
-	WinningTrades int     `json:"winning_trades"`
-	LosingTrades  int     `json:"losing_trades"`
-	WinRate       float64 `json:"win_rate"`
-	TotalPnL      float64 `json:"total_pnl"`
-	AverageWin    float64 `json:"average_win"`
-	AverageLoss   float64 `json:"average_loss"`
-	MaxDrawdown   float64 `json:"max_drawdown"`
-	CurrentStreak int     `json:"current_streak"`
+	TotalTrades        int     `json:"total_trades"`
+	WinningTrades      int     `json:"winning_trades"`
+	LosingTrades       int     `json:"losing_trades"`
+	WinRate            float64 `json:"win_rate"`
+	TotalPnL           float64 `json:"total_pnl"`
+	AverageWin         float64 `json:"average_win"`
+	AverageLoss        float64 `json:"average_loss"`        // Average loss magnitude (positive)
+	MaxSingleTradeLoss float64 `json:"max_single_trade_loss"` // Largest single trade loss (negative)
+	CurrentStreak      int     `json:"current_streak"`
 }
 
 // NewJSONStorage creates a new JSON-based storage implementation
@@ -55,7 +55,7 @@ func NewJSONStorage(filePath string) (*JSONStorage, error) {
 	}
 
 	// Create parent directory if it doesn't exist
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
 		return nil, fmt.Errorf("creating parent directory: %w", err)
 	}
 
@@ -110,7 +110,7 @@ func (s *JSONStorage) Save() error {
 // saveUnsafe performs the actual save operation without acquiring locks
 // Must be called with mutex already held
 func (s *JSONStorage) saveUnsafe() error {
-	s.data.LastUpdated = time.Now()
+	s.data.LastUpdated = time.Now().UTC()
 
 	data, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
@@ -356,6 +356,14 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	}
 	s.data.CurrentPosition.CurrentPnL = finalPnL
 
+	// If TransitionState doesn't set these, ensure they are recorded.
+	if s.data.CurrentPosition.ExitReason == "" {
+		s.data.CurrentPosition.ExitReason = reason
+	}
+	if s.data.CurrentPosition.ExitDate.IsZero() {
+		s.data.CurrentPosition.ExitDate = time.Now().UTC()
+	}
+
 	// Add to history
 	s.data.History = append(s.data.History, *clonePosition(s.data.CurrentPosition))
 
@@ -363,7 +371,7 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	s.updateStatistics(finalPnL)
 
 	// Update daily P&L
-	today := time.Now().Format("2006-01-02")
+	today := time.Now().UTC().Format("2006-01-02")
 	s.data.DailyPnL[today] += finalPnL
 
 	// Clear current position
@@ -398,9 +406,9 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 			stats.CurrentStreak = -1
 		}
 
-		// Update average loss
+		// Update average loss (using absolute magnitude)
 		if stats.LosingTrades > 0 {
-			totalLosses := stats.AverageLoss*float64(stats.LosingTrades-1) + pnl
+			totalLosses := stats.AverageLoss*float64(stats.LosingTrades-1) + (-pnl) // Use absolute magnitude
 			stats.AverageLoss = totalLosses / float64(stats.LosingTrades)
 		}
 	}
@@ -410,9 +418,9 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 		stats.WinRate = float64(stats.WinningTrades) / float64(stats.TotalTrades)
 	}
 
-	// Update max drawdown
-	if pnl < 0 && pnl < stats.MaxDrawdown {
-		stats.MaxDrawdown = pnl
+	// Update max single trade loss
+	if pnl < 0 && pnl < stats.MaxSingleTradeLoss {
+		stats.MaxSingleTradeLoss = pnl
 	}
 }
 

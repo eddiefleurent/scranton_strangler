@@ -195,6 +195,91 @@ func (e *MockError) Error() string {
 	return e.message
 }
 
+// TestExitMetadataBackup ensures exit metadata is properly set during position closure
+func TestExitMetadataBackup(t *testing.T) {
+	tmpFile := fmt.Sprintf("/tmp/test_exit_metadata_%d.json", time.Now().UnixNano())
+	defer func() {
+		_ = os.Remove(tmpFile)
+		_ = os.Remove(tmpFile + ".tmp")
+	}()
+
+	storage, err := NewJSONStorage(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create JSON storage: %v", err)
+	}
+
+	// Create and set a test position
+	testPos := models.NewPosition(
+		"test-exit-123",
+		"SPY",
+		445.0,
+		455.0,
+		time.Now().AddDate(0, 0, 30),
+		1,
+	)
+	testPos.CreditReceived = 3.50
+
+	// Transition to open state (must go through submitted first)
+	err = testPos.TransitionState(models.StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to transition position to submitted: %v", err)
+	}
+	err = testPos.TransitionState(models.StateOpen, "order_filled")
+	if err != nil {
+		t.Fatalf("Failed to transition position to open: %v", err)
+	}
+
+	err = storage.SetCurrentPosition(testPos)
+	if err != nil {
+		t.Fatalf("Failed to set current position: %v", err)
+	}
+
+	// Clear exit metadata to test backup functionality
+	testPos.ExitReason = ""
+	testPos.ExitDate = time.Time{}
+	err = storage.SetCurrentPosition(testPos)
+	if err != nil {
+		t.Fatalf("Failed to update position: %v", err)
+	}
+
+	// Close position with valid condition
+	finalPnL := -1.25 // Loss to test edge case
+	err = storage.ClosePosition(finalPnL, "position_closed") // Use valid transition condition
+	if err != nil {
+		t.Fatalf("Failed to close position: %v", err)
+	}
+
+	// Verify position is in history with correct exit metadata
+	history := storage.GetHistory()
+	if len(history) != 1 {
+		t.Fatalf("Expected 1 position in history, got %d", len(history))
+	}
+
+	closedPos := history[0]
+
+	// Verify exit reason is set (should be the transition condition)
+	expectedReason := "position_closed"
+	if closedPos.ExitReason != expectedReason {
+		t.Errorf("Expected exit reason '%s', got '%s'", expectedReason, closedPos.ExitReason)
+	}
+
+	// Verify exit date is set (should be recent)
+	if closedPos.ExitDate.IsZero() {
+		t.Error("Expected exit date to be set, but it was zero time")
+	}
+
+	// Verify exit date is reasonable (within last minute)
+	timeSinceExit := time.Since(closedPos.ExitDate)
+	if timeSinceExit < 0 || timeSinceExit > time.Minute {
+		t.Errorf("Exit date seems unreasonable: %v (time since: %v)", closedPos.ExitDate, timeSinceExit)
+	}
+
+	// Verify final P&L is recorded
+	if closedPos.CurrentPnL != finalPnL {
+		t.Errorf("Expected final P&L %f, got %f", finalPnL, closedPos.CurrentPnL)
+	}
+}
+
 // TestInterfaceCompliance ensures all implementations satisfy the interface
 func TestInterfaceCompliance(t *testing.T) {
 	// Test that both implementations satisfy the interface
