@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,8 +143,12 @@ func TestStateMachine_AdjustmentLimits(t *testing.T) {
 		}
 
 		// Return to management state
-		_ = sm.Transition(StateFirstDown, "adjustment_complete") //nolint:errcheck // test setup
-		_ = sm.Transition(StateSecondDown, "strike_challenged")  //nolint:errcheck // test setup
+		if err := sm.Transition(StateFirstDown, "adjustment_complete"); err != nil {
+			t.Fatalf("to FirstDown: %v", err)
+		}
+		if err := sm.Transition(StateSecondDown, "strike_challenged"); err != nil {
+			t.Fatalf("to SecondDown: %v", err)
+		}
 	}
 
 	// Fourth adjustment should fail
@@ -220,11 +225,21 @@ func TestStateMachine_Reset(t *testing.T) {
 	sm := NewStateMachine()
 
 	// Make several transitions (simplified)
-	_ = sm.Transition(StateSubmitted, "order_placed")
-	_ = sm.Transition(StateOpen, "order_filled")
-	_ = sm.Transition(StateFirstDown, "start_management")
-	_ = sm.Transition(StateSecondDown, "strike_challenged")
-	_ = sm.Transition(StateAdjusting, "roll_untested")
+	if err := sm.Transition(StateSubmitted, "order_placed"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := sm.Transition(StateOpen, "order_filled"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := sm.Transition(StateFirstDown, "start_management"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := sm.Transition(StateSecondDown, "strike_challenged"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := sm.Transition(StateAdjusting, "roll_untested"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
 
 	// Verify state is not idle
 	if sm.GetCurrentState() == StateIdle {
@@ -351,9 +366,15 @@ func TestPosition_StateValidation(t *testing.T) {
 	pos.CreditReceived = 3.50
 
 	// Transition to management state (simplified)
-	_ = pos.TransitionState(StateSubmitted, "order_placed")
-	_ = pos.TransitionState(StateOpen, "order_filled")
-	_ = pos.TransitionState(StateFirstDown, "start_management")
+	if transErr := pos.TransitionState(StateSubmitted, "order_placed"); transErr != nil {
+		t.Errorf("Unexpected error: %v", transErr)
+	}
+	if transErr := pos.TransitionState(StateOpen, "order_filled"); transErr != nil {
+		t.Errorf("Unexpected error: %v", transErr)
+	}
+	if transErr := pos.TransitionState(StateFirstDown, "start_management"); transErr != nil {
+		t.Errorf("Unexpected error: %v", transErr)
+	}
 
 	err = pos.ValidateState()
 	if err != nil {
@@ -382,9 +403,15 @@ func TestPosition_ManagementMethods(t *testing.T) {
 	}
 
 	// Transition to management state (simplified)
-	_ = pos.TransitionState(StateSubmitted, "order_placed")
-	_ = pos.TransitionState(StateOpen, "order_filled")
-	_ = pos.TransitionState(StateFirstDown, "start_management")
+	if err := pos.TransitionState(StateSubmitted, "order_placed"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := pos.TransitionState(StateOpen, "order_filled"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if err := pos.TransitionState(StateFirstDown, "start_management"); err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
 
 	if !pos.IsInManagement() {
 		t.Error("Position should be in management after FirstDown")
@@ -409,13 +436,13 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	sm := NewStateMachine()
 
 	// Test below 200% loss - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -6.50, 30) // 185.7% loss
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -6.50, 30, 21) // 185.7% loss
 	if shouldExit {
 		t.Errorf("Should not emergency exit at 185.7%% loss, but got: %s", reason)
 	}
 
 	// Test exactly at 200% loss - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -7.00, 30) // 200% loss
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -7.00, 30, 21) // 200% loss
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
 	}
@@ -425,7 +452,7 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	}
 
 	// Test above 200% loss - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -8.00, 30) // 228.6% loss
+	shouldExit, _ = sm.ShouldEmergencyExit(3.50, -8.00, 30, 21) // 228.6% loss
 	if !shouldExit {
 		t.Error("Should emergency exit at 228.6% loss")
 	}
@@ -441,21 +468,21 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
 
 	// Test within 5-day limit - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, 3.499, 30) // negligible loss, 4 days
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, 3.499, 30, 21) // negligible loss, 4 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
-	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour) // exactly 5 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, 3.499, 30) // negligible loss, 5 days
+	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour)     // exactly 5 days ago
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, 3.499, 30, 21) // negligible loss, 5 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
 	}
 
 	// Test beyond 5-day limit - should trigger
-	sm.fourthDownStartTime = time.Now().Add(-6 * 24 * time.Hour) // 6 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30) // 142.9% loss, 6 days
+	sm.fourthDownStartTime = time.Now().Add(-6 * 24 * time.Hour)     // 6 days ago
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30, 21) // 142.9% loss, 6 days
 	if !shouldExit {
 		t.Error("Should emergency exit after 6 days for Option A")
 	}
@@ -471,15 +498,15 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 	sm.SetFourthDownOption(OptionB)
 
 	// Test within 3-day limit - no emergency exit
-	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)  // 2 days ago
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 30) // 2.9% loss, 2 days
+	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)      // 2 days ago
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 30, 21) // 2.9% loss, 2 days
 	if shouldExit && reason != emergencyExitMessage {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
 
 	// Test beyond 3-day limit - should trigger
-	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 30) // 2.9% loss, 4 days
+	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour)     // 4 days ago
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 30, 21) // 2.9% loss, 4 days
 	if !shouldExit {
 		t.Error("Should emergency exit after 4 days for Option B")
 	}
@@ -496,25 +523,25 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
 
 	// Test above MaxDTE - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, config.MaxDTE+4) // 2.9% loss, above MaxDTE
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 25, 21) // 2.9% loss, above MaxDTE
 	if shouldExit && reason != emergencyExitMessage {
-		t.Errorf("Should not emergency exit at %d DTE, but got: %s", config.MaxDTE+4, reason)
+		t.Errorf("Should not emergency exit at %d DTE, but got: %s", 25, reason)
 	}
 
 	// Test exactly at MaxDTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, config.MaxDTE) // 2.9% loss, MaxDTE
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 21, 21) // 2.9% loss, MaxDTE
 	if !shouldExit {
-		t.Errorf("Should emergency exit at %d DTE for Option C", config.MaxDTE)
+		t.Errorf("Should emergency exit at %d DTE for Option C", 21)
 	}
-	expectedDTEMsg := fmt.Sprintf("Option C reached %d DTE limit", config.MaxDTE)
+	expectedDTEMsg := fmt.Sprintf("Option C reached %d DTE limit", 21)
 	if !contains(reason, expectedDTEMsg) {
 		t.Errorf("Expected Option C DTE limit message, got: %s", reason)
 	}
 
 	// Test below MaxDTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, config.MaxDTE-6) // 2.9% loss, 15 DTE
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 15, 21) // 2.9% loss, 15 DTE
 	if !shouldExit {
-		t.Errorf("Should emergency exit at %d DTE for Option C", config.MaxDTE-6)
+		t.Errorf("Should emergency exit at %d DTE for Option C", 15)
 	}
 	if !contains(reason, expectedDTEMsg) {
 		t.Errorf("Expected Option C DTE limit message, got: %s", reason)
@@ -562,14 +589,14 @@ func TestPosition_EmergencyExit_Integration(t *testing.T) {
 	pos.CurrentPnL = -5.00 // 142.9% loss
 
 	// Below 200% loss - no emergency exit
-	shouldExit, reason := pos.ShouldEmergencyExit()
+	shouldExit, reason := pos.ShouldEmergencyExit(21)
 	if shouldExit {
 		t.Errorf("Should not emergency exit at 142.9%% loss, but got: %s", reason)
 	}
 
 	// At 200% loss - should trigger
 	pos.CurrentPnL = -7.00 // 200% loss
-	shouldExit, reason = pos.ShouldEmergencyExit()
+	shouldExit, _ = pos.ShouldEmergencyExit(21)
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
 	}
@@ -615,7 +642,9 @@ func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	// Set up Fourth Down state
 	sm.currentState = StateFourthDown
 	sm.SetFourthDownOption(OptionA)
-	_ = sm.ExecutePunt()
+	if err := sm.ExecutePunt(); err != nil {
+		t.Errorf("ExecutePunt should succeed: %v", err)
+	}
 
 	// Verify setup
 	if sm.GetFourthDownOption() != OptionA {
@@ -641,16 +670,4 @@ func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 }
 
 // Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || containsRecursive(s, substr, 0))
-}
-
-func containsRecursive(s, substr string, start int) bool {
-	if start+len(substr) > len(s) {
-		return false
-	}
-	if s[start:start+len(substr)] == substr {
-		return true
-	}
-	return containsRecursive(s, substr, start+1)
-}
+func contains(s, substr string) bool { return strings.Contains(s, substr) }

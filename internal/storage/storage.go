@@ -4,8 +4,11 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
@@ -48,11 +51,13 @@ func NewJSONStorage(filepath string) (*JSONStorage, error) {
 		},
 	}
 
-	// Load existing data if file exists
+	// Load existing data if file exists; fail on unexpected errors
 	if _, err := os.Stat(filepath); err == nil {
-		if err := s.Load(); err != nil {
-			return nil, fmt.Errorf("loading storage: %w", err)
+		if loadErr := s.Load(); loadErr != nil {
+			return nil, fmt.Errorf("loading storage: %w", loadErr)
 		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("stat storage file: %w", err)
 	}
 
 	return s, nil
@@ -67,9 +72,11 @@ func (s *JSONStorage) Load() error {
 		return err
 	}
 
-	if err := json.Unmarshal(data, &s.data); err != nil {
+	var loaded StorageData
+	if err := json.Unmarshal(data, &loaded); err != nil {
 		return err
 	}
+	s.data = &loaded
 
 	if s.data == nil {
 		s.data = &StorageData{}
@@ -100,8 +107,9 @@ func (s *JSONStorage) saveUnsafe() error {
 		return err
 	}
 
-	// Write to temp file first with fsync
-	f, err := os.CreateTemp("", "storage-*")
+	// Create temp file in the same directory as the target file to avoid EXDEV
+	dir := filepath.Dir(s.filepath)
+	f, err := os.CreateTemp(dir, "storage-*")
 	if err != nil {
 		return err
 	}
@@ -110,9 +118,17 @@ func (s *JSONStorage) saveUnsafe() error {
 	// Ensure cleanup happens even if we return early
 	defer func() {
 		if f != nil {
-			f.Close()
+			if err := f.Close(); err != nil {
+				// Error already being handled, just log if needed
+				_ = err
+			}
 		}
-		os.Remove(tmpFile)
+		if tmpFile != "" {
+			if err := os.Remove(tmpFile); err != nil {
+				// Error already being handled, just log if needed
+				_ = err
+			}
+		}
 	}()
 
 	if _, err := f.Write(data); err != nil {
@@ -127,13 +143,84 @@ func (s *JSONStorage) saveUnsafe() error {
 	}
 	f = nil // Prevent close in defer since we closed successfully
 
-	// Atomic rename
+	// Try atomic rename first
 	if err := os.Rename(tmpFile, s.filepath); err != nil {
-		return err
+		// Check if it's an EXDEV error (cross-device link)
+		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err == syscall.EXDEV {
+			// Handle EXDEV by copying the temp file to destination
+			if copyErr := s.copyFile(tmpFile, s.filepath); copyErr != nil {
+				return fmt.Errorf("failed to copy temp file: %w", copyErr)
+			}
+		} else {
+			return fmt.Errorf("failed to rename temp file: %w", err)
+		}
 	}
 
 	// Clear tmpFile so defer doesn't try to remove it
 	tmpFile = ""
+
+	// Sync the parent directory to ensure directory entry is persisted
+	if err := s.syncParentDir(); err != nil {
+		return fmt.Errorf("failed to sync parent directory: %w", err)
+	}
+
+	return nil
+}
+
+// copyFile copies the contents of src to dst, then fsyncs dst
+func (s *JSONStorage) copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := srcFile.Close(); closeErr != nil {
+			// Error already being handled, just log if needed
+			_ = closeErr
+		}
+	}()
+
+	dstFile, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := dstFile.Close(); err != nil {
+			// Error already being handled, just log if needed
+			_ = err
+		}
+	}()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return err
+	}
+
+	// Sync the destination file
+	if err := dstFile.Sync(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// syncParentDir opens the parent directory of s.filepath and calls Sync on it
+func (s *JSONStorage) syncParentDir() error {
+	parentDir := filepath.Dir(s.filepath)
+	dir, err := os.Open(parentDir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := dir.Close(); err != nil {
+			// Error already being handled, just log if needed
+			_ = err
+		}
+	}()
+
+	if err := dir.Sync(); err != nil {
+		return err
+	}
+
 	return nil
 }
 

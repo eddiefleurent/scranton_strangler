@@ -16,16 +16,17 @@ type StrangleStrategy struct {
 }
 
 type StrategyConfig struct {
-	Symbol          string
-	DTETarget       int     // 45 days
-	DeltaTarget     float64 // 0.16 for 16 delta
-	ProfitTarget    float64 // 0.50 for 50%
-	MaxDTE          int     // 21 days to exit
-	AllocationPct   float64 // 0.35 for 35%
-	MinIVR          float64 // 30
-	MinCredit       float64 // $2.00
-	EscalateLossPct float64 // e.g., 2.0 (200% loss triggers escalation)
-	StopLossPct     float64 // e.g., 2.5 (250% loss triggers hard stop)
+	Symbol              string
+	DTETarget           int     // 45 days
+	DeltaTarget         float64 // 0.16 for 16 delta
+	ProfitTarget        float64 // 0.50 for 50%
+	MaxDTE              int     // 21 days to exit
+	AllocationPct       float64 // 0.35 for 35%
+	MinIVR              float64 // 30
+	MinCredit           float64 // $2.00
+	EscalateLossPct     float64 // e.g., 2.0 (200% loss triggers escalation)
+	StopLossPct         float64 // e.g., 2.5 (250% loss triggers hard stop)
+	UseMockHistoricalIV bool    // Whether to use mock historical IV data
 }
 
 // ExitReason represents the reason for exiting a position
@@ -164,6 +165,9 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 
 	// Find ATM call option to get current IV
 	atmStrike := s.findNearestStrike(chain, quote.Last)
+	if atmStrike == 0 {
+		return 0, fmt.Errorf("no options available for ATM calculation")
+	}
 	for _, option := range chain {
 		if option.Strike == atmStrike && option.OptionType == "call" && option.Greeks != nil {
 			if option.Greeks.MidIV > 0 {
@@ -223,14 +227,14 @@ func (s *StrangleStrategy) generateMockHistoricalIV(days int) []float64 {
 
 // shouldUseMockHistoricalData determines if we should use mock data
 func (s *StrangleStrategy) shouldUseMockHistoricalData() bool {
-	// For MVP, always use mock data until proper storage is implemented
-	return true
+	// Use config toggle for mock historical IV data
+	return s.config.UseMockHistoricalIV
 }
 
 // findNearestStrike finds the strike closest to the current price
 func (s *StrangleStrategy) findNearestStrike(chain []broker.Option, price float64) float64 {
 	if len(chain) == 0 {
-		return price
+		return 0
 	}
 
 	nearestStrike := chain[0].Strike
@@ -404,7 +408,7 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 	return putCredit + callCredit
 }
 
-func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int {
+func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	balance, err := s.broker.GetAccountBalance()
 	if err != nil {
 		return 0
@@ -413,7 +417,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int 
 
 	// Estimate buying power requirement (simplified)
 	// Real calculation would use margin requirements
-	bprPerContract := creditPerContract * 100 * 10 // Rough estimate
+	bprPerContract := creditPerShare * 100 * 10 // Rough estimate
 
 	maxContracts := int(allocatedCapital / bprPerContract)
 	if maxContracts < 1 {
@@ -441,7 +445,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	// Calculate profit percentage against total credit received (in dollars)
 	totalCredit := position.GetTotalCredit() * float64(position.Quantity) * 100
 	if totalCredit == 0 {
-		return false, ExitReasonError
+		return true, ExitReasonError
 	}
 	profitPct := currentPnL / totalCredit
 	if profitPct >= s.config.ProfitTarget {

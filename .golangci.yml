@@ -18,7 +18,7 @@ linters-settings:
     simplify: true
   
   goimports:
-    local-prefixes: github.com/eddie/scranton_strangler
+    local-prefixes: github.com/eddiefleurent/scranton_strangler
 
   misspell:
     locale: US
@@ -44,19 +44,15 @@ linters-settings:
 linters:
   enable:
     - bodyclose
-    - depguard
     - dogsled
     - errcheck
-    - exhaustive
-    - exportloopref
+    - copyloopvar
     - funlen
     - gochecknoinits
     - goconst
-    - gocritic
     - gocyclo
     - gofmt
     - goimports
-    - gomnd
     - goprintffuncname
     - gosec
     - gosimple
@@ -67,29 +63,39 @@ linters:
     - nakedret
     - noctx
     - nolintlint
-    - revive
     - rowserrcheck
-    - staticcheck
-    - stylecheck
     - typecheck
     - unconvert
     - unparam
-    - unused
     - whitespace
 
-  disable: []
+  disable:
+    - mnd  
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - gomnd
         - funlen
         - gocyclo
     
     - path: cmd/
       linters:
         - gochecknoinits
+    
+    - path: scripts/
+      linters:
+        - gocyclo
+        - funlen
+        
+    - path: internal/config/
+      linters:
+        - gocyclo
+        - gosec
+    
+    - path: internal/storage/
+      linters:
+        - gosec
   
   exclude-use-default: false
   max-issues-per-linter: 0

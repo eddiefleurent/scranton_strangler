@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +27,7 @@ type Bot struct {
 	storage  storage.StorageInterface
 	logger   *log.Logger
 	stop     chan struct{}
+	ctx      context.Context // Main bot context for operations
 }
 
 func main() {
@@ -109,6 +112,7 @@ func main() {
 }
 
 func (b *Bot) Run(ctx context.Context) error {
+	b.ctx = ctx // Store context for use in operations
 	b.logger.Println("Bot starting main loop...")
 
 	// Verify broker connection
@@ -160,7 +164,7 @@ func (b *Bot) runTradingCycle() {
 		shouldExit, reason := b.strategy.CheckExitConditions(position)
 		if shouldExit {
 			b.logger.Printf("Exit signal: %s", reason)
-			b.executeExit(reason)
+			b.executeExit(b.ctx, reason)
 		} else {
 			b.logger.Println("No exit conditions met, continuing to monitor")
 		}
@@ -296,85 +300,216 @@ func (b *Bot) executeEntry() {
 	go b.pollOrderStatus(position.ID, placedOrder.Order.ID)
 }
 
-func (b *Bot) executeExit(reason strategy.ExitReason) {
+// closePositionWithRetry attempts to close a position with timeout and retry logic
+func (b *Bot) closePositionWithRetry(
+	ctx context.Context,
+	position *models.Position,
+	maxDebit float64,
+	maxRetries int,
+) (*broker.OrderResponse, error) {
+	const (
+		initialBackoff = 1 * time.Second
+		maxBackoff     = 30 * time.Second
+		timeout        = 2 * time.Minute
+	)
+
+	closeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var lastErr error
+	backoff := initialBackoff
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		select {
+		case <-closeCtx.Done():
+			return nil, fmt.Errorf("close operation timed out after %v: %w", timeout, closeCtx.Err())
+		default:
+		}
+
+		// Check if context is canceled
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("operation canceled: %w", ctx.Err())
+		}
+
+		b.logger.Printf("Close attempt %d/%d for position %s", attempt+1, maxRetries+1, position.ID)
+
+		closeOrder, err := b.broker.CloseStranglePosition(
+			position.Symbol,
+			position.PutStrike,
+			position.CallStrike,
+			position.Expiration.Format("2006-01-02"),
+			position.Quantity,
+			maxDebit,
+		)
+
+		if err == nil {
+			b.logger.Printf("Close order placed successfully on attempt %d: %d", attempt+1, closeOrder.Order.ID)
+			return closeOrder, nil
+		}
+
+		lastErr = err
+		b.logger.Printf("Close attempt %d failed: %v", attempt+1, err)
+
+		// Check if error is transient (network, rate limit, temporary server error)
+		if b.isTransientError(err) && attempt < maxRetries {
+			b.logger.Printf("Transient error detected, retrying in %v", backoff)
+			select {
+			case <-time.After(backoff):
+				// Exponential backoff with jitter
+				backoff = time.Duration(float64(backoff) * 1.5)
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
+				// Add some jitter to avoid thundering herd
+				maxJitter := int64(backoff / 4)
+				if maxJitter > 0 {
+					jitterVal, err := rand.Int(rand.Reader, big.NewInt(maxJitter))
+					if err != nil {
+						log.Printf("Failed to generate jitter: %v", err)
+					} else {
+						jitter := time.Duration(jitterVal.Int64())
+						backoff += jitter
+					}
+				}
+			case <-closeCtx.Done():
+				return nil, fmt.Errorf("close operation timed out during backoff: %w", closeCtx.Err())
+			case <-ctx.Done():
+				return nil, fmt.Errorf("operation canceled during backoff: %w", ctx.Err())
+			}
+		} else {
+			// Non-transient error or max retries reached
+			break
+		}
+	}
+
+	return nil, fmt.Errorf("failed to close position after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// isTransientError determines if an error is likely transient and worth retrying
+func (b *Bot) isTransientError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+
+	// Common transient error patterns
+	transientPatterns := []string{
+		"timeout",
+		"connection refused",
+		"connection reset",
+		"temporary failure",
+		"server error",
+		"rate limit",
+		"429", // HTTP 429 Too Many Requests
+		"502", // HTTP 502 Bad Gateway
+		"503", // HTTP 503 Service Unavailable
+		"504", // HTTP 504 Gateway Timeout
+		"network",
+		"dns",
+		"tcp",
+	}
+
+	for _, pattern := range transientPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 	b.logger.Printf("Executing exit: %s", reason)
 
-	// Get current position
 	position := b.storage.GetCurrentPosition()
 	if position == nil {
 		b.logger.Printf("No position to exit")
 		return
 	}
 
-	b.logger.Printf("Closing position: %s %s Put %.0f / Call %.0f",
-		position.Symbol, position.Expiration.Format("2006-01-02"),
-		position.PutStrike, position.CallStrike)
-
-	// Calculate maximum debit willing to pay (based on exit reason)
-	var maxDebit float64
-	currentVal, cvErr := b.strategy.GetCurrentPositionValue(position)
-	switch reason {
-	case strategy.ExitReasonProfitTarget:
-		// For profit target, pay up to 50% of credit received
-		maxDebit = position.CreditReceived * 0.5
-	case strategy.ExitReasonTime:
-		// For time exits, aim near market to get filled
-		if cvErr == nil {
-			maxDebit = currentVal / (float64(position.Quantity) * 100)
-		} else {
-			maxDebit = position.CreditReceived
-		}
-	case strategy.ExitReasonStopLoss:
-		// For stop loss, prioritize exit at market
-		if cvErr == nil {
-			maxDebit = currentVal / (float64(position.Quantity) * 100)
-		} else {
-			maxDebit = position.CreditReceived * 3.0
-		}
-	default:
-		// Default conservative approach
-		maxDebit = position.CreditReceived * 1.0
-	}
-
-	// Place buy-to-close order
-	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
-	closeOrder, err := b.broker.CloseStranglePosition(
-		position.Symbol,
-		position.PutStrike,
-		position.CallStrike,
-		position.Expiration.Format("2006-01-02"),
-		position.Quantity,
-		maxDebit,
-	)
-
-	if err != nil {
-		b.logger.Printf("Failed to place close order: %v", err)
+	if !b.isPositionReadyForExit(position) {
 		return
 	}
 
-	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
+	b.logPositionClose(position)
 
-	// Calculate actual P&L using real-time quotes
-	actualPnL, err := b.strategy.CalculatePositionPnL(position)
+	maxDebit := b.calculateMaxDebit(position, reason)
+
+	_, err := b.placeCloseOrder(ctx, position, maxDebit)
 	if err != nil {
-		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
-		// Fall back to estimated P&L
-		if reason == strategy.ExitReasonProfitTarget {
-			actualPnL = position.CreditReceived * float64(position.Quantity) * 100 * 0.5 // 50% profit
-		} else {
-			actualPnL = position.CreditReceived * float64(position.Quantity) * 100 * 0.2 // 20% profit for early exits
+		return
+	}
+
+	b.completePositionClose(position, reason)
+}
+
+func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
+	currentState := position.GetCurrentState()
+	if currentState == models.StateClosed {
+		b.logger.Printf("Position %s is already closed, skipping duplicate close attempt", position.ID)
+		return false
+	}
+
+	if currentState == models.StateError || currentState == models.StateAdjusting || currentState == models.StateRolling {
+		b.logger.Printf("Position %s is in state %s, not eligible for close", position.ID, currentState)
+		return false
+	}
+
+	return true
+}
+
+func (b *Bot) logPositionClose(position *models.Position) {
+	b.logger.Printf("Closing position: %s %s Put %.0f / Call %.0f (State: %s)",
+		position.Symbol, position.Expiration.Format("2006-01-02"),
+		position.PutStrike, position.CallStrike, position.GetCurrentState())
+}
+
+func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitReason) float64 {
+	currentVal, cvErr := b.strategy.GetCurrentPositionValue(position)
+
+	switch reason {
+	case strategy.ExitReasonProfitTarget:
+		return position.CreditReceived * 0.5
+	case strategy.ExitReasonTime:
+		if cvErr == nil {
+			return currentVal / (float64(position.Quantity) * 100)
 		}
+		return position.CreditReceived
+	case strategy.ExitReasonStopLoss:
+		if cvErr == nil {
+			return currentVal / (float64(position.Quantity) * 100)
+		}
+		return position.CreditReceived * config.StopLossPct
+	default:
+		return position.CreditReceived * 1.0
+	}
+}
+
+func (b *Bot) placeCloseOrder(
+	ctx context.Context,
+	position *models.Position,
+	maxDebit float64,
+) (*broker.OrderResponse, error) {
+	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
+
+	closeOrder, err := b.closePositionWithRetry(ctx, position, maxDebit, 3)
+	if err != nil {
+		b.logger.Printf("Failed to place close order after retries: %v", err)
+		return nil, err
 	}
 
-	// Calculate percentage using total credit across all contracts
-	denom := position.CreditReceived * float64(position.Quantity) * 100
-	if denom == 0 {
-		denom = position.CreditReceived * 100 // fallback per-contract in dollars
-	}
-	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
-		actualPnL, (actualPnL/denom)*100)
+	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
+	return closeOrder, nil
+}
 
-	// Close position in storage
+func (b *Bot) completePositionClose(
+	position *models.Position,
+	reason strategy.ExitReason,
+) {
+	actualPnL := b.calculateActualPnL(position, reason)
+	b.logPnL(position, actualPnL)
+
 	if err := b.storage.ClosePosition(actualPnL, string(reason)); err != nil {
 		b.logger.Printf("Failed to close position in storage: %v", err)
 		return
@@ -382,10 +517,30 @@ func (b *Bot) executeExit(reason strategy.ExitReason) {
 
 	b.logger.Printf("Position closed successfully: %s", reason)
 
-	// Log statistics
 	stats := b.storage.GetStatistics()
 	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
 		stats.TotalTrades, stats.WinRate*100, stats.TotalPnL)
+}
+
+func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.ExitReason) float64 {
+	actualPnL, err := b.strategy.CalculatePositionPnL(position)
+	if err != nil {
+		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
+		if reason == strategy.ExitReasonProfitTarget {
+			return position.CreditReceived * float64(position.Quantity) * 100 * 0.5
+		}
+		return position.CreditReceived * float64(position.Quantity) * 100 * 0.2
+	}
+	return actualPnL
+}
+
+func (b *Bot) logPnL(position *models.Position, actualPnL float64) {
+	denom := position.CreditReceived * float64(position.Quantity) * 100
+	if denom == 0 {
+		denom = position.CreditReceived * 100
+	}
+	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
+		actualPnL, (actualPnL/denom)*100)
 }
 
 // pollOrderStatus polls the broker for order status until filled or timeout

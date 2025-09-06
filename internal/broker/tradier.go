@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"net/http"
 	"net/url"
@@ -407,7 +408,9 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 ) (*OrderResponse, error) {
 	// OTOCO orders in Tradier API do not support multi-leg orders like strangles
 	// The API documentation specifies that OTOCO is for single-leg orders only
-	return nil, fmt.Errorf("OTOCO orders do not support multi-leg strangle orders in Tradier API - use separate orders for opening and closing positions, or implement a polling mechanism to monitor fills and submit individual close orders")
+	return nil, fmt.Errorf("OTOCO orders do not support multi-leg strangle orders in Tradier API - " +
+		"use separate orders for opening and closing positions, or implement a polling mechanism to " +
+		"monitor fills and submit individual close orders")
 }
 
 // Helper method for making HTTP requests
@@ -438,12 +441,14 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
 			// Log error but don't fail the operation
+			log.Printf("Failed to close response body: %v", err)
 		}
 	}()
 
 	// Check rate limit headers
 	if remaining := resp.Header.Get("X-Ratelimit-Available"); remaining != "" {
 		// Could log or track rate limit usage here
+		log.Printf("Rate limit remaining: %s", remaining)
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
@@ -460,7 +465,8 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 // ============ Helper Functions ============
 
 // FindStrangleStrikes finds put and call strikes closest to target delta
-func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, callStrike float64, putSymbol, callSymbol string) {
+func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, callStrike float64,
+	putSymbol, callSymbol string) {
 	var bestPut, bestCall *Option
 	bestPutDiff := 999.0
 	bestCallDiff := 999.0

@@ -15,6 +15,7 @@ broker:
 strategy:
   symbol: "SPY"
   allocation_pct: 0.35  # 35% of account max
+  use_mock_historical_iv: true  # Use mock data until proper storage implemented
   
   entry:
     min_ivr: 30  # Minimum IV rank to enter

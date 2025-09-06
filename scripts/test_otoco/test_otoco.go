@@ -65,9 +65,9 @@ func main() {
 	bestDiff := 999
 
 	for _, exp := range expirations {
-		expDate, err := time.Parse("2006-01-02", exp)
-		if err != nil {
-			fmt.Printf("   Skipping invalid expiration: %s (parse error: %v)\n", exp, err)
+		expDate, parseErr := time.Parse("2006-01-02", exp)
+		if parseErr != nil {
+			fmt.Printf("   Skipping invalid expiration: %s (parse error: %v)\n", exp, parseErr)
 			continue
 		}
 		diff := int(expDate.Sub(targetDate).Hours() / 24)

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
-	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
@@ -46,13 +45,13 @@ func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 			// Create mock broker that returns the test balance
 			mockClient := newMockBroker(tt.accountBalance)
 
-			config := &StrategyConfig{
+			cfg := &StrategyConfig{
 				AllocationPct: tt.allocationPct,
 			}
 
 			strategy := &StrangleStrategy{
 				broker: mockClient,
-				config: config,
+				config: cfg,
 			}
 
 			result := strategy.calculatePositionSize(tt.creditPerContract)
@@ -141,10 +140,10 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 }
 
 func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
-	config := &StrategyConfig{
+	cfg := &StrategyConfig{
 		Symbol:       "SPY",
-		ProfitTarget: 0.50,          // 50%
-		MaxDTE:       config.MaxDTE, // Use constant instead of hardcoded
+		ProfitTarget: 0.50, // 50%
+		MaxDTE:       21,   // Default MaxDTE value
 	}
 
 	tests := []struct {
@@ -241,7 +240,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			mockClient := newMockBroker(100000.0)
 			strategy := &StrangleStrategy{
 				broker: mockClient,
-				config: config,
+				config: cfg,
 			}
 
 			// Set up mock option prices based on test case
@@ -484,15 +483,34 @@ func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 	return options, nil
 }
 
-func (m *mockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool) (*broker.OrderResponse, error) {
+func (m *mockBroker) PlaceStrangleOrder(
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	limitPrice float64,
+	preview bool,
+) (*broker.OrderResponse, error) {
 	return nil, nil
 }
 
-func (m *mockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*broker.OrderResponse, error) {
+func (m *mockBroker) PlaceStrangleOTOCO(
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	credit, profitTarget float64,
+) (*broker.OrderResponse, error) {
 	return nil, nil
 }
 
-func (m *mockBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*broker.OrderResponse, error) {
+func (m *mockBroker) CloseStranglePosition(
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	maxDebit float64,
+) (*broker.OrderResponse, error) {
 	return nil, nil
 }
 
@@ -522,6 +540,10 @@ func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) 
 	}, nil
 }
 
-func (m *mockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*broker.OrderResponse, error) {
+func (m *mockBroker) PlaceBuyToCloseOrder(
+	optionSymbol string,
+	quantity int,
+	maxPrice float64,
+) (*broker.OrderResponse, error) {
 	return nil, nil
 }

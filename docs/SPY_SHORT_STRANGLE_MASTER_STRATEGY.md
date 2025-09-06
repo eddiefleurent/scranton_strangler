@@ -149,10 +149,10 @@ If Experienced/Active Management:
 - **OCO Order**: Take 25% total profit OR continue to Fourth Down
 - **Count**: Strike adjustments = 2
 - **Limit**: Hold straddle maximum 7 days
-- **Trigger Next**: Loss exceeds 150% of credit
+- **Trigger Next**: Loss exceeds EscalateLossPct (200%) of credit
 
 #### Fourth Down (Critical Decision) - AUTOMATED STOPS
-- **Trigger**: Loss > 150% of credit received
+- **Trigger**: Loss > EscalateLossPct (200%) of credit received
 - **Three Actions** (Bot selects based on conditions):
 
 ##### Option A — Field Goal (Inverted Strangle)
@@ -189,8 +189,8 @@ If Experienced/Active Management:
 |-----------|---------------|------------|---------|
 | Normal | >MaxDTE (21) | <50% | Continue monitoring |
 | Strike approached | >MaxDTE (21) | <100% | Roll untested side |
-| Strike breached | >14 DTE | <150% | Create straddle |
-| Critical loss | >7 DTE | >150% | Execute Fourth Down |
+| Strike breached | >14 DTE | <EscalateLossPct (200%) | Create straddle |
+| Critical loss | >7 DTE | >EscalateLossPct (200%) | Execute Fourth Down |
 | **HARD STOP** | Any | >StopLossPct (250%) | **Close immediately** |
 | **HARD STOP** | <5 DTE | Any | **Close immediately** |
 
@@ -301,7 +301,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 ### Based on Backtesting (2005-2023)
 - **Win Rate**: 83% for 16Δ strangles
 - **Average Winner**: 50% of max profit
-- **Average Loser**: 150% of credit collected
+- **Average Loser**: EscalateLossPct (200%) of credit collected
 - **Expected Annual Return**: 25-30% (at 35% allocation)
 - **Worst Drawdown**: -20% (March 2020)
 - **Recovery Time**: 3-6 months from major losses

@@ -190,7 +190,10 @@ func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrik
 	return bestPutStrike, bestCallStrike
 }
 
-func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putStrike, callStrike float64) (float64, error) {
+func (m *MockDataProvider) CalculateStrangleCredit(
+	options []broker.Option,
+	putStrike, callStrike float64,
+) (float64, error) {
 	putCredit := 0.0
 	callCredit := 0.0
 
@@ -228,8 +231,16 @@ func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
 		return map[string]interface{}{"error": fmt.Sprintf("credit calculation error: %v", err)}
 	}
 
-	expTime, _ := time.Parse("2006-01-02", expiration)
+	expTime, err := time.Parse("2006-01-02", expiration)
+	if err != nil {
+		// If parse fails, set default expiration 45 days from now
+		expTime = time.Now().AddDate(0, 0, 45)
+	}
 	dte := int(time.Until(expTime).Hours() / 24)
+	// Clamp DTE to non-negative value
+	if dte < 0 {
+		dte = 0
+	}
 
 	return map[string]interface{}{
 		"symbol":      "SPY",

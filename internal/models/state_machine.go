@@ -265,7 +265,8 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 
 	// Ensure that when currentState equals previousState there is at least one recorded transition for that state
 	if sm.currentState == sm.previousState && sm.transitionCount[sm.currentState] == 0 && totalTransitions > 0 {
-		return fmt.Errorf("inconsistent transition counts for identical states: current and previous states are the same (%s) but no transitions recorded", sm.currentState)
+		return fmt.Errorf("inconsistent transition counts for identical states: "+
+			"current and previous states are the same (%s) but no transitions recorded", sm.currentState)
 	}
 
 	// Check adjustment/roll limits
@@ -283,7 +284,7 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
-func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte float64) (bool, string) {
+func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte float64, maxDTE int) (bool, string) {
 	// Calculate loss percentage
 	if creditReceived == 0 {
 		return false, ""
@@ -309,8 +310,8 @@ func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte floa
 				return true, "emergency exit: Option B exceeded 3-day limit"
 			}
 		case OptionC:
-			if dte <= config.MaxDTE {
-				return true, fmt.Sprintf("emergency exit: Option C reached %d DTE limit", config.MaxDTE)
+			if dte <= float64(maxDTE) {
+				return true, fmt.Sprintf("emergency exit: Option C reached %d DTE limit", maxDTE)
 			}
 		}
 	}

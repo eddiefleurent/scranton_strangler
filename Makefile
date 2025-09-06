@@ -8,20 +8,12 @@ all: build
 
 # Default target
 help:
-	@echo "Available commands:"
-	@echo "  build           - Build the Go binary"
-	@echo "  test            - Run all tests"
-	@echo "  test-coverage   - Run tests with coverage report"
-	@echo "  lint            - Run linter"
-	@echo "  run             - Run the bot locally"
-	@echo "  clean           - Clean build artifacts"
-	@echo "  build-test-helper - Build the test helper utility"
-	@echo "  docker-build    - Build Docker image"
-	@echo "  docker-run      - Run with Docker Compose"
-	@echo "  deploy-staging  - Deploy to staging environment"
-	@echo "  deploy-prod     - Deploy to production environment"
-	@echo "  logs            - Show container logs"
-	@echo "  stop            - Stop all containers"
+	@echo "Targets:"
+	@echo "  build/test/lint/run/clean"
+	@echo "  docker-build/docker-run/logs/stop"
+	@echo "  deploy-staging/deploy-prod"
+	@echo "  test-coverage/security-scan/build-test-helper"
+	@echo "  dev-setup"
 
 # Go binary name
 BINARY_NAME=strangle-bot
@@ -30,13 +22,11 @@ BINARY_PATH=./$(BINARY_NAME)
 # Build the application
 build:
 	@echo "Building $(BINARY_NAME)..."
-	go mod tidy
 	go build -o $(BINARY_NAME) cmd/bot/main.go
 
 # Build for production (optimized)
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
-	go mod tidy
 	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o $(BINARY_NAME) cmd/bot/main.go
 
 # Run tests
@@ -97,8 +87,11 @@ stop:
 # Development helpers
 dev-setup:
 	@echo "Setting up development environment..."
-	cp config.yaml.example config.yaml
-	@echo "Please update config.yaml with your settings"
+	@if [ -e config.yaml ]; then \
+		echo "config.yaml already exists; skipping copy"; \
+	else \
+		cp config.yaml.example config.yaml && echo "Created config.yaml — please update with your settings"; \
+	fi
 
 # API testing
 test-api:

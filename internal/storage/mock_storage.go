@@ -128,14 +128,16 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 		if m.statistics.WinningTrades == 1 {
 			m.statistics.AverageWin = pnl
 		} else {
-			m.statistics.AverageWin = (m.statistics.AverageWin*float64(m.statistics.WinningTrades-1) + pnl) / float64(m.statistics.WinningTrades)
+			m.statistics.AverageWin = (m.statistics.AverageWin*float64(m.statistics.WinningTrades-1) + pnl) /
+				float64(m.statistics.WinningTrades)
 		}
 	} else if pnl < 0 {
 		m.statistics.LosingTrades++
 		if m.statistics.LosingTrades == 1 {
 			m.statistics.AverageLoss = pnl
 		} else {
-			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + pnl) / float64(m.statistics.LosingTrades)
+			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + pnl) /
+				float64(m.statistics.LosingTrades)
 		}
 	}
 	// pnl == 0 is treated as breakeven - don't increment wins or losses

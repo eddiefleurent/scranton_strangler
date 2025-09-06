@@ -43,6 +43,7 @@ func (p *Position) GetTotalCredit() float64 {
 	return total
 }
 
+// ProfitPercent returns the profit/loss as a percentage (0-100), not a ratio
 func (p *Position) ProfitPercent() float64 {
 	totalCredit := p.GetTotalCredit() * float64(p.Quantity) * 100
 	if totalCredit == 0 {
@@ -167,11 +168,11 @@ func (p *Position) GetStateDescription() string {
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
-func (p *Position) ShouldEmergencyExit() (bool, string) {
+func (p *Position) ShouldEmergencyExit(maxDTE int) (bool, string) {
 	if p.StateMachine == nil {
-		return false, ""
+		p.StateMachine = NewStateMachine()
 	}
-	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, float64(p.CalculateDTE()))
+	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, float64(p.CalculateDTE()), maxDTE)
 }
 
 // SetFourthDownOption sets the Fourth Down strategy option

@@ -1,3 +1,4 @@
+// Package config provides configuration management for the trading bot.
 package config
 
 import (
@@ -14,10 +15,11 @@ const (
 	EscalateLossPct = 2.0
 	// StopLossPct represents the 250% loss threshold for immediate position closure
 	StopLossPct = 2.5
-	// MaxDTE represents the maximum days to expiration before forced exit (21 days)
-	MaxDTE = 21
+	// defaultMaxDTE represents the default maximum days to expiration before forced exit (21 days)
+	defaultMaxDTE = 21
 )
 
+// Config represents the complete application configuration.
 type Config struct {
 	Environment EnvironmentConfig `yaml:"environment"`
 	Broker      BrokerConfig      `yaml:"broker"`
@@ -26,11 +28,13 @@ type Config struct {
 	Risk        RiskConfig        `yaml:"risk"`
 }
 
+// EnvironmentConfig defines the environment settings.
 type EnvironmentConfig struct {
 	Mode     string `yaml:"mode"`      // paper | live
 	LogLevel string `yaml:"log_level"` // debug | info | warn | error
 }
 
+// BrokerConfig defines broker API settings.
 type BrokerConfig struct {
 	Provider    string `yaml:"provider"`
 	APIKey      string `yaml:"api_key"`
@@ -39,12 +43,14 @@ type BrokerConfig struct {
 	UseOTOCO    bool   `yaml:"use_otoco"` // Use OTOCO orders for preset exits
 }
 
+// StrategyConfig defines trading strategy parameters.
 type StrategyConfig struct {
-	Symbol        string           `yaml:"symbol"`
-	Entry         EntryConfig      `yaml:"entry"`
-	Exit          ExitConfig       `yaml:"exit"`
-	Adjustments   AdjustmentConfig `yaml:"adjustments"`
-	AllocationPct float64          `yaml:"allocation_pct"`
+	Symbol              string           `yaml:"symbol"`
+	Entry               EntryConfig      `yaml:"entry"`
+	Exit                ExitConfig       `yaml:"exit"`
+	Adjustments         AdjustmentConfig `yaml:"adjustments"`
+	AllocationPct       float64          `yaml:"allocation_pct"`
+	UseMockHistoricalIV bool             `yaml:"use_mock_historical_iv"`
 }
 
 type EntryConfig struct {
@@ -142,14 +148,18 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("strategy.entry.target_dte must be > 0")
 	}
 	{
-		min, max := c.Strategy.Entry.DTERange[0], c.Strategy.Entry.DTERange[1]
-		if c.Strategy.Entry.TargetDTE < min || c.Strategy.Entry.TargetDTE > max {
-			return fmt.Errorf("strategy.entry.target_dte (%d) must be within dte_range [%d,%d]", c.Strategy.Entry.TargetDTE, min, max)
+		minDTE, maxDTE := c.Strategy.Entry.DTERange[0], c.Strategy.Entry.DTERange[1]
+		if c.Strategy.Entry.TargetDTE < minDTE || c.Strategy.Entry.TargetDTE > maxDTE {
+			return fmt.Errorf("strategy.entry.target_dte (%d) must be within dte_range [%d,%d]",
+				c.Strategy.Entry.TargetDTE, minDTE, maxDTE)
 		}
 	}
 	if c.Strategy.Entry.MinCredit <= 0 {
 		return fmt.Errorf("strategy.entry.min_credit must be > 0")
 	}
+
+	// Normalize exit configuration
+	c.normalizeExitConfig()
 
 	// Risk validation
 	if c.Risk.MaxContracts <= 0 {
@@ -160,6 +170,20 @@ func (c *Config) Validate() error {
 	}
 	if c.Risk.MaxPositionLoss <= 0 {
 		return fmt.Errorf("risk.max_position_loss must be > 0")
+	}
+
+	// Schedule validation
+	if _, err := time.ParseDuration(c.Schedule.MarketCheckInterval); err != nil {
+		return fmt.Errorf("schedule.market_check_interval invalid: %w", err)
+	}
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return fmt.Errorf("failed to load timezone: %w", err)
+	}
+	s, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
+	e, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
+	if err1 != nil || err2 != nil || (s.Hour() > e.Hour() || (s.Hour() == e.Hour() && s.Minute() >= e.Minute())) {
+		return fmt.Errorf("schedule trading window invalid (start/end parse/order)")
 	}
 
 	return nil
@@ -201,5 +225,21 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	end := time.Date(todayET.Year(), todayET.Month(), todayET.Day(),
 		endClock.Hour(), endClock.Minute(), 0, 0, loc)
 
-	return !todayET.Before(start) && !todayET.After(end)
+	// Inclusive start, exclusive end
+	return !todayET.Before(start) && todayET.Before(end)
+}
+
+// normalizeExitConfig sets default values for exit configuration
+func (c *Config) normalizeExitConfig() {
+	if c.Strategy.Exit.MaxDTE == 0 {
+		c.Strategy.Exit.MaxDTE = defaultMaxDTE
+	}
+}
+
+// GetMaxDTE returns the configured MaxDTE value, falling back to defaultMaxDTE if unset
+func (c *Config) GetMaxDTE() int {
+	if c.Strategy.Exit.MaxDTE == 0 {
+		return defaultMaxDTE
+	}
+	return c.Strategy.Exit.MaxDTE
 }
