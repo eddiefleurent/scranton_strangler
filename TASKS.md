@@ -172,21 +172,19 @@ A bot that can automatically:
 ## Removed Complexity (Post-MVP)
 
 ### Unnecessary for MVP
-- ❌ Interface abstractions (Broker/Strategy/Storage)
-- ❌ Complex state machines (Football System) 
-- ❌ Advanced order types (OCO, Bracket)
+- ❌ Advanced order types (OCO, Bracket orders)
 - ❌ Multiple position management
 - ❌ SQLite/PostgreSQL database
 - ❌ Comprehensive test coverage (>80%)
-- ❌ Circuit breakers and observability  
+- ❌ Circuit breakers and observability
 - ❌ Web dashboards and monitoring
 - ❌ Multi-asset support
 - ❌ Backtesting framework
 
 ### Keep It Simple
-- ✅ Direct struct implementations  
-- ✅ Simple state: OPEN/CLOSED positions
-- ✅ OTOCO orders only
+- ✅ Interface abstractions (Broker/Strategy/Storage) - implemented for MVP
+- ✅ Simple state machine (OPEN/CLOSED positions)
+- ✅ OTOCO orders (in-scope) vs OCO/Bracket (post-MVP)
 - ✅ One position at a time
 - ✅ JSON file storage
 - ✅ Basic tests for math functions

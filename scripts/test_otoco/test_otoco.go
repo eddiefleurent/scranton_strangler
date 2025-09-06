@@ -25,9 +25,12 @@ func main() {
 	// Get account ID (you'll need to set this)
 	accountID := os.Getenv("TRADIER_ACCOUNT_ID")
 	if accountID == "" {
-		// Use a default sandbox account ID if not set
-		accountID = "VA00000000" // Replace with your sandbox account
-		fmt.Printf("Using default sandbox account ID: %s\n", accountID)
+		if preview {
+			accountID = "VA00000000" // sandbox placeholder for preview-only runs
+			fmt.Printf("Using default sandbox account ID: %s\n", accountID)
+		} else {
+			log.Fatal("TRADIER_ACCOUNT_ID not set (required for live mode)")
+		}
 	}
 
 	fmt.Println("=== Testing Tradier OTOCO Order ===")
@@ -59,7 +62,11 @@ func main() {
 	bestDiff := 999
 
 	for _, exp := range expirations {
-		expDate, _ := time.Parse("2006-01-02", exp)
+		expDate, err := time.Parse("2006-01-02", exp)
+		if err != nil {
+			fmt.Printf("   Skipping invalid expiration: %s (parse error: %v)\n", exp, err)
+			continue
+		}
 		diff := int(expDate.Sub(targetDate).Hours() / 24)
 		if diff < 0 {
 			diff = -diff
@@ -70,7 +77,14 @@ func main() {
 		}
 	}
 
-	expDate, _ := time.Parse("2006-01-02", bestExpiration)
+	if bestExpiration == "" {
+		log.Fatal("No valid expiration dates found")
+	}
+
+	expDate, err := time.Parse("2006-01-02", bestExpiration)
+	if err != nil {
+		log.Fatalf("Failed to parse selected expiration %s: %v", bestExpiration, err)
+	}
 	dte := int(expDate.Sub(time.Now()).Hours() / 24)
 	fmt.Printf("   Selected expiration: %s (%d DTE)\n", bestExpiration, dte)
 

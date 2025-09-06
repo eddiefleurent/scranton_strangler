@@ -63,20 +63,27 @@ fi
 
 log_info "Binary built successfully"
 
-# Build Docker image
-log_info "Building Docker image..."
-docker build -t "strangle-bot:$ENVIRONMENT" .
+# Detect compose command
+if command -v docker compose &>/dev/null; then
+    COMPOSE="docker compose"
+else
+    COMPOSE="docker-compose"
+fi
+
+# Ensure bind-mount targets exist
+mkdir -p "$PROJECT_ROOT/logs"
+touch "$PROJECT_ROOT/positions.json"
 
 # Stop existing containers
 log_info "Stopping existing containers..."
-docker-compose down || true
+$COMPOSE down || true
 
 # Start services
 log_info "Starting services..."
 if [[ "$ENVIRONMENT" == "production" ]]; then
-    docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+    $COMPOSE -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 else
-    docker-compose up -d
+    $COMPOSE up -d --build
 fi
 
 # Wait for services to be healthy
@@ -84,18 +91,18 @@ log_info "Waiting for services to be ready..."
 sleep 10
 
 # Check if services are running
-if docker-compose ps | grep -q "Up"; then
+if $COMPOSE ps | grep -q "Up"; then
     log_info "Deployment to $ENVIRONMENT completed successfully!"
-    
+
     # Show running containers
     log_info "Running containers:"
-    docker-compose ps
-    
+    $COMPOSE ps
+
     # Show logs
     log_info "Recent logs:"
-    docker-compose logs --tail=20 strangle-bot
+    $COMPOSE logs --tail=20 strangle-bot
 else
     log_error "Deployment failed. Services are not running properly."
-    docker-compose logs
+    $COMPOSE logs
     exit 1
 fi
