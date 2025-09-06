@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
+	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
@@ -32,6 +33,7 @@ type ExitReason string
 const (
 	ExitReasonProfitTarget ExitReason = "profit_target"
 	ExitReasonTime         ExitReason = "time"
+	ExitReasonEscalate     ExitReason = "escalate"
 	ExitReasonStopLoss     ExitReason = "stop_loss"
 	ExitReasonManual       ExitReason = "manual"
 	ExitReasonError        ExitReason = "error"
@@ -117,17 +119,17 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 	// Get current IV from option chain
 	currentIV, err := s.getCurrentImpliedVolatility()
 	if err != nil {
-		// Fallback to mock value if unable to get real IV
-		fmt.Printf("Warning: Using mock IVR due to error: %v\n", err)
-		return 35.0
+		// Fallback to 0.0 for fail-closed behavior - block entries on IV errors
+		fmt.Printf("Warning: Using 0.0 IVR due to error: %v\n", err)
+		return 0.0
 	}
 
 	// Get historical IV data (20-day lookback for MVP)
 	historicalIVs, err := s.getHistoricalImpliedVolatility(20)
 	if err != nil || len(historicalIVs) == 0 {
-		// Fallback to mock value if no historical data
-		fmt.Printf("Warning: Using mock IVR due to insufficient historical data\n")
-		return 35.0
+		// Fallback to 0.0 for fail-closed behavior - block entries on insufficient data
+		fmt.Printf("Warning: Using 0.0 IVR due to insufficient historical data\n")
+		return 0.0
 	}
 
 	// Calculate IVR using the standard formula
@@ -431,14 +433,19 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		return true, ExitReasonProfitTarget
 	}
 
-	// Check 250% stop-loss
-	if profitPct <= -2.5 {
-		return true, ExitReasonStopLoss
+	// Check escalate loss threshold (200% loss) - prepare for action
+	if profitPct <= -config.EscalateLossPct {
+		// First check if we've reached the stop loss threshold (250%)
+		if profitPct <= -config.StopLossPct {
+			return true, ExitReasonStopLoss
+		}
+		// Otherwise trigger escalate action at 200% loss
+		return true, ExitReasonEscalate
 	}
 
-	// Check DTE
+	// Check DTE using constant
 	currentDTE := position.CalculateDTE()
-	if currentDTE <= s.config.MaxDTE {
+	if currentDTE <= config.MaxDTE {
 		return true, ExitReasonTime
 	}
 

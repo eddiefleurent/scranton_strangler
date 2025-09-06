@@ -4,6 +4,8 @@ package models
 import (
 	"fmt"
 	"time"
+
+	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 // PositionState represents the current state of a position
@@ -288,9 +290,9 @@ func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte floa
 	}
 	lossPercent := (currentPnL / creditReceived) * -100 // Negative because P&L is negative for losses
 
-	// Emergency exit at 200% loss (always applies)
-	if lossPercent >= 200 {
-		return true, fmt.Sprintf("emergency exit: loss %.1f%% >= 200%% threshold", lossPercent)
+	// Emergency exit at configured escalate loss percentage (always applies)
+	if lossPercent >= config.EscalateLossPct*100 {
+		return true, fmt.Sprintf("emergency exit: loss %.1f%% >= %.0f%% threshold", lossPercent, config.EscalateLossPct*100)
 	}
 
 	// Check Fourth Down time-based limits if in Fourth Down state
@@ -307,8 +309,8 @@ func (sm *StateMachine) ShouldEmergencyExit(creditReceived, currentPnL, dte floa
 				return true, "emergency exit: Option B exceeded 3-day limit"
 			}
 		case OptionC:
-			if dte <= 21 {
-				return true, "emergency exit: Option C reached 21 DTE limit"
+			if dte <= config.MaxDTE {
+				return true, fmt.Sprintf("emergency exit: Option C reached %d DTE limit", config.MaxDTE)
 			}
 		}
 	}

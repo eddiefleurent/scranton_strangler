@@ -90,8 +90,12 @@
 - [ ] Better error handling with retries
 - [ ] SQLite for position storage
 - [ ] Structured logging with levels
-- [ ] Email/Slack alerts on trades
-- [ ] Basic web dashboard for monitoring
+- [ ] **Trade Monitoring & Alerting**
+  - [ ] Discord webhook notifications for trade events (entry/exit/adjustments/alerts)
+  - [ ] Simple event logging to append-only JSON file (trades.log)
+  - [ ] Basic web dashboard with HTMX for position viewing
+  - [ ] Real-time position status endpoint for dashboard polling
+  - [ ] Configuration for notification levels and webhook URL
 
 ### Phase 3: Strategy Enhancements  
 - [ ] "Football System" adjustments

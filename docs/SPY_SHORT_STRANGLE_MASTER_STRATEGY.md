@@ -4,7 +4,7 @@
 - **Product**: SPY (S&P 500 ETF)
 - **Strategy**: Short Strangle (sell OTM put + OTM call)
 - **Target Win Rate**: 80-90% (with proper management)
-- **Typical Duration**: 21-30 days (from 45 DTE entry)
+- **Typical Duration**: MaxDTE-30 days (from 45 DTE entry, where MaxDTE = 21)
 - **Profit Target**: 50% of initial credit
 - **Capital Allocation**: 30-35% of account max
 
@@ -101,7 +101,7 @@ If Experienced/Active Management:
 
 ### Standard Exits
 1. **Profit Target Hit**: 50% of initial credit (GTC limit order when using OTOCO)
-2. **Time Exit**: 21 DTE remaining (avoid gamma risk)
+2. **Time Exit**: MaxDTE (21) remaining (avoid gamma risk)
 3. **Whichever comes first**
 
 ### Profit Taking Mechanics
@@ -111,8 +111,8 @@ If Experienced/Active Management:
 - **Example**: Collected $3.00 credit → Exit at $1.50 debit
 
 ### Emergency Exits (Manual Intervention Only)
-- Loss exceeds 200% of collected premium (escalate/prepare for action)
-- Loss reaches 250% of collected premium (position must be immediately closed)
+- Loss exceeds EscalateLossPct (2.0 = 200%) of collected premium (escalate/prepare for action)
+- Loss reaches StopLossPct (2.5 = 250%) of collected premium (position must be immediately closed)
 - Black swan event (market drops/rises >8% in day)
 - Major unexpected news event
 - Assignment risk becomes imminent
@@ -158,25 +158,25 @@ If Experienced/Active Management:
 **Option A - Field Goal (Inverted Strangle)**
 - Roll untested strike below tested strike (3rd adjustment)
 - **Count**: Strike adjustments = 3 (FINAL ADJUSTMENT)
-- **STOP**: Close at any profit OR at 200% loss (whichever first)
+- **STOP**: Close at any profit OR at EscalateLossPct (200%) loss (whichever first)
 - **Time Limit**: 5 days maximum
 
 **Option B - Go For It (Hold Straddle)** 
 - Keep current straddle, wait for recovery (no additional roll)
 - **Count**: Strike adjustments remain at 2
-- **STOP**: Close at 25% profit OR 200% loss (whichever first)
+- **STOP**: Close at 25% profit OR EscalateLossPct (200%) loss (whichever first)
 - **Time Limit**: 3 days maximum
 
 **Option C - Punt (Time Roll)**
 - Roll entire position to next expiration (time adjustment, not strike)
 - **Count**: Strike adjustments reset to 0, but trade marked as "punted"
-- **STOP**: Close at 50% profit OR 21 DTE OR 200% total loss
+- **STOP**: Close at 50% profit OR MaxDTE (21) OR EscalateLossPct (200%) total loss
 - **LIMIT**: Maximum 1 punt per original trade
 - **RESET**: New expiration cycle allows fresh First→Fourth Down sequence
 
 ### Hard Stop Conditions (Non-Negotiable)
 
-1. **Maximum Loss Stop**: 250% of credit received
+1. **Maximum Loss Stop**: StopLossPct (250%) of credit received
 2. **Time Stop**: 5 DTE remaining (assignment risk)
 3. **Delta Stop**: Position delta > |1.0| (directional risk too high)
 4. **Management Stop**: Completed Fourth Down without recovery
@@ -187,11 +187,11 @@ If Experienced/Active Management:
 
 | Condition | Days Remaining | Loss Level | Action |
 |-----------|---------------|------------|---------|
-| Normal | >21 DTE | <50% | Continue monitoring |
-| Strike approached | >21 DTE | <100% | Roll untested side |
+| Normal | >MaxDTE (21) | <50% | Continue monitoring |
+| Strike approached | >MaxDTE (21) | <100% | Roll untested side |
 | Strike breached | >14 DTE | <150% | Create straddle |
 | Critical loss | >7 DTE | >150% | Execute Fourth Down |
-| **HARD STOP** | Any | >250% | **Close immediately** |
+| **HARD STOP** | Any | >StopLossPct (250%) | **Close immediately** |
 | **HARD STOP** | <5 DTE | Any | **Close immediately** |
 
 ### Emergency Exit Triggers (Immediate Close)
@@ -222,9 +222,9 @@ $17,500 ÷ $15,000 BPR = 1 contract
 
 ### Realistic Risk Scenarios
 - **Normal Loss**: 50-100% of credit collected
-- **Bad Loss**: 200% of credit (manageable)
+- **Bad Loss**: EscalateLossPct (200%) of credit (manageable)
 - **Worst Case**: 500-700% of credit (black swan)
-- **Protect Against**: Never let loss exceed 250% without action
+- **Protect Against**: Never let loss exceed StopLossPct (250%) without action
 
 ---
 
@@ -266,7 +266,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 ## Common Mistakes to Avoid
 
 1. **Over-allocating capital** - Stick to 35% max
-2. **Holding past 21 DTE** - Gamma risk increases exponentially
+2. **Holding past MaxDTE (21)** - Gamma risk increases exponentially
 3. **Not taking 50% profits** - Greed kills returns
 4. **Using on single stocks** - Stick to ETFs for stability
 5. **Ignoring IVR** - Trade when premium is worth it
@@ -371,7 +371,7 @@ At 50% profit?
   Yes → CLOSE
   No ↓
   
-At 21 DTE?
+At MaxDTE (21)?
   Yes → CLOSE
   No ↓
   
@@ -388,7 +388,7 @@ Strike being tested?
 2. **Discipline**: Take 50% profits religiously
 3. **Defense**: Manage early and often
 4. **Size**: Never over-allocate
-5. **Time**: Exit by 21 DTE always
+5. **Time**: Exit by MaxDTE (21) always
 6. **Simplicity**: Stick to SPY until experienced
 7. **Records**: Track everything for improvement
 8. **Learning**: Each trade teaches something

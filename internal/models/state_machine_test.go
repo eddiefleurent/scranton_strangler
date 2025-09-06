@@ -1,13 +1,16 @@
 package models
 
 import (
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 // Test constants for repeated strings
-const (
-	emergencyExitMessage = "emergency exit: loss 142.9% >= 200% threshold"
+var (
+	emergencyExitMessage = fmt.Sprintf("emergency exit: loss 142.9%% >= %.0f%% threshold", config.EscalateLossPct*100)
 )
 
 func TestStateMachine_BasicTransitions(t *testing.T) {
@@ -416,7 +419,8 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
 	}
-	if reason != "emergency exit: loss 200.0% >= 200% threshold" {
+	expectedMsg := fmt.Sprintf("emergency exit: loss 200.0%% >= %.0f%% threshold", config.EscalateLossPct*100)
+	if reason != expectedMsg {
 		t.Errorf("Expected specific loss message, got: %s", reason)
 	}
 
@@ -491,25 +495,26 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm.SetFourthDownOption(OptionC)
 	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
 
-	// Test above 21 DTE - no emergency exit
-	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, 25) // 142.9% loss, 25 DTE
+	// Test above MaxDTE - no emergency exit
+	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -5.00, config.MaxDTE+4) // 142.9% loss, above MaxDTE
 	if shouldExit && reason != emergencyExitMessage {
-		t.Errorf("Should not emergency exit at 25 DTE, but got: %s", reason)
+		t.Errorf("Should not emergency exit at %d DTE, but got: %s", config.MaxDTE+4, reason)
 	}
 
-	// Test exactly at 21 DTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 21) // 142.9% loss, 21 DTE
+	// Test exactly at MaxDTE - should trigger
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, config.MaxDTE) // 142.9% loss, MaxDTE
 	if !shouldExit {
-		t.Error("Should emergency exit at 21 DTE for Option C")
+		t.Errorf("Should emergency exit at %d DTE for Option C", config.MaxDTE)
 	}
-	if !contains(reason, "Option C reached 21 DTE limit") {
+	expectedDTEMsg := fmt.Sprintf("Option C reached %d DTE limit", config.MaxDTE)
+	if !contains(reason, expectedDTEMsg) {
 		t.Errorf("Expected Option C DTE limit message, got: %s", reason)
 	}
 
-	// Test below 21 DTE - should trigger
-	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 15) // 142.9% loss, 15 DTE
+	// Test below MaxDTE - should trigger
+	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, config.MaxDTE-6) // 142.9% loss, 15 DTE
 	if !shouldExit {
-		t.Error("Should emergency exit at 15 DTE for Option C")
+		t.Errorf("Should emergency exit at %d DTE for Option C", config.MaxDTE-6)
 	}
 }
 

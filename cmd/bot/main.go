@@ -351,16 +351,16 @@ func (b *Bot) executeExit(reason strategy.ExitReason) {
 		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
 		// Fall back to estimated P&L
 		if reason == strategy.ExitReasonProfitTarget {
-			actualPnL = position.CreditReceived * 0.5 // 50% profit
+			actualPnL = position.CreditReceived * float64(position.Quantity) * 100 * 0.5 // 50% profit
 		} else {
-			actualPnL = position.CreditReceived * 0.2 // 20% profit for early exits
+			actualPnL = position.CreditReceived * float64(position.Quantity) * 100 * 0.2 // 20% profit for early exits
 		}
 	}
 
 	// Calculate percentage using total credit across all contracts
-	denom := position.CreditReceived * float64(position.Quantity)
+	denom := position.CreditReceived * float64(position.Quantity) * 100
 	if denom == 0 {
-		denom = position.CreditReceived // fallback to avoid divide-by-zero
+		denom = position.CreditReceived * 100 // fallback per-contract in dollars
 	}
 	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)",
 		actualPnL, (actualPnL/denom)*100)

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
+	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
@@ -142,8 +143,8 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 	config := &StrategyConfig{
 		Symbol:       "SPY",
-		ProfitTarget: 0.50, // 50%
-		MaxDTE:       21,   // 21 days
+		ProfitTarget: 0.50,         // 50%
+		MaxDTE:       config.MaxDTE, // Use constant instead of hardcoded
 	}
 
 	tests := []struct {
@@ -187,6 +188,21 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			},
 			expectedExit:   true,
 			expectedReason: "time",
+		},
+		{
+			name: "200% escalate loss triggered",
+			position: &models.Position{
+				Symbol:         "SPY",
+				PutStrike:      400.0,
+				CallStrike:     420.0,
+				Expiration:     time.Now().AddDate(0, 0, 35),
+				Quantity:       1,
+				CreditReceived: 3.50,
+				CurrentPnL:     -700.0, // -200% loss (-$700 on $350 credit)
+				DTE:            35,     // Still have time but need escalation
+			},
+			expectedExit:   true,
+			expectedReason: "escalate",
 		},
 		{
 			name: "250% stop-loss triggered",
@@ -245,6 +261,12 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
 					mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
 					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
+				case "200% escalate loss triggered":
+					// For -200% loss: credit 3.50, current value should be 10.50
+					// P&L = $350 - $1050 = -$700 (-200% loss)
+					mockClient.setOptionPrice(expiration, 400.0, "put", 5.00)
+					mockClient.setOptionPrice(expiration, 420.0, "call", 5.50)
+					// Total: 10.50, P&L = 3.50 - 10.50 = -7.00 per contract = -$700
 				case "250% stop-loss triggered":
 					// For -250% loss: credit 3.50, current value should be 12.25
 					// P&L = $350 - $1225 = -$875 (-250% loss)

@@ -8,6 +8,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Risk Management Constants
+const (
+	// EscalateLossPct represents the 200% loss threshold for escalating/preparing for action
+	EscalateLossPct = 2.0
+	// StopLossPct represents the 250% loss threshold for immediate position closure
+	StopLossPct = 2.5
+	// MaxDTE represents the maximum days to expiration before forced exit (21 days)
+	MaxDTE = 21
+)
+
 type Config struct {
 	Environment EnvironmentConfig `yaml:"environment"`
 	Broker      BrokerConfig      `yaml:"broker"`

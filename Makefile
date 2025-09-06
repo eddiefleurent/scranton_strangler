@@ -1,6 +1,6 @@
 # SPY Strangle Bot - Makefile
 
-.PHONY: help build test lint run clean docker-build docker-run deploy-staging deploy-prod
+.PHONY: help build test lint run clean build-test-helper docker-build docker-run deploy-staging deploy-prod
 
 # Default target
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  lint            - Run linter"
 	@echo "  run             - Run the bot locally"
 	@echo "  clean           - Clean build artifacts"
+	@echo "  build-test-helper - Build the test helper utility"
 	@echo "  docker-build    - Build Docker image"
 	@echo "  docker-run      - Run with Docker Compose"
 	@echo "  deploy-staging  - Deploy to staging environment"
@@ -65,6 +66,7 @@ clean:
 	rm -f main
 	rm -f test_otoco
 	rm -f test-tradier
+	rm -f scripts/test_helper/test_helper
 	rm -f coverage.out coverage.html
 	rm -f *.test
 	rm -f *.prof
@@ -105,7 +107,12 @@ dev-setup:
 # API testing
 test-api:
 	@echo "Testing Tradier API connection..."
-	cd scripts/test_otoco && go run test_otoco.go
+	cd scripts/test_tradier && go run test_tradier.go
+
+# Build test helper
+build-test-helper:
+	@echo "Building test helper..."
+	go build -tags test -o scripts/test_helper/test_helper scripts/test_helper/test_helper.go
 
 # Security scan
 security-scan:

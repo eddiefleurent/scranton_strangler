@@ -13,7 +13,9 @@ import (
 
 func main() {
 	var preview bool
+	var sandbox bool
 	flag.BoolVar(&preview, "preview", true, "Preview order without placing (default: true)")
+	flag.BoolVar(&sandbox, "sandbox", true, "Use Tradier sandbox endpoints (default: true)")
 	flag.Parse()
 
 	// Get API key from environment
@@ -25,21 +27,22 @@ func main() {
 	// Get account ID (you'll need to set this)
 	accountID := os.Getenv("TRADIER_ACCOUNT_ID")
 	if accountID == "" {
-		if preview {
-			accountID = "VA00000000" // sandbox placeholder for preview-only runs
+		if sandbox {
+			accountID = "VA00000000" // sandbox placeholder for non-production tests
 			fmt.Printf("Using default sandbox account ID: %s\n", accountID)
 		} else {
-			log.Fatal("TRADIER_ACCOUNT_ID not set (required for live mode)")
+			log.Fatal("TRADIER_ACCOUNT_ID not set (required for non-sandbox mode)")
 		}
 	}
 
 	fmt.Println("=== Testing Tradier OTOCO Order ===")
 	fmt.Printf("Account ID: %s\n", accountID)
 	fmt.Printf("Preview Mode: %v\n", preview)
+	fmt.Printf("Sandbox: %v\n", sandbox)
 	fmt.Println()
 
 	// Create API client
-	client := broker.NewTradierAPI(apiKey, accountID, true) // true = sandbox
+	client := broker.NewTradierAPI(apiKey, accountID, sandbox)
 
 	// 1. Get SPY quote
 	fmt.Println("1. Getting SPY quote...")

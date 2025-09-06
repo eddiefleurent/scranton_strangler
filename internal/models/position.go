@@ -192,7 +192,7 @@ func (p *Position) GetFourthDownOption() FourthDownOption {
 // CanPunt returns true if punt is still allowed
 func (p *Position) CanPunt() bool {
 	if p.StateMachine == nil {
-		return true
+		p.StateMachine = NewStateMachine()
 	}
 	return p.StateMachine.CanPunt()
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,10 @@ import (
 )
 
 func main() {
+	var sandbox bool
+	flag.BoolVar(&sandbox, "sandbox", true, "Use Tradier sandbox endpoints (default: true)")
+	flag.Parse()
+
 	fmt.Println("=== Tradier API Complete Test Suite ===")
 	fmt.Println()
 
@@ -35,9 +40,13 @@ func main() {
 		fmt.Println("⚠️  TRADIER_ACCOUNT_ID not set, some tests will be skipped")
 	}
 
-	// Initialize client (sandbox mode)
-	client := broker.NewTradierClient(apiKey, accountID, true /* sandbox */, true /* useOTOCO */, 0.5 /* profitTarget */)
-	fmt.Printf("✓ Initialized Tradier client (Sandbox mode)\n")
+	// Initialize client
+	client := broker.NewTradierClient(apiKey, accountID, sandbox, true /* useOTOCO */, 0.5 /* profitTarget */)
+	if sandbox {
+		fmt.Printf("✓ Initialized Tradier client (Sandbox mode)\n")
+	} else {
+		fmt.Printf("✓ Initialized Tradier client (Live mode)\n")
+	}
 	fmt.Printf("  API Key: %s\n", maskAPIKey(apiKey))
 	if accountID != "" {
 		fmt.Printf("  Account: %s\n", accountID)

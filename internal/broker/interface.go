@@ -1,6 +1,9 @@
 package broker
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Broker defines the interface for interacting with a brokerage
 type Broker interface {
@@ -53,8 +56,19 @@ func (t *TradierClient) GetAccountBalance() (float64, error) {
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
 func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool) (*OrderResponse, error) {
 	if t.useOTOCO {
-		// Use OTOCO order with configurable profit target
-		return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, limitPrice, t.profitTarget, preview)
+		// Try OTOCO order with configurable profit target
+		orderResp, err := t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, limitPrice, t.profitTarget, preview)
+		if err != nil {
+			// Check if error indicates OTOCO unsupported - fall back to regular order
+			if strings.Contains(err.Error(), "unsupported") || strings.Contains(err.Error(), "OTOCO") {
+				// Log OTOCO-specific error and fall back to regular order
+				// Use regular strangle order as fallback
+				return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview)
+			}
+			// Return the original error if it's not OTOCO-related
+			return nil, err
+		}
+		return orderResp, nil
 	}
 	// Use regular strangle order
 	return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview)
