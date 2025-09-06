@@ -415,3 +415,76 @@ func TestValidate_StoragePath(t *testing.T) {
 		}
 	})
 }
+
+func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
+	t.Run("stop_loss_pct clamped when max_position_loss is less than default", func(t *testing.T) {
+		config := &Config{
+			Strategy: StrategyConfig{
+				Exit: ExitConfig{
+					StopLossPct: 0, // unset
+				},
+			},
+			Risk: RiskConfig{
+				MaxPositionLoss: 2.0, // less than defaultStopLossPct (2.5)
+			},
+		}
+
+		config.normalizeExitConfig()
+
+		if config.Strategy.Exit.StopLossPct != 2.0 {
+			t.Errorf("Expected StopLossPct to be clamped to 2.0, got %.2f", config.Strategy.Exit.StopLossPct)
+		}
+	})
+
+	t.Run("stop_loss_pct not clamped when max_position_loss is greater than default", func(t *testing.T) {
+		config := &Config{
+			Strategy: StrategyConfig{
+				Exit: ExitConfig{
+					StopLossPct: 0, // unset
+				},
+			},
+			Risk: RiskConfig{
+				MaxPositionLoss: 3.0, // greater than defaultStopLossPct (2.5)
+			},
+		}
+
+		config.normalizeExitConfig()
+
+		if config.Strategy.Exit.StopLossPct != 2.5 {
+			t.Errorf("Expected StopLossPct to be 2.5, got %.2f", config.Strategy.Exit.StopLossPct)
+		}
+	})
+
+	t.Run("explicit stop_loss_pct remains unchanged", func(t *testing.T) {
+		config := &Config{
+			Strategy: StrategyConfig{
+				Exit: ExitConfig{
+					StopLossPct: 1.5, // explicitly set
+				},
+			},
+			Risk: RiskConfig{
+				MaxPositionLoss: 2.0,
+			},
+		}
+
+		config.normalizeExitConfig()
+
+		if config.Strategy.Exit.StopLossPct != 1.5 {
+			t.Errorf("Expected StopLossPct to remain 1.5, got %.2f", config.Strategy.Exit.StopLossPct)
+		}
+	})
+
+	t.Run("max_position_loss defaulted when unset", func(t *testing.T) {
+		config := &Config{
+			Risk: RiskConfig{
+				MaxPositionLoss: 0, // unset
+			},
+		}
+
+		config.normalizeExitConfig()
+
+		if config.Risk.MaxPositionLoss != 2.0 {
+			t.Errorf("Expected MaxPositionLoss to be defaulted to 2.0, got %.2f", config.Risk.MaxPositionLoss)
+		}
+	})
+}

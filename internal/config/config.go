@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -16,6 +17,8 @@ const (
 	defaultEscalateLossPct = 2.0
 	// defaultStopLossPct is used when strategy.exit.stop_loss_pct is unset
 	defaultStopLossPct = 2.5
+	// defaultRiskMaxPositionLoss is used when risk.max_position_loss is unset
+	defaultRiskMaxPositionLoss = 2.0
 	// defaultMaxDTE represents the default maximum days to expiration before forced exit (21 days)
 	defaultMaxDTE = 21
 )
@@ -306,8 +309,12 @@ func (c *Config) normalizeExitConfig() {
 	if c.Strategy.EscalateLossPct == 0 {
 		c.Strategy.EscalateLossPct = defaultEscalateLossPct
 	}
+	if c.Risk.MaxPositionLoss == 0 {
+		c.Risk.MaxPositionLoss = defaultRiskMaxPositionLoss
+	}
 	if c.Strategy.Exit.StopLossPct == 0 {
-		c.Strategy.Exit.StopLossPct = defaultStopLossPct
+		// Clamp StopLossPct to not exceed MaxPositionLoss when unset
+		c.Strategy.Exit.StopLossPct = math.Min(defaultStopLossPct, c.Risk.MaxPositionLoss)
 	}
 }
 
