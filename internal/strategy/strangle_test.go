@@ -42,7 +42,7 @@ func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock broker that returns the test balance
-			mockClient := &mockBroker{balance: tt.accountBalance}
+			mockClient := newMockBroker(tt.accountBalance)
 			
 			config := &StrategyConfig{
 				AllocationPct: tt.allocationPct,
@@ -140,11 +140,10 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 
 func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 	config := &StrategyConfig{
+		Symbol:       "SPY",
 		ProfitTarget: 0.50, // 50%
 		MaxDTE:       21,   // 21 days
 	}
-	
-	strategy := &StrangleStrategy{config: config}
 
 	tests := []struct {
 		name           string
@@ -161,10 +160,14 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 		{
 			name: "profit target reached",
 			position: &models.Position{
+				Symbol:         "SPY",
+				PutStrike:      400.0,
+				CallStrike:     420.0,
+				Expiration:     time.Now().AddDate(0, 0, 35),
+				Quantity:       1,
 				CreditReceived: 3.50,
-				CurrentPnL:     1.75, // 50% profit
+				CurrentPnL:     175.0, // 50% profit ($175 on $350 credit)
 				DTE:           35,
-				Status:        "open",
 			},
 			expectedExit:   true,
 			expectedReason: "profit target reached",
@@ -172,10 +175,14 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 		{
 			name: "max DTE reached",
 			position: &models.Position{
+				Symbol:         "SPY",
+				PutStrike:      400.0,
+				CallStrike:     420.0,
+				Expiration:     time.Now().AddDate(0, 0, 21),
+				Quantity:       1,
 				CreditReceived: 3.50,
-				CurrentPnL:     0.50, // Only 14% profit
+				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 credit)
 				DTE:           21,    // At max DTE
-				Status:        "open",
 			},
 			expectedExit:   true,
 			expectedReason: "max DTE reached",
@@ -183,10 +190,14 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 		{
 			name: "no exit conditions met",
 			position: &models.Position{
+				Symbol:         "SPY",
+				PutStrike:      400.0,
+				CallStrike:     420.0,
+				Expiration:     time.Now().AddDate(0, 0, 35),
+				Quantity:       1,
 				CreditReceived: 3.50,
-				CurrentPnL:     0.50, // Only 14% profit
+				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 credit)
 				DTE:           35,    // Still have time
-				Status:        "open",
 			},
 			expectedExit:   false,
 			expectedReason: "no exit conditions met",
@@ -195,9 +206,40 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockClient := newMockBroker(100000.0)
+			strategy := &StrangleStrategy{
+				broker: mockClient,
+				config: config,
+			}
+			
+			// Set up mock option prices based on test case
+			if tt.position != nil {
+				expiration := tt.position.Expiration.Format("2006-01-02")
+				
+				// Set different option prices for different test scenarios
+				switch tt.name {
+				case "profit target reached":
+					// For 50% profit: credit 3.50, current value should be 1.75
+					mockClient.setOptionPrice(expiration, 400.0, "put", 0.85)
+					mockClient.setOptionPrice(expiration, 420.0, "call", 0.90)
+					// Total: 1.75, P&L = 3.50 - 1.75 = 1.75 (50% profit)
+				case "max DTE reached":
+					// Current value higher, low profit but time exit
+					// Want 0.50 P&L: Credit $350, current value should be $300
+					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
+					mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
+					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
+				case "no exit conditions met":
+					// Same as max DTE but different DTE in position
+					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
+					mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
+					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
+				}
+			}
+			
 			strategy.currentPos = tt.position
 			
-			shouldExit, reason := strategy.CheckExitConditions()
+			shouldExit, reason := strategy.CheckExitConditions(tt.position)
 			
 			if shouldExit != tt.expectedExit {
 				t.Errorf("CheckExitConditions() exit = %v, want %v", shouldExit, tt.expectedExit)
@@ -335,7 +377,25 @@ func containsInMiddle(s, substr string) bool {
 
 // Mock Broker for testing
 type mockBroker struct {
-	balance float64
+	balance     float64
+	optionPrices map[string]map[float64]map[string]float64 // [expiration][strike][type] -> mid price
+}
+
+func newMockBroker(balance float64) *mockBroker {
+	return &mockBroker{
+		balance: balance,
+		optionPrices: make(map[string]map[float64]map[string]float64),
+	}
+}
+
+func (m *mockBroker) setOptionPrice(expiration string, strike float64, optionType string, midPrice float64) {
+	if m.optionPrices[expiration] == nil {
+		m.optionPrices[expiration] = make(map[float64]map[string]float64)
+	}
+	if m.optionPrices[expiration][strike] == nil {
+		m.optionPrices[expiration][strike] = make(map[string]float64)
+	}
+	m.optionPrices[expiration][strike][optionType] = midPrice
 }
 
 func (m *mockBroker) GetAccountBalance() (float64, error) {
@@ -355,7 +415,44 @@ func (m *mockBroker) GetExpirations(symbol string) ([]string, error) {
 }
 
 func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
-	return nil, nil
+	var options []broker.Option
+	
+	// Check if we have custom prices set for this expiration
+	if exp, exists := m.optionPrices[expiration]; exists {
+		for strike, types := range exp {
+			for optionType, midPrice := range types {
+				// Create bid/ask around the mid price (±0.05)
+				bid := midPrice - 0.05
+				ask := midPrice + 0.05
+				options = append(options, broker.Option{
+					Strike:     strike,
+					OptionType: optionType,
+					Bid:        bid,
+					Ask:        ask,
+				})
+			}
+		}
+	}
+	
+	// If no custom prices, return default test data
+	if len(options) == 0 {
+		options = []broker.Option{
+			{
+				Strike:     400.0,
+				OptionType: "put",
+				Bid:        0.80,
+				Ask:        0.90, // Mid = 0.85
+			},
+			{
+				Strike:     420.0,
+				OptionType: "call",
+				Bid:        0.85,
+				Ask:        0.95, // Mid = 0.90
+			},
+		}
+	}
+	
+	return options, nil
 }
 
 func (m *mockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit float64) (*broker.OrderResponse, error) {
@@ -363,5 +460,13 @@ func (m *mockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike flo
 }
 
 func (m *mockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*broker.OrderResponse, error) {
+	return nil, nil
+}
+
+func (m *mockBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*broker.OrderResponse, error) {
+	return nil, nil
+}
+
+func (m *mockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*broker.OrderResponse, error) {
 	return nil, nil
 }

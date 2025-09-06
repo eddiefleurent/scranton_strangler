@@ -401,7 +401,9 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	}
 	
 	// Check profit target
-	profitPct := currentPnL / position.CreditReceived
+	// Calculate profit percentage against total credit received (in dollars)
+	totalCreditReceived := position.GetTotalCredit() * float64(position.Quantity) * 100
+	profitPct := currentPnL / totalCreditReceived
 	if profitPct >= s.config.ProfitTarget {
 		return true, fmt.Sprintf("profit target reached: %.1f%% (P&L: $%.2f)", profitPct*100, currentPnL)
 	}
