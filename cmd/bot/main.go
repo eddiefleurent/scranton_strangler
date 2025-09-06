@@ -40,7 +40,7 @@ func main() {
 
 	// Create logger
 	logger := log.New(os.Stdout, "[BOT] ", log.LstdFlags|log.Lshortfile)
-	
+
 	logger.Printf("Starting SPY Strangle Bot in %s mode", cfg.Environment.Mode)
 	if cfg.IsPaperTrading() {
 		logger.Println("🏳️ PAPER TRADING MODE - No real money at risk")
@@ -109,7 +109,7 @@ func main() {
 
 func (b *Bot) Run(ctx context.Context) error {
 	b.logger.Println("Bot starting main loop...")
-	
+
 	// Verify broker connection
 	b.logger.Println("Verifying broker connection...")
 	balance, err := b.broker.GetAccountBalance()
@@ -139,7 +139,7 @@ func (b *Bot) Run(ctx context.Context) error {
 
 func (b *Bot) runTradingCycle() {
 	now := time.Now()
-	
+
 	// Check if within trading hours
 	if !b.config.IsWithinTradingHours(now) {
 		b.logger.Printf("Outside trading hours (%s - %s), skipping cycle",
@@ -151,7 +151,7 @@ func (b *Bot) runTradingCycle() {
 
 	// Check for existing position
 	hasPosition := b.checkExistingPosition()
-	
+
 	if hasPosition {
 		// Check exit conditions
 		b.logger.Println("Position exists, checking exit conditions...")
@@ -163,7 +163,7 @@ func (b *Bot) runTradingCycle() {
 		} else {
 			b.logger.Println("No exit conditions met, continuing to monitor")
 		}
-		
+
 		// Check for adjustments (Phase 2)
 		if b.config.Strategy.Adjustments.Enabled {
 			b.checkAdjustments()
@@ -179,7 +179,7 @@ func (b *Bot) runTradingCycle() {
 			b.logger.Printf("Entry conditions not met: %s", reason)
 		}
 	}
-	
+
 	b.logger.Println("Trading cycle complete")
 }
 
@@ -212,23 +212,23 @@ func (b *Bot) checkExistingPosition() bool {
 
 func (b *Bot) executeEntry() {
 	b.logger.Println("Executing entry...")
-	
+
 	// Find strikes
 	order, err := b.strategy.FindStrangleStrikes()
 	if err != nil {
 		b.logger.Printf("Failed to find strikes: %v", err)
 		return
 	}
-	
+
 	b.logger.Printf("Found strangle: Put %.0f / Call %.0f, Credit: $%.2f",
 		order.PutStrike, order.CallStrike, order.Credit)
-	
+
 	// Risk check
 	if order.Quantity > b.config.Risk.MaxContracts {
 		order.Quantity = b.config.Risk.MaxContracts
 		b.logger.Printf("Position size limited to %d contracts", order.Quantity)
 	}
-	
+
 	// Place order
 	b.logger.Printf("Placing strangle order for %d contracts...", order.Quantity)
 	placedOrder, err := b.broker.PlaceStrangleOrder(
@@ -239,24 +239,24 @@ func (b *Bot) executeEntry() {
 		order.Quantity,
 		order.Credit,
 	)
-	
+
 	if err != nil {
 		b.logger.Printf("Failed to place order: %v", err)
 		return
 	}
-	
+
 	b.logger.Printf("Order placed successfully: %d", placedOrder.Order.ID)
-	
+
 	// Save position state
 	positionID := generatePositionID()
-	
+
 	// Parse expiration string to time.Time
 	expirationTime, err := time.Parse("2006-01-02", order.Expiration)
 	if err != nil {
 		b.logger.Printf("Failed to parse expiration date: %v", err)
 		return
 	}
-	
+
 	// Create new position
 	position := models.NewPosition(
 		positionID,
@@ -266,34 +266,34 @@ func (b *Bot) executeEntry() {
 		expirationTime,
 		order.Quantity,
 	)
-	
+
 	// Set entry details
 	position.CreditReceived = order.Credit
 	position.EntrySpot = order.SpotPrice
 	position.DTE = position.CalculateDTE()
-	
+
 	// Set real entry IVR
 	position.EntryIVR = b.strategy.GetCurrentIVR()
-	
+
 	// Initialize position state
 	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
 		b.logger.Printf("Failed to set position state: %v", err)
 		return
 	}
-	
+
 	// Save position to storage
 	if err := b.storage.SetCurrentPosition(position); err != nil {
 		b.logger.Printf("Failed to save position: %v", err)
 		return
 	}
-	
-	b.logger.Printf("Position saved: ID=%s, Credit=$%.2f, DTE=%d", 
+
+	b.logger.Printf("Position saved: ID=%s, Credit=$%.2f, DTE=%d",
 		position.ID, position.CreditReceived, position.DTE)
 }
 
 func (b *Bot) executeExit(reason string) {
 	b.logger.Printf("Executing exit: %s", reason)
-	
+
 	// Get current position
 	position := b.storage.GetCurrentPosition()
 	if position == nil {
@@ -344,8 +344,8 @@ func (b *Bot) executeExit(reason string) {
 			actualPnL = position.CreditReceived * 0.2 // 20% profit for early exits
 		}
 	}
-	
-	b.logger.Printf("Position P&L: $%.2f (%.1f%% of credit received)", 
+
+	b.logger.Printf("Position P&L: $%.2f (%.1f%% of credit received)",
 		actualPnL, (actualPnL/position.CreditReceived)*100)
 
 	// Close position in storage
@@ -355,7 +355,7 @@ func (b *Bot) executeExit(reason string) {
 	}
 
 	b.logger.Printf("Position closed successfully: %s", reason)
-	
+
 	// Log statistics
 	stats := b.storage.GetStatistics()
 	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
@@ -371,13 +371,13 @@ func (b *Bot) checkAdjustments() {
 func generatePositionID() string {
 	// Simple ID generation using timestamp and random bytes
 	now := time.Now().Format("20060102-150405")
-	
+
 	// Add 4 random bytes for uniqueness
 	randomBytes := make([]byte, 2)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// Fallback if random fails
 		return fmt.Sprintf("%s-%d", now, time.Now().UnixNano()%10000)
 	}
-	
+
 	return fmt.Sprintf("%s-%x", now, randomBytes)
 }

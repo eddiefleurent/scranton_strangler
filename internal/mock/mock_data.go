@@ -5,7 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"time"
-	
+
 	"github.com/eddie/spy-strangle-bot/internal/broker"
 )
 
@@ -24,7 +24,7 @@ func NewMockDataProvider() *MockDataProvider {
 func (m *MockDataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	// Simulate small price movements
 	m.currentPrice += (rand.Float64() - 0.5) * 2
-	
+
 	spread := 0.02 // 2 cent spread
 	return &broker.QuoteItem{
 		Symbol: symbol,
@@ -45,35 +45,35 @@ func (m *MockDataProvider) GetIVR() float64 {
 func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	expDate, _ := time.Parse("2006-01-02", expiration)
 	dte := int(time.Until(expDate).Hours() / 24)
-	
+
 	var options []broker.Option
-	
+
 	// Generate strikes around current price
 	strikeInterval := 5.0
 	startStrike := math.Floor(m.currentPrice/strikeInterval)*strikeInterval - 50
 	endStrike := startStrike + 100
-	
+
 	for strike := startStrike; strike <= endStrike; strike += strikeInterval {
 		// Calculate approximate delta based on distance from current price
 		distance := math.Abs(strike - m.currentPrice)
 		deltaDecay := math.Exp(-distance * 0.02) // Exponential decay
-		
+
 		putDelta := -0.5 * deltaDecay
 		if strike > m.currentPrice {
 			putDelta = -0.5 * (1 - deltaDecay)
 		}
-		
+
 		callDelta := 0.5 * deltaDecay
 		if strike < m.currentPrice {
 			callDelta = 0.5 * (1 - deltaDecay)
 		}
-		
+
 		// Calculate option prices (simplified Black-Scholes approximation)
 		timeValue := float64(dte) / 365.0
 		vol := m.ivr / 100.0
 		putPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(putDelta))
 		callPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(callDelta))
-		
+
 		// Create put option
 		putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expDate.Format("060102"), int(strike*1000))
 		putOption := broker.Option{
@@ -89,7 +89,7 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 			OpenInterest:   rand.Int63n(50000),
 			Underlying:     symbol,
 		}
-		
+
 		// Create call option
 		callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expDate.Format("060102"), int(strike*1000))
 		callOption := broker.Option{
@@ -105,14 +105,14 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 			OpenInterest:   rand.Int63n(50000),
 			Underlying:     symbol,
 		}
-		
+
 		// Add Greeks if requested
 		if withGreeks {
 			putOption.Greeks = &broker.Greeks{
-				Delta:  putDelta,
-				MidIV:  vol,
-				Theta:  -0.05 * vol,
-				Vega:   0.10 * vol,
+				Delta: putDelta,
+				MidIV: vol,
+				Theta: -0.05 * vol,
+				Vega:  0.10 * vol,
 			}
 			callOption.Greeks = &broker.Greeks{
 				Delta: callDelta,
@@ -121,29 +121,29 @@ func (m *MockDataProvider) GetOptionChain(symbol, expiration string, withGreeks 
 				Vega:  0.10 * vol,
 			}
 		}
-		
+
 		options = append(options, putOption, callOption)
 	}
-	
+
 	return options, nil
 }
 
 func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, callStrike float64) {
 	targetDelta := 0.16
-	
+
 	// Find put strike closest to -16 delta
 	bestPutStrike := 0.0
 	bestPutDiff := math.MaxFloat64
-	
+
 	// Find call strike closest to 16 delta
 	bestCallStrike := 0.0
 	bestCallDiff := math.MaxFloat64
-	
+
 	for _, option := range options {
 		if option.Greeks == nil {
 			continue
 		}
-		
+
 		if option.OptionType == "put" {
 			putDiff := math.Abs(math.Abs(option.Greeks.Delta) - targetDelta)
 			if putDiff < bestPutDiff {
@@ -158,14 +158,14 @@ func (m *MockDataProvider) Find16DeltaStrikes(options []broker.Option) (putStrik
 			}
 		}
 	}
-	
+
 	return bestPutStrike, bestCallStrike
 }
 
 func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putStrike, callStrike float64) float64 {
 	putCredit := 0.0
 	callCredit := 0.0
-	
+
 	for _, option := range options {
 		if option.Strike == putStrike && option.OptionType == "put" {
 			putCredit = (option.Bid + option.Ask) / 2
@@ -174,7 +174,7 @@ func (m *MockDataProvider) CalculateStrangleCredit(options []broker.Option, putS
 			callCredit = (option.Bid + option.Ask) / 2
 		}
 	}
-		
+
 	return putCredit + callCredit
 }
 
@@ -185,7 +185,7 @@ func (m *MockDataProvider) GenerateSamplePosition() map[string]interface{} {
 	options, _ := m.GetOptionChain("SPY", expiration, true)
 	putStrike, callStrike := m.Find16DeltaStrikes(options)
 	credit := m.CalculateStrangleCredit(options, putStrike, callStrike)
-	
+
 	return map[string]interface{}{
 		"symbol":      "SPY",
 		"spot_price":  quote.Last,

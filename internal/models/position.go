@@ -19,9 +19,9 @@ type Position struct {
 	CurrentPnL     float64      `json:"current_pnl"`
 	DTE            int          `json:"dte"`
 	Adjustments    []Adjustment `json:"adjustments"`
-	
+
 	// State machine for position management
-	StateMachine   *StateMachine `json:"state_machine"`
+	StateMachine *StateMachine `json:"state_machine"`
 }
 
 type Adjustment struct {
@@ -72,12 +72,12 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
 	}
-	
+
 	err := p.StateMachine.Transition(to, condition)
 	if err != nil {
 		return fmt.Errorf("position %s state transition failed: %w", p.ID, err)
 	}
-	
+
 	return nil
 }
 
@@ -126,15 +126,15 @@ func (p *Position) ValidateState() error {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachine()
 	}
-	
+
 	// Validate state machine consistency
 	if err := p.StateMachine.ValidateStateConsistency(); err != nil {
 		return fmt.Errorf("position %s state validation failed: %w", p.ID, err)
 	}
-	
+
 	// Validate position data consistency with state
 	currentState := p.StateMachine.GetCurrentState()
-	
+
 	// Check if position data is consistent with state
 	switch currentState {
 	case StateIdle:
@@ -151,7 +151,7 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s: closed position should have credit received", p.ID)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -162,4 +162,3 @@ func (p *Position) GetStateDescription() string {
 	}
 	return p.StateMachine.GetStateDescription()
 }
-

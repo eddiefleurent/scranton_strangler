@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"math"
 	"time"
-	
+
 	"github.com/eddie/spy-strangle-bot/internal/broker"
 	"github.com/eddie/spy-strangle-bot/internal/models"
 )
 
 type StrangleStrategy struct {
-	broker       broker.Broker
-	config       *StrategyConfig
-	currentPos   *models.Position
+	broker     broker.Broker
+	config     *StrategyConfig
+	currentPos *models.Position
 }
 
 type StrategyConfig struct {
@@ -38,18 +38,18 @@ func (s *StrangleStrategy) CheckEntryConditions() (bool, string) {
 	if s.currentPos != nil && s.currentPos.GetCurrentState() != models.StateIdle && s.currentPos.GetCurrentState() != models.StateClosed {
 		return false, "already have open position"
 	}
-	
+
 	// Check IVR (simplified - would need historical IV data)
 	ivr := s.calculateIVR()
 	if ivr < s.config.MinIVR {
 		return false, fmt.Sprintf("IVR too low: %.1f < %.1f", ivr, s.config.MinIVR)
 	}
-	
+
 	// Check for major events (simplified)
 	if s.hasMajorEventsNearby() {
 		return false, "major event within 48 hours"
 	}
-	
+
 	return true, "entry conditions met"
 }
 
@@ -59,27 +59,27 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Find expiration around 45 DTE
 	targetExp := s.findTargetExpiration(s.config.DTETarget)
-	
+
 	// Get option chain with Greeks
 	options, err := s.broker.GetOptionChain(s.config.Symbol, targetExp, true)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Find strikes closest to target delta
 	putStrike := s.findStrikeByDelta(options, -s.config.DeltaTarget, true)
 	callStrike := s.findStrikeByDelta(options, s.config.DeltaTarget, false)
-	
+
 	// Calculate expected credit
 	credit := s.calculateExpectedCredit(options, putStrike, callStrike)
-	
+
 	if credit < s.config.MinCredit {
 		return nil, fmt.Errorf("credit too low: %.2f < %.2f", credit, s.config.MinCredit)
 	}
-	
+
 	return &StrangleOrder{
 		Symbol:     s.config.Symbol,
 		PutStrike:  putStrike,
@@ -115,11 +115,11 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 
 	// Calculate IVR using the standard formula
 	ivr := broker.CalculateIVR(currentIV, historicalIVs)
-	
+
 	// Log IV calculation details
 	fmt.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f\n",
 		currentIV*100, getMinIV(historicalIVs)*100, getMaxIV(historicalIVs)*100, ivr)
-	
+
 	return ivr
 }
 
@@ -158,7 +158,7 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, error) {
 	// TODO: Implement proper historical IV storage/retrieval
 	// For MVP, we'll simulate historical data or use a simple approach
-	
+
 	// Option 1: Use mock historical data for testing
 	if s.shouldUseMockHistoricalData() {
 		return s.generateMockHistoricalIV(days), nil
@@ -174,14 +174,14 @@ func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, 
 func (s *StrangleStrategy) generateMockHistoricalIV(days int) []float64 {
 	// Generate realistic IV range for SPY (typically 10-40%)
 	historicalIVs := make([]float64, days)
-	
+
 	// Base IV around 20% with some variation
 	baseIV := 0.20
 	for i := 0; i < days; i++ {
 		// Add some realistic variation (±5%)
 		variation := (float64(i%10) - 5) * 0.01
 		historicalIVs[i] = baseIV + variation
-		
+
 		// Ensure realistic bounds (8% to 35%)
 		if historicalIVs[i] < 0.08 {
 			historicalIVs[i] = 0.08
@@ -190,7 +190,7 @@ func (s *StrangleStrategy) generateMockHistoricalIV(days int) []float64 {
 			historicalIVs[i] = 0.35
 		}
 	}
-	
+
 	return historicalIVs
 }
 
@@ -266,7 +266,7 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 	callOption := broker.GetOptionByStrike(chain, position.CallStrike, "call")
 
 	if putOption == nil || callOption == nil {
-		return 0, fmt.Errorf("could not find options for strikes Put %.0f / Call %.0f", 
+		return 0, fmt.Errorf("could not find options for strikes Put %.0f / Call %.0f",
 			position.PutStrike, position.CallStrike)
 	}
 
@@ -301,14 +301,14 @@ func (s *StrangleStrategy) GetCurrentPositionValue(position *models.Position) (f
 	callOption := broker.GetOptionByStrike(chain, position.CallStrike, "call")
 
 	if putOption == nil || callOption == nil {
-		return 0, fmt.Errorf("could not find options for strikes Put %.0f / Call %.0f", 
+		return 0, fmt.Errorf("could not find options for strikes Put %.0f / Call %.0f",
 			position.PutStrike, position.CallStrike)
 	}
 
 	// Calculate current option values (mid price)
 	putValue := (putOption.Bid + putOption.Ask) / 2
 	callValue := (callOption.Bid + callOption.Ask) / 2
-	
+
 	return (putValue + callValue) * float64(position.Quantity) * 100, nil
 }
 
@@ -331,18 +331,18 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 	// Find strike closest to target delta
 	bestStrike := 0.0
 	bestDiff := math.MaxFloat64
-	
+
 	for _, option := range options {
 		// Only consider options of the correct type
 		if (isPut && option.OptionType != "put") || (!isPut && option.OptionType != "call") {
 			continue
 		}
-		
+
 		// Skip if no Greeks available
 		if option.Greeks == nil {
 			continue
 		}
-		
+
 		delta := option.Greeks.Delta
 		diff := math.Abs(delta - targetDelta)
 		if diff < bestDiff {
@@ -350,14 +350,14 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 			bestStrike = option.Strike
 		}
 	}
-	
+
 	return bestStrike
 }
 
 func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putStrike, callStrike float64) float64 {
 	putCredit := 0.0
 	callCredit := 0.0
-	
+
 	for _, option := range options {
 		if option.Strike == putStrike && option.OptionType == "put" {
 			putCredit = (option.Bid + option.Ask) / 2
@@ -366,23 +366,23 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 			callCredit = (option.Bid + option.Ask) / 2
 		}
 	}
-	
+
 	return putCredit + callCredit
 }
 
 func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int {
 	balance, _ := s.broker.GetAccountBalance()
 	allocatedCapital := balance * s.config.AllocationPct
-	
+
 	// Estimate buying power requirement (simplified)
 	// Real calculation would use margin requirements
 	bprPerContract := creditPerContract * 100 * 10 // Rough estimate
-	
+
 	maxContracts := int(allocatedCapital / bprPerContract)
 	if maxContracts < 1 {
 		maxContracts = 1
 	}
-	
+
 	return maxContracts
 }
 
@@ -391,7 +391,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	if position == nil {
 		return false, "no position"
 	}
-	
+
 	// Calculate real-time P&L
 	currentPnL, err := s.CalculatePositionPnL(position)
 	if err != nil {
@@ -399,7 +399,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		currentPnL = position.CurrentPnL
 		fmt.Printf("Warning: Using stored P&L due to calculation error: %v\n", err)
 	}
-	
+
 	// Check profit target
 	// Calculate profit percentage against total credit received (in dollars)
 	totalCreditReceived := position.GetTotalCredit() * float64(position.Quantity) * 100
@@ -407,20 +407,20 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	if profitPct >= s.config.ProfitTarget {
 		return true, fmt.Sprintf("profit target reached: %.1f%% (P&L: $%.2f)", profitPct*100, currentPnL)
 	}
-	
+
 	// Check DTE
 	currentDTE := position.CalculateDTE()
 	if currentDTE <= s.config.MaxDTE {
 		return true, fmt.Sprintf("max DTE reached: %d days", currentDTE)
 	}
-	
+
 	return false, "no exit conditions met"
 }
 
 func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 	// Get current option prices
 	options, _ := s.broker.GetOptionChain(s.config.Symbol, pos.Expiration.Format("2006-01-02"), false)
-	
+
 	currentCost := 0.0
 	for _, option := range options {
 		if option.Strike == pos.PutStrike && option.OptionType == "put" {
@@ -430,7 +430,7 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 			currentCost += (option.Bid + option.Ask) / 2
 		}
 	}
-	
+
 	// P&L = credit received - current cost to close
 	return pos.CreditReceived - currentCost
 }

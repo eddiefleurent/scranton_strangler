@@ -12,7 +12,7 @@ type MockStorage struct {
 	history         []models.Position
 	dailyPnL        map[string]float64
 	statistics      *Statistics
-	
+
 	// Mock control flags
 	saveError     error
 	loadError     error
@@ -42,23 +42,23 @@ func (m *MockStorage) ClosePosition(finalPnL float64) error {
 	if m.currentPosition == nil {
 		return fmt.Errorf("no position to close")
 	}
-	
+
 	// Transition state to closed
 	if err := m.currentPosition.TransitionState(models.StateClosed, "position_closed"); err != nil {
 		return fmt.Errorf("failed to transition position to closed state: %w", err)
 	}
-	
+
 	m.currentPosition.CurrentPnL = finalPnL
-	
+
 	// Add to history
 	m.history = append(m.history, *m.currentPosition)
-	
+
 	// Update statistics (simplified)
 	m.updateStatistics(finalPnL)
-	
+
 	// Clear current position
 	m.currentPosition = nil
-	
+
 	return nil
 }
 
@@ -66,7 +66,7 @@ func (m *MockStorage) AddAdjustment(adj models.Adjustment) error {
 	if m.currentPosition == nil {
 		return fmt.Errorf("no current position to adjust")
 	}
-	
+
 	m.currentPosition.Adjustments = append(m.currentPosition.Adjustments, adj)
 	return nil
 }
@@ -124,7 +124,7 @@ func (m *MockStorage) SetDailyPnL(date string, pnl float64) {
 func (m *MockStorage) updateStatistics(pnl float64) {
 	m.statistics.TotalTrades++
 	m.statistics.TotalPnL += pnl
-	
+
 	if pnl > 0 {
 		m.statistics.WinningTrades++
 		if m.statistics.WinningTrades == 1 {
@@ -140,7 +140,7 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + pnl) / float64(m.statistics.LosingTrades)
 		}
 	}
-	
+
 	// Calculate win rate
 	if m.statistics.TotalTrades > 0 {
 		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(m.statistics.TotalTrades) * 100

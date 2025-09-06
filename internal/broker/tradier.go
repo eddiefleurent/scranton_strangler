@@ -12,12 +12,12 @@ import (
 
 // TradierAPI - Accurate implementation based on actual API docs
 type TradierAPI struct {
-	apiKey      string
-	baseURL     string
-	accountID   string
-	client      *http.Client
-	sandbox     bool
-	rateLimits  RateLimits
+	apiKey     string
+	baseURL    string
+	accountID  string
+	client     *http.Client
+	sandbox    bool
+	rateLimits RateLimits
 }
 
 // Rate limits per environment
@@ -30,7 +30,7 @@ type RateLimits struct {
 func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
 	var baseURL string
 	var limits RateLimits
-	
+
 	if sandbox {
 		baseURL = "https://sandbox.tradier.com/v1"
 		limits = RateLimits{
@@ -46,7 +46,7 @@ func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
 			Standard:   120,
 		}
 	}
-	
+
 	return &TradierAPI{
 		apiKey:     apiKey,
 		baseURL:    baseURL,
@@ -67,21 +67,21 @@ type OptionChainResponse struct {
 }
 
 type Option struct {
-	Symbol         string    `json:"symbol"`         // e.g., "SPY241220P00450000"
-	Description    string    `json:"description"`    // e.g., "SPY Dec 20 2024 $450.00 Put"
-	Strike         float64   `json:"strike"`         // Strike price
-	OptionType     string    `json:"option_type"`    // "put" or "call"
-	ExpirationDate string    `json:"expiration_date"`
-	ExpirationDay  int       `json:"expiration_day"`
-	Bid            float64   `json:"bid"`
-	Ask            float64   `json:"ask"`
-	Last           float64   `json:"last"`
-	BidSize        int       `json:"bid_size"`
-	AskSize        int       `json:"ask_size"`
-	Volume         int64     `json:"volume"`
-	OpenInterest   int64     `json:"open_interest"`
-	Underlying     string    `json:"underlying"`
-	Greeks         *Greeks   `json:"greeks,omitempty"`
+	Symbol         string  `json:"symbol"`      // e.g., "SPY241220P00450000"
+	Description    string  `json:"description"` // e.g., "SPY Dec 20 2024 $450.00 Put"
+	Strike         float64 `json:"strike"`      // Strike price
+	OptionType     string  `json:"option_type"` // "put" or "call"
+	ExpirationDate string  `json:"expiration_date"`
+	ExpirationDay  int     `json:"expiration_day"`
+	Bid            float64 `json:"bid"`
+	Ask            float64 `json:"ask"`
+	Last           float64 `json:"last"`
+	BidSize        int     `json:"bid_size"`
+	AskSize        int     `json:"ask_size"`
+	Volume         int64   `json:"volume"`
+	OpenInterest   int64   `json:"open_interest"`
+	Underlying     string  `json:"underlying"`
+	Greeks         *Greeks `json:"greeks,omitempty"`
 }
 
 type Greeks struct {
@@ -109,8 +109,8 @@ type PositionItem struct {
 	CostBasis    float64   `json:"cost_basis"`
 	DateAcquired time.Time `json:"date_acquired"`
 	ID           int       `json:"id"`
-	Quantity     float64   `json:"quantity"`     // Negative for short positions
-	Symbol       string    `json:"symbol"`       // Will be option symbol for options
+	Quantity     float64   `json:"quantity"` // Negative for short positions
+	Symbol       string    `json:"symbol"`   // Will be option symbol for options
 }
 
 // Quotes response
@@ -155,36 +155,36 @@ type ExpirationsResponse struct {
 // Account balance response
 type BalanceResponse struct {
 	Balances struct {
-		OptionBuyingPower   float64 `json:"option_buying_power"`
-		OptionShortValue    float64 `json:"option_short_value"`
-		TotalEquity         float64 `json:"total_equity"`
-		AccountValue        float64 `json:"account_value"`
-		PendingOrdersCount  int     `json:"pending_orders_count"`
-		ClosedPL            float64 `json:"closed_pl"`
-		CurrentRequirement  float64 `json:"current_requirement"`
-		OptionRequirement   float64 `json:"option_requirement"`
+		OptionBuyingPower  float64 `json:"option_buying_power"`
+		OptionShortValue   float64 `json:"option_short_value"`
+		TotalEquity        float64 `json:"total_equity"`
+		AccountValue       float64 `json:"account_value"`
+		PendingOrdersCount int     `json:"pending_orders_count"`
+		ClosedPL           float64 `json:"closed_pl"`
+		CurrentRequirement float64 `json:"current_requirement"`
+		OptionRequirement  float64 `json:"option_requirement"`
 	} `json:"balances"`
 }
 
 // Order response
 type OrderResponse struct {
 	Order struct {
-		ID            int     `json:"id"`
-		Type          string  `json:"type"`
-		Symbol        string  `json:"symbol"`
-		Side          string  `json:"side"`
-		Quantity      float64 `json:"quantity"`
-		Status        string  `json:"status"`
-		Duration      string  `json:"duration"`
-		Price         float64 `json:"price"`
-		AvgFillPrice  float64 `json:"avg_fill_price"`
-		ExecQuantity  float64 `json:"exec_quantity"`
-		LastFillPrice float64 `json:"last_fill_price"`
-		LastFillQuantity float64 `json:"last_fill_quantity"`
+		ID                int     `json:"id"`
+		Type              string  `json:"type"`
+		Symbol            string  `json:"symbol"`
+		Side              string  `json:"side"`
+		Quantity          float64 `json:"quantity"`
+		Status            string  `json:"status"`
+		Duration          string  `json:"duration"`
+		Price             float64 `json:"price"`
+		AvgFillPrice      float64 `json:"avg_fill_price"`
+		ExecQuantity      float64 `json:"exec_quantity"`
+		LastFillPrice     float64 `json:"last_fill_price"`
+		LastFillQuantity  float64 `json:"last_fill_quantity"`
 		RemainingQuantity float64 `json:"remaining_quantity"`
-		CreateDate    string  `json:"create_date"`
-		TransactionDate string `json:"transaction_date"`
-		Class         string  `json:"class"`
+		CreateDate        string  `json:"create_date"`
+		TransactionDate   string  `json:"transaction_date"`
+		Class             string  `json:"class"`
 	} `json:"order"`
 }
 
@@ -192,58 +192,58 @@ type OrderResponse struct {
 
 func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 	endpoint := fmt.Sprintf("%s/markets/quotes?symbols=%s&greeks=false", t.baseURL, symbol)
-	
+
 	var response QuotesResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return &response.Quotes.Quote, nil
 }
 
 func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
-	endpoint := fmt.Sprintf("%s/markets/options/expirations?symbol=%s&includeAllRoots=true&strikes=false", 
+	endpoint := fmt.Sprintf("%s/markets/options/expirations?symbol=%s&includeAllRoots=true&strikes=false",
 		t.baseURL, symbol)
-	
+
 	var response ExpirationsResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return response.Expirations.Date, nil
 }
 
 func (t *TradierAPI) GetOptionChain(symbol, expiration string, greeks bool) ([]Option, error) {
-	endpoint := fmt.Sprintf("%s/markets/options/chains?symbol=%s&expiration=%s&greeks=%t", 
+	endpoint := fmt.Sprintf("%s/markets/options/chains?symbol=%s&expiration=%s&greeks=%t",
 		t.baseURL, symbol, expiration, greeks)
-	
+
 	var response OptionChainResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return response.Options.Option, nil
 }
 
 func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/positions", t.baseURL, t.accountID)
-	
+
 	var response PositionsResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return response.Positions.Position, nil
 }
 
 func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/balances", t.baseURL, t.accountID)
-	
+
 	var response BalanceResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return &response, nil
 }
 
@@ -267,25 +267,25 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	preview bool,
 	buyToClose bool,
 ) (*OrderResponse, error) {
-	
+
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
 		return nil, fmt.Errorf("invalid expiration format: %w", err)
 	}
 	expFormatted := expDate.Format("060102")
-	
+
 	// Build option symbols: SYMBOL + YYMMDD + P/C + 8-digit strike
 	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(putStrike*1000))
 	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(callStrike*1000))
-	
+
 	// Build form data
 	params := url.Values{}
 	params.Add("class", "multileg")
 	params.Add("symbol", symbol)
 	params.Add("duration", "day")
 	params.Add("price", fmt.Sprintf("%.2f", limitPrice))
-	
+
 	// Determine order type and side based on buyToClose flag
 	var orderType, side string
 	if buyToClose {
@@ -296,28 +296,28 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 		side = "sell_to_open"
 	}
 	params.Add("type", orderType)
-	
+
 	if preview {
 		params.Add("preview", "true")
 	}
-	
+
 	// Leg 0: Put option
 	params.Add("option_symbol[0]", putSymbol)
 	params.Add("side[0]", side)
 	params.Add("quantity[0]", fmt.Sprintf("%d", quantity))
-	
-	// Leg 1: Call option  
+
+	// Leg 1: Call option
 	params.Add("option_symbol[1]", callSymbol)
 	params.Add("side[1]", side)
 	params.Add("quantity[1]", fmt.Sprintf("%d", quantity))
-	
+
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
-	
+
 	var response OrderResponse
 	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return &response, nil
 }
 
@@ -342,14 +342,14 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	params.Add("type", "limit")
 	params.Add("duration", "day")
 	params.Add("price", fmt.Sprintf("%.2f", maxPrice))
-	
+
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
-	
+
 	var response OrderResponse
 	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return &response, nil
 }
 
@@ -362,67 +362,67 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	profitTarget float64, // percentage as decimal (0.5 for 50%)
 	preview bool,
 ) (*OrderResponse, error) {
-	
+
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
 	expDate, err := time.Parse("2006-01-02", expiration)
 	if err != nil {
 		return nil, fmt.Errorf("invalid expiration format: %w", err)
 	}
 	expFormatted := expDate.Format("060102")
-	
+
 	// Build option symbols
 	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(putStrike*1000))
 	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(callStrike*1000))
-	
+
 	// Calculate exit price (50% of credit received)
 	exitPrice := limitCredit * (1 - profitTarget)
-	
+
 	// Build OTOCO form data
 	params := url.Values{}
 	params.Add("class", "otoco")
 	params.Add("duration", "gtc") // Good-till-cancelled for the overall order
-	
+
 	if preview {
 		params.Add("preview", "true")
 	}
-	
+
 	// Primary order: Open the strangle
 	params.Add("type[0]", "credit")
 	params.Add("duration[0]", "day")
 	params.Add("price[0]", fmt.Sprintf("%.2f", limitCredit))
-	
+
 	// Primary order Leg 0: Sell put
 	params.Add("option_symbol[0][0]", putSymbol)
 	params.Add("side[0][0]", "sell_to_open")
 	params.Add("quantity[0][0]", fmt.Sprintf("%d", quantity))
-	
-	// Primary order Leg 1: Sell call  
+
+	// Primary order Leg 1: Sell call
 	params.Add("option_symbol[0][1]", callSymbol)
 	params.Add("side[0][1]", "sell_to_open")
 	params.Add("quantity[0][1]", fmt.Sprintf("%d", quantity))
-	
+
 	// OTO Order 1: Close at profit target (50% of credit)
 	params.Add("type[1]", "debit")
 	params.Add("duration[1]", "gtc")
 	params.Add("price[1]", fmt.Sprintf("%.2f", exitPrice))
-	
+
 	// OTO Order 1 Leg 0: Buy back put
 	params.Add("option_symbol[1][0]", putSymbol)
 	params.Add("side[1][0]", "buy_to_close")
 	params.Add("quantity[1][0]", fmt.Sprintf("%d", quantity))
-	
+
 	// OTO Order 1 Leg 1: Buy back call
 	params.Add("option_symbol[1][1]", callSymbol)
 	params.Add("side[1][1]", "buy_to_close")
 	params.Add("quantity[1][1]", fmt.Sprintf("%d", quantity))
-	
+
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
-	
+
 	var response OrderResponse
 	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
-	
+
 	return &response, nil
 }
 
@@ -430,7 +430,7 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, response interface{}) error {
 	var req *http.Request
 	var err error
-	
+
 	if method == "POST" && params != nil {
 		req, err = http.NewRequest(method, endpoint, strings.NewReader(params.Encode()))
 		if err != nil {
@@ -443,26 +443,26 @@ func (t *TradierAPI) makeRequest(method, endpoint string, params url.Values, res
 			return err
 		}
 	}
-	
+
 	req.Header.Add("Authorization", "Bearer "+t.apiKey)
 	req.Header.Add("Accept", "application/json")
-	
+
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	
+
 	// Check rate limit headers
 	if remaining := resp.Header.Get("X-Ratelimit-Available"); remaining != "" {
 		// Could log or track rate limit usage here
 	}
-	
+
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
-	
+
 	return json.NewDecoder(resp.Body).Decode(response)
 }
 
@@ -473,22 +473,22 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 	var bestPut, bestCall *Option
 	bestPutDiff := 999.0
 	bestCallDiff := 999.0
-	
+
 	for i := range options {
 		opt := &options[i]
-		
+
 		// Skip if no Greeks data
 		if opt.Greeks == nil {
 			continue
 		}
-		
+
 		if opt.OptionType == "put" {
 			// Put deltas are negative, so we use absolute value
 			delta := opt.Greeks.Delta
 			if delta < 0 {
 				delta = -delta
 			}
-			
+
 			diff := abs(delta - targetDelta)
 			if diff < bestPutDiff {
 				bestPutDiff = diff
@@ -503,7 +503,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 			}
 		}
 	}
-	
+
 	if bestPut != nil {
 		putStrike = bestPut.Strike
 		putSymbol = bestPut.Symbol
@@ -512,14 +512,14 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 		callStrike = bestCall.Strike
 		callSymbol = bestCall.Symbol
 	}
-	
+
 	return
 }
 
 // CalculateStrangleCredit calculates expected credit from put and call
 func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) float64 {
 	var putCredit, callCredit float64
-	
+
 	for _, opt := range options {
 		if opt.Strike == putStrike && opt.OptionType == "put" {
 			// Use mid price between bid and ask
@@ -530,7 +530,7 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) fl
 			callCredit = (opt.Bid + opt.Ask) / 2
 		}
 	}
-	
+
 	return putCredit + callCredit
 }
 
@@ -538,17 +538,17 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) fl
 func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle bool, putPos, callPos *PositionItem) {
 	for i := range positions {
 		pos := &positions[i]
-		
+
 		// Check if it's an option for our symbol
 		if !strings.HasPrefix(pos.Symbol, symbol) {
 			continue
 		}
-		
+
 		// Short positions have negative quantity
 		if pos.Quantity >= 0 {
 			continue
 		}
-		
+
 		// Check if it's a put or call
 		if strings.Contains(pos.Symbol, "P") {
 			putPos = pos
@@ -556,7 +556,7 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 			callPos = pos
 		}
 	}
-	
+
 	hasStrangle = putPos != nil && callPos != nil
 	return
 }

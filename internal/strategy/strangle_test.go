@@ -10,32 +10,32 @@ import (
 
 func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 	tests := []struct {
-		name                string
-		accountBalance      float64
-		allocationPct       float64
-		creditPerContract   float64
+		name                 string
+		accountBalance       float64
+		allocationPct        float64
+		creditPerContract    float64
 		expectedMinContracts int
 	}{
 		{
-			name:                "normal account size",
-			accountBalance:      100000.0, // $100k account
-			allocationPct:       0.35,     // 35% allocation
-			creditPerContract:   3.50,     // $3.50 credit
-			expectedMinContracts: 1,       // At least 1 contract
+			name:                 "normal account size",
+			accountBalance:       100000.0, // $100k account
+			allocationPct:        0.35,     // 35% allocation
+			creditPerContract:    3.50,     // $3.50 credit
+			expectedMinContracts: 1,        // At least 1 contract
 		},
 		{
-			name:                "small account",
-			accountBalance:      10000.0, // $10k account
-			allocationPct:       0.35,    // 35% allocation
-			creditPerContract:   2.00,    // $2.00 credit
-			expectedMinContracts: 1,      // Minimum 1 contract
+			name:                 "small account",
+			accountBalance:       10000.0, // $10k account
+			allocationPct:        0.35,    // 35% allocation
+			creditPerContract:    2.00,    // $2.00 credit
+			expectedMinContracts: 1,       // Minimum 1 contract
 		},
 		{
-			name:                "large account high allocation",
-			accountBalance:      500000.0, // $500k account
-			allocationPct:       0.35,     // 35% allocation
-			creditPerContract:   4.00,     // $4.00 credit
-			expectedMinContracts: 1,       // Should allow multiple contracts
+			name:                 "large account high allocation",
+			accountBalance:       500000.0, // $500k account
+			allocationPct:        0.35,     // 35% allocation
+			creditPerContract:    4.00,     // $4.00 credit
+			expectedMinContracts: 1,        // Should allow multiple contracts
 		},
 	}
 
@@ -43,23 +43,23 @@ func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock broker that returns the test balance
 			mockClient := newMockBroker(tt.accountBalance)
-			
+
 			config := &StrategyConfig{
 				AllocationPct: tt.allocationPct,
 			}
-			
+
 			strategy := &StrangleStrategy{
 				broker: mockClient,
 				config: config,
 			}
 
 			result := strategy.calculatePositionSize(tt.creditPerContract)
-			
+
 			if result < tt.expectedMinContracts {
 				t.Errorf("calculatePositionSize() = %v, want at least %v",
 					result, tt.expectedMinContracts)
 			}
-			
+
 			// Verify allocation doesn't exceed limit
 			allocatedCapital := tt.accountBalance * tt.allocationPct
 			estimatedBPR := tt.creditPerContract * 100 * 10 * float64(result)
@@ -167,7 +167,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				Quantity:       1,
 				CreditReceived: 3.50,
 				CurrentPnL:     175.0, // 50% profit ($175 on $350 credit)
-				DTE:           35,
+				DTE:            35,
 			},
 			expectedExit:   true,
 			expectedReason: "profit target reached",
@@ -182,7 +182,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				Quantity:       1,
 				CreditReceived: 3.50,
 				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 credit)
-				DTE:           21,    // At max DTE
+				DTE:            21,   // At max DTE
 			},
 			expectedExit:   true,
 			expectedReason: "max DTE reached",
@@ -197,7 +197,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				Quantity:       1,
 				CreditReceived: 3.50,
 				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 credit)
-				DTE:           35,    // Still have time
+				DTE:            35,   // Still have time
 			},
 			expectedExit:   false,
 			expectedReason: "no exit conditions met",
@@ -211,11 +211,11 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				broker: mockClient,
 				config: config,
 			}
-			
+
 			// Set up mock option prices based on test case
 			if tt.position != nil {
 				expiration := tt.position.Expiration.Format("2006-01-02")
-				
+
 				// Set different option prices for different test scenarios
 				switch tt.name {
 				case "profit target reached":
@@ -236,15 +236,15 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
 				}
 			}
-			
+
 			strategy.currentPos = tt.position
-			
+
 			shouldExit, reason := strategy.CheckExitConditions(tt.position)
-			
+
 			if shouldExit != tt.expectedExit {
 				t.Errorf("CheckExitConditions() exit = %v, want %v", shouldExit, tt.expectedExit)
 			}
-			
+
 			if !containsSubstring(reason, tt.expectedReason) {
 				t.Errorf("CheckExitConditions() reason = %q, want to contain %q", reason, tt.expectedReason)
 			}
@@ -335,19 +335,19 @@ func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
 
 	// Test finding expiration 45 days out
 	result := strategy.findTargetExpiration(45)
-	
+
 	// Parse the result
 	expDate, err := time.Parse("2006-01-02", result)
 	if err != nil {
 		t.Fatalf("findTargetExpiration() returned invalid date format: %s", result)
 	}
-	
+
 	// Should be a Friday
 	if expDate.Weekday() != time.Friday {
 		t.Errorf("findTargetExpiration() returned %s (%s), want Friday",
 			result, expDate.Weekday())
 	}
-	
+
 	// Should be approximately 45 days from now (allow some variance for weekends)
 	now := time.Now()
 	daysDiff := int(expDate.Sub(now).Hours() / 24)
@@ -358,12 +358,12 @@ func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
 
 // Helper function for substring matching
 func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && 
-		   (s == substr || 
-		    (len(s) > len(substr) && 
-		     (s[:len(substr)] == substr || 
-		      s[len(s)-len(substr):] == substr ||
-		      containsInMiddle(s, substr))))
+	return len(s) >= len(substr) &&
+		(s == substr ||
+			(len(s) > len(substr) &&
+				(s[:len(substr)] == substr ||
+					s[len(s)-len(substr):] == substr ||
+					containsInMiddle(s, substr))))
 }
 
 func containsInMiddle(s, substr string) bool {
@@ -377,13 +377,13 @@ func containsInMiddle(s, substr string) bool {
 
 // Mock Broker for testing
 type mockBroker struct {
-	balance     float64
+	balance      float64
 	optionPrices map[string]map[float64]map[string]float64 // [expiration][strike][type] -> mid price
 }
 
 func newMockBroker(balance float64) *mockBroker {
 	return &mockBroker{
-		balance: balance,
+		balance:      balance,
 		optionPrices: make(map[string]map[float64]map[string]float64),
 	}
 }
@@ -416,7 +416,7 @@ func (m *mockBroker) GetExpirations(symbol string) ([]string, error) {
 
 func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	var options []broker.Option
-	
+
 	// Check if we have custom prices set for this expiration
 	if exp, exists := m.optionPrices[expiration]; exists {
 		for strike, types := range exp {
@@ -433,7 +433,7 @@ func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 			}
 		}
 	}
-	
+
 	// If no custom prices, return default test data
 	if len(options) == 0 {
 		options = []broker.Option{
@@ -451,7 +451,7 @@ func (m *mockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 			},
 		}
 	}
-	
+
 	return options, nil
 }
 

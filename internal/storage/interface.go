@@ -9,11 +9,11 @@ type StorageInterface interface {
 	SetCurrentPosition(pos *models.Position) error
 	ClosePosition(finalPnL float64) error
 	AddAdjustment(adj models.Adjustment) error
-	
+
 	// Data persistence
 	Save() error
 	Load() error
-	
+
 	// Historical data and analytics
 	GetHistory() []models.Position
 	GetStatistics() *Statistics

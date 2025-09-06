@@ -57,7 +57,7 @@ func main() {
 	targetDate := time.Now().AddDate(0, 0, 45)
 	var bestExpiration string
 	bestDiff := 999
-	
+
 	for _, exp := range expirations {
 		expDate, _ := time.Parse("2006-01-02", exp)
 		diff := int(expDate.Sub(targetDate).Hours() / 24)
@@ -69,7 +69,7 @@ func main() {
 			bestExpiration = exp
 		}
 	}
-	
+
 	expDate, _ := time.Parse("2006-01-02", bestExpiration)
 	dte := int(expDate.Sub(time.Now()).Hours() / 24)
 	fmt.Printf("   Selected expiration: %s (%d DTE)\n", bestExpiration, dte)
@@ -85,11 +85,11 @@ func main() {
 	// 4. Find 16 delta strikes
 	fmt.Println("\n4. Finding 16 delta strikes...")
 	putStrike, callStrike, putSymbol, callSymbol := broker.FindStrangleStrikes(options, 0.16)
-	
+
 	if putStrike == 0 || callStrike == 0 {
 		log.Fatal("Could not find suitable strikes")
 	}
-	
+
 	fmt.Printf("   Put Strike: $%.0f (%s)\n", putStrike, putSymbol)
 	fmt.Printf("   Call Strike: $%.0f (%s)\n", callStrike, callSymbol)
 
@@ -102,7 +102,7 @@ func main() {
 	fmt.Println("   Order Type: OTOCO (One-Triggers-One-Cancels-Other)")
 	fmt.Println("   Primary Order: Sell strangle for credit")
 	fmt.Printf("   Exit Order: Buy back at 50%% profit ($%.2f)\n", credit*0.5)
-	
+
 	if preview {
 		fmt.Println("\n   ⚠️  PREVIEW MODE - Order will not be placed")
 	} else {
@@ -122,7 +122,7 @@ func main() {
 		0.5, // 50% profit target
 		preview,
 	)
-	
+
 	if err != nil {
 		log.Fatalf("Failed to place OTOCO order: %v", err)
 	}

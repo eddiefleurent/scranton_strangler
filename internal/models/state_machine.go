@@ -10,17 +10,17 @@ type PositionState string
 
 const (
 	// Core states
-	StateIdle    PositionState = "idle"    // No active position
-	StateOpen    PositionState = "open"    // Position opened, ready for management
-	StateClosed  PositionState = "closed"  // Position closed
-	StateError   PositionState = "error"   // Error state requiring intervention
-	
+	StateIdle   PositionState = "idle"   // No active position
+	StateOpen   PositionState = "open"   // Position opened, ready for management
+	StateClosed PositionState = "closed" // Position closed
+	StateError  PositionState = "error"  // Error state requiring intervention
+
 	// Football System management states
-	StateFirstDown  PositionState = "first_down"  // Normal theta decay monitoring  
+	StateFirstDown  PositionState = "first_down"  // Normal theta decay monitoring
 	StateSecondDown PositionState = "second_down" // Strike challenged (within 5 points)
 	StateThirdDown  PositionState = "third_down"  // Strike breached, consider adjustments
 	StateFourthDown PositionState = "fourth_down" // Critical decision point
-	
+
 	// Action states
 	StateAdjusting PositionState = "adjusting" // Executing position adjustment
 	StateRolling   PositionState = "rolling"   // Rolling to new expiration
@@ -40,34 +40,34 @@ var ValidTransitions = []StateTransition{
 	{StateIdle, StateOpen, "position_filled", "Position opened successfully"},
 	{StateOpen, StateFirstDown, "start_management", "Begin football system monitoring"},
 	{StateOpen, StateClosed, "position_closed", "Position closed directly (profit target hit, time limit, etc.)"},
-	
+
 	// Football System progression
 	{StateFirstDown, StateSecondDown, "strike_challenged", "Price within 5 points of strike"},
 	{StateSecondDown, StateThirdDown, "strike_breached", "Price breached strike"},
 	{StateThirdDown, StateFourthDown, "adjustment_failed", "Adjustment attempt failed"},
-	
+
 	// Recovery transitions
 	{StateSecondDown, StateFirstDown, "price_recovered", "Price moved away from strike"},
 	{StateThirdDown, StateFirstDown, "adjustment_successful", "Successfully adjusted position"},
 	{StateFourthDown, StateFirstDown, "recovery_successful", "Position recovered after critical adjustment"},
-	
+
 	// Exit transitions from any management state
 	{StateFirstDown, StateClosed, "exit_conditions", "Profit target or time limit reached"},
 	{StateSecondDown, StateClosed, "exit_conditions", "Exit conditions met"},
 	{StateThirdDown, StateClosed, "hard_stop", "Hard stop triggered"},
 	{StateFourthDown, StateClosed, "emergency_exit", "Emergency exit required"},
-	
+
 	// Adjustment transitions
 	{StateSecondDown, StateAdjusting, "roll_untested", "Rolling untested side"},
 	{StateThirdDown, StateAdjusting, "execute_adjustment", "Executing adjustment strategy"},
 	{StateFourthDown, StateRolling, "punt_decision", "Rolling to new expiration (punt)"},
-	
+
 	// Return from adjustments
 	{StateAdjusting, StateFirstDown, "adjustment_complete", "Adjustment completed successfully"},
 	{StateRolling, StateFirstDown, "roll_complete", "Time roll completed"},
 	{StateAdjusting, StateError, "adjustment_failed", "Adjustment failed"},
 	{StateRolling, StateError, "roll_failed", "Time roll failed"},
-	
+
 	// Error recovery
 	{StateError, StateIdle, "manual_intervention", "Manual intervention completed"},
 	{StateError, StateClosed, "force_close", "Force close position"},
@@ -120,8 +120,8 @@ func (sm *StateMachine) IsValidTransition(to PositionState, condition string) er
 			return nil
 		}
 	}
-	
-	return fmt.Errorf("invalid transition from %s to %s with condition '%s'", 
+
+	return fmt.Errorf("invalid transition from %s to %s with condition '%s'",
 		sm.currentState, to, condition)
 }
 
@@ -131,13 +131,13 @@ func (sm *StateMachine) Transition(to PositionState, condition string) error {
 	if err := sm.IsValidTransition(to, condition); err != nil {
 		return err
 	}
-	
+
 	// Perform transition
 	sm.previousState = sm.currentState
 	sm.currentState = to
 	sm.transitionTime = time.Now()
 	sm.transitionCount[to]++
-	
+
 	return nil
 }
 
@@ -157,9 +157,9 @@ func (sm *StateMachine) Reset() {
 // IsManagementState returns true if we're in a football management state
 func (sm *StateMachine) IsManagementState() bool {
 	return sm.currentState == StateFirstDown ||
-		   sm.currentState == StateSecondDown ||
-		   sm.currentState == StateThirdDown ||
-		   sm.currentState == StateFourthDown
+		sm.currentState == StateSecondDown ||
+		sm.currentState == StateThirdDown ||
+		sm.currentState == StateFourthDown
 }
 
 // GetManagementPhase returns which "down" we're in (1-4)
@@ -222,17 +222,17 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 	if sm.currentState == sm.previousState && sm.transitionTime.IsZero() {
 		return fmt.Errorf("invalid state: current and previous states are the same with no transition time")
 	}
-	
+
 	// Check adjustment/roll limits
 	if sm.transitionCount[StateAdjusting] > sm.maxAdjustments {
-		return fmt.Errorf("adjustment count %d exceeds maximum %d", 
+		return fmt.Errorf("adjustment count %d exceeds maximum %d",
 			sm.transitionCount[StateAdjusting], sm.maxAdjustments)
 	}
-	
+
 	if sm.transitionCount[StateRolling] > sm.maxTimeRolls {
 		return fmt.Errorf("time roll count %d exceeds maximum %d",
 			sm.transitionCount[StateRolling], sm.maxTimeRolls)
 	}
-	
+
 	return nil
 }

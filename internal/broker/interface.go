@@ -7,16 +7,16 @@ type Broker interface {
 	// Account operations
 	GetAccountBalance() (float64, error)
 	GetPositions() ([]PositionItem, error)
-	
+
 	// Market data
 	GetQuote(symbol string) (*QuoteItem, error)
 	GetExpirations(symbol string) ([]string, error)
 	GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
-	
+
 	// Order placement
 	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit float64) (*OrderResponse, error)
 	PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error)
-	
+
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*OrderResponse, error)
 	PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error)
@@ -75,11 +75,11 @@ func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 	if len(historicalIVs) == 0 {
 		return 0
 	}
-	
+
 	// Find min and max IV over the period
 	minIV := historicalIVs[0]
 	maxIV := historicalIVs[0]
-	
+
 	for _, iv := range historicalIVs {
 		if iv < minIV {
 			minIV = iv
@@ -88,12 +88,12 @@ func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 			maxIV = iv
 		}
 	}
-	
+
 	// IVR = (Current IV - 52 week low) / (52 week high - 52 week low) * 100
 	if maxIV == minIV {
 		return 50 // Default to middle if no range
 	}
-	
+
 	return ((currentIV - minIV) / (maxIV - minIV)) * 100
 }
 

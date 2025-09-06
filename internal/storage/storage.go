@@ -26,22 +26,22 @@ type StorageData struct {
 }
 
 type Statistics struct {
-	TotalTrades    int     `json:"total_trades"`
-	WinningTrades  int     `json:"winning_trades"`
-	LosingTrades   int     `json:"losing_trades"`
-	WinRate        float64 `json:"win_rate"`
-	TotalPnL       float64 `json:"total_pnl"`
-	AverageWin     float64 `json:"average_win"`
-	AverageLoss    float64 `json:"average_loss"`
-	MaxDrawdown    float64 `json:"max_drawdown"`
-	CurrentStreak  int     `json:"current_streak"`
+	TotalTrades   int     `json:"total_trades"`
+	WinningTrades int     `json:"winning_trades"`
+	LosingTrades  int     `json:"losing_trades"`
+	WinRate       float64 `json:"win_rate"`
+	TotalPnL      float64 `json:"total_pnl"`
+	AverageWin    float64 `json:"average_win"`
+	AverageLoss   float64 `json:"average_loss"`
+	MaxDrawdown   float64 `json:"max_drawdown"`
+	CurrentStreak int     `json:"current_streak"`
 }
 
 // NewJSONStorage creates a new JSON-based storage implementation
 func NewJSONStorage(filepath string) (*JSONStorage, error) {
 	s := &JSONStorage{
 		filepath: filepath,
-		data:     &StorageData{
+		data: &StorageData{
 			DailyPnL:   make(map[string]float64),
 			Statistics: &Statistics{},
 		},
@@ -108,7 +108,7 @@ func (s *JSONStorage) GetCurrentPosition() *models.Position {
 func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	s.data.CurrentPosition = pos
 	return s.saveUnsafe()
 }
@@ -156,10 +156,10 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 		} else {
 			stats.CurrentStreak = 1
 		}
-		
+
 		// Update average win
 		if stats.WinningTrades > 0 {
-			totalWins := stats.AverageWin * float64(stats.WinningTrades-1) + pnl
+			totalWins := stats.AverageWin*float64(stats.WinningTrades-1) + pnl
 			stats.AverageWin = totalWins / float64(stats.WinningTrades)
 		}
 	} else {
@@ -169,10 +169,10 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 		} else {
 			stats.CurrentStreak = -1
 		}
-		
+
 		// Update average loss
 		if stats.LosingTrades > 0 {
-			totalLosses := stats.AverageLoss * float64(stats.LosingTrades-1) + pnl
+			totalLosses := stats.AverageLoss*float64(stats.LosingTrades-1) + pnl
 			stats.AverageLoss = totalLosses / float64(stats.LosingTrades)
 		}
 	}

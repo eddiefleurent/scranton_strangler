@@ -2,9 +2,9 @@ package config
 
 import (
 	"fmt"
+	"gopkg.in/yaml.v3"
 	"os"
 	"time"
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -29,19 +29,19 @@ type BrokerConfig struct {
 }
 
 type StrategyConfig struct {
-	Symbol        string          `yaml:"symbol"`
-	AllocationPct float64         `yaml:"allocation_pct"`
-	Entry         EntryConfig     `yaml:"entry"`
-	Exit          ExitConfig      `yaml:"exit"`
+	Symbol        string           `yaml:"symbol"`
+	AllocationPct float64          `yaml:"allocation_pct"`
+	Entry         EntryConfig      `yaml:"entry"`
+	Exit          ExitConfig       `yaml:"exit"`
 	Adjustments   AdjustmentConfig `yaml:"adjustments"`
 }
 
 type EntryConfig struct {
-	MinIVR      float64   `yaml:"min_ivr"`
-	TargetDTE   int       `yaml:"target_dte"`
-	DTERange    []int     `yaml:"dte_range"`
-	Delta       float64   `yaml:"delta"`
-	MinCredit   float64   `yaml:"min_credit"`
+	MinIVR    float64 `yaml:"min_ivr"`
+	TargetDTE int     `yaml:"target_dte"`
+	DTERange  []int   `yaml:"dte_range"`
+	Delta     float64 `yaml:"delta"`
+	MinCredit float64 `yaml:"min_credit"`
 }
 
 type ExitConfig struct {
@@ -50,14 +50,14 @@ type ExitConfig struct {
 }
 
 type AdjustmentConfig struct {
-	Enabled              bool    `yaml:"enabled"`
-	SecondDownThreshold  float64 `yaml:"second_down_threshold"`
+	Enabled             bool    `yaml:"enabled"`
+	SecondDownThreshold float64 `yaml:"second_down_threshold"`
 }
 
 type RiskConfig struct {
-	MaxContracts      int     `yaml:"max_contracts"`
-	MaxDailyLoss      float64 `yaml:"max_daily_loss"`
-	MaxPositionLoss   float64 `yaml:"max_position_loss"`
+	MaxContracts    int     `yaml:"max_contracts"`
+	MaxDailyLoss    float64 `yaml:"max_daily_loss"`
+	MaxPositionLoss float64 `yaml:"max_position_loss"`
 }
 
 type ScheduleConfig struct {
@@ -147,8 +147,8 @@ func (c *Config) GetCheckInterval() time.Duration {
 func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	startTime, _ := time.Parse("15:04", c.Schedule.TradingStart)
 	endTime, _ := time.Parse("15:04", c.Schedule.TradingEnd)
-	
+
 	currentTime, _ := time.Parse("15:04", now.Format("15:04"))
-	
+
 	return currentTime.After(startTime) && currentTime.Before(endTime)
 }
