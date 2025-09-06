@@ -275,8 +275,8 @@ func (b *Bot) executeEntry() {
 	// Set real entry IVR
 	position.EntryIVR = b.strategy.GetCurrentIVR()
 
-	// Initialize position state
-	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
+	// Initialize position state to submitted
+	if err := position.TransitionState(models.StateSubmitted, "order_placed"); err != nil {
 		b.logger.Printf("Failed to set position state: %v", err)
 		return
 	}
@@ -289,9 +289,12 @@ func (b *Bot) executeEntry() {
 
 	b.logger.Printf("Position saved: ID=%s, Credit=$%.2f, DTE=%d",
 		position.ID, position.CreditReceived, position.DTE)
+
+	// Start order status polling in background
+	go b.pollOrderStatus(position.ID, placedOrder.Order.ID)
 }
 
-func (b *Bot) executeExit(reason string) {
+func (b *Bot) executeExit(reason strategy.ExitReason) {
 	b.logger.Printf("Executing exit: %s", reason)
 
 	// Get current position
@@ -305,14 +308,21 @@ func (b *Bot) executeExit(reason string) {
 		position.Symbol, position.Expiration.Format("2006-01-02"),
 		position.PutStrike, position.CallStrike)
 
-	// Calculate maximum debit willing to pay (based on profit target or stop loss)
+	// Calculate maximum debit willing to pay (based on exit reason)
 	var maxDebit float64
-	if reason == "50% profit target" {
+	switch reason {
+	case strategy.ExitReasonProfitTarget:
 		// For profit target, pay up to 50% of credit received
 		maxDebit = position.CreditReceived * 0.5
-	} else {
-		// For time/risk exits, get current market quotes to determine fair debit
+	case strategy.ExitReasonTime:
+		// For time-based exits, pay up to current market value
 		maxDebit = position.CreditReceived * 2.0 // Max 2x credit as stop loss
+	case strategy.ExitReasonStopLoss:
+		// For stop loss, be more aggressive
+		maxDebit = position.CreditReceived * 1.5 // Max 1.5x credit
+	default:
+		// Default conservative approach
+		maxDebit = position.CreditReceived * 1.0
 	}
 
 	// Place buy-to-close order
@@ -360,6 +370,119 @@ func (b *Bot) executeExit(reason string) {
 	stats := b.storage.GetStatistics()
 	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
 		stats.TotalTrades, stats.WinRate*100, stats.TotalPnL)
+}
+
+// pollOrderStatus polls the broker for order status until filled or timeout
+func (b *Bot) pollOrderStatus(positionID string, orderID int) {
+	const (
+		pollInterval = 5 * time.Second  // Check every 5 seconds
+		timeout      = 5 * time.Minute  // Give up after 5 minutes
+	)
+
+	b.logger.Printf("Starting order status polling for position %s, order %d", positionID, orderID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			b.logger.Printf("Order polling timeout for position %s", positionID)
+			b.handleOrderTimeout(positionID)
+			return
+		case <-ticker.C:
+			// Check order status
+			orderStatus, err := b.broker.GetOrderStatus(orderID)
+			if err != nil {
+				b.logger.Printf("Error checking order status for %s: %v", positionID, err)
+				continue
+			}
+
+			b.logger.Printf("Order %d status: %s", orderID, orderStatus.Order.Status)
+
+			switch orderStatus.Order.Status {
+			case "filled":
+				b.logger.Printf("Order filled for position %s", positionID)
+				b.handleOrderFilled(positionID)
+				return
+			case "cancelled", "rejected":
+				b.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
+				b.handleOrderFailed(positionID, orderStatus.Order.Status)
+				return
+			case "pending", "open", "partial":
+				// Continue polling
+				continue
+			default:
+				b.logger.Printf("Unknown order status for position %s: %s", positionID, orderStatus.Order.Status)
+			}
+		}
+	}
+}
+
+// handleOrderFilled transitions position to Open state when order is confirmed filled
+func (b *Bot) handleOrderFilled(positionID string) {
+	position := b.storage.GetCurrentPosition()
+	if position == nil || position.ID != positionID {
+		b.logger.Printf("Position %s not found or mismatched", positionID)
+		return
+	}
+
+	if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
+		b.logger.Printf("Failed to transition position %s to open: %v", positionID, err)
+		return
+	}
+
+	if err := b.storage.SetCurrentPosition(position); err != nil {
+		b.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
+		return
+	}
+
+	b.logger.Printf("Position %s successfully transitioned to open state", positionID)
+}
+
+// handleOrderFailed transitions position to error state when order fails
+func (b *Bot) handleOrderFailed(positionID string, reason string) {
+	position := b.storage.GetCurrentPosition()
+	if position == nil || position.ID != positionID {
+		b.logger.Printf("Position %s not found or mismatched", positionID)
+		return
+	}
+
+	if err := position.TransitionState(models.StateError, fmt.Sprintf("order_%s", reason)); err != nil {
+		b.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
+		return
+	}
+
+	if err := b.storage.SetCurrentPosition(position); err != nil {
+		b.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
+		return
+	}
+
+	b.logger.Printf("Position %s marked as error due to order failure: %s", positionID, reason)
+}
+
+// handleOrderTimeout transitions position to closed state when order times out
+func (b *Bot) handleOrderTimeout(positionID string) {
+	position := b.storage.GetCurrentPosition()
+	if position == nil || position.ID != positionID {
+		b.logger.Printf("Position %s not found or mismatched", positionID)
+		return
+	}
+
+	if err := position.TransitionState(models.StateClosed, "order_timeout"); err != nil {
+		b.logger.Printf("Failed to transition position %s to closed: %v", positionID, err)
+		return
+	}
+
+	if err := b.storage.SetCurrentPosition(position); err != nil {
+		b.logger.Printf("Failed to save position %s after timeout: %v", positionID, err)
+		return
+	}
+
+	b.logger.Printf("Position %s closed due to order timeout", positionID)
 }
 
 func (b *Bot) checkAdjustments() {

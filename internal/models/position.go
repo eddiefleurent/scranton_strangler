@@ -162,3 +162,43 @@ func (p *Position) GetStateDescription() string {
 	}
 	return p.StateMachine.GetStateDescription()
 }
+
+// ShouldEmergencyExit checks if the position meets emergency exit conditions
+func (p *Position) ShouldEmergencyExit() (bool, string) {
+	if p.StateMachine == nil {
+		return false, ""
+	}
+	return p.StateMachine.ShouldEmergencyExit(p.CreditReceived, p.CurrentPnL, p.CalculateDTE())
+}
+
+// SetFourthDownOption sets the Fourth Down strategy option
+func (p *Position) SetFourthDownOption(option FourthDownOption) {
+	if p.StateMachine == nil {
+		p.StateMachine = NewStateMachine()
+	}
+	p.StateMachine.SetFourthDownOption(option)
+}
+
+// GetFourthDownOption returns the selected Fourth Down strategy
+func (p *Position) GetFourthDownOption() FourthDownOption {
+	if p.StateMachine == nil {
+		return ""
+	}
+	return p.StateMachine.GetFourthDownOption()
+}
+
+// CanPunt returns true if punt is still allowed
+func (p *Position) CanPunt() bool {
+	if p.StateMachine == nil {
+		return true
+	}
+	return p.StateMachine.CanPunt()
+}
+
+// ExecutePunt performs punt operation
+func (p *Position) ExecutePunt() error {
+	if p.StateMachine == nil {
+		p.StateMachine = NewStateMachine()
+	}
+	return p.StateMachine.ExecutePunt()
+}

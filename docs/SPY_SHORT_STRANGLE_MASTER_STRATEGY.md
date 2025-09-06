@@ -111,14 +111,14 @@ If Experienced/Active Management:
 - **Example**: Collected $3.00 credit → Exit at $1.50 debit
 
 ### Emergency Exits (Manual Intervention Only)
-- Loss exceeds 200% of collected premium (manageable threshold)
-- Loss approaching 300% (must take action)
+- Loss exceeds 200% of collected premium (escalate/prepare for action)
+- Loss reaches 250% of collected premium (position must be immediately closed)
 - Black swan event (market drops/rises >8% in day)
 - Major unexpected news event
 - Assignment risk becomes imminent
 
 ### Automated Management Policy
-- **Research**: Tastytrade studies show mechanical stops reduce returns
+- **Research**: Tastytrade studies show mechanical stops reduce returns (https://www.tastytrade.com/tools/options/backtesting and https://www.tastytrade.com/tools/options/backtesting/research)
 - **Philosophy**: Manage through rolling and adjustments with hard limits
 - **Automated System**: Must have definitive stop conditions
 - **Never**: Let losses exceed defined thresholds without action

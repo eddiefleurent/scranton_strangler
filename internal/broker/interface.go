@@ -17,6 +17,9 @@ type Broker interface {
 	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit float64) (*OrderResponse, error)
 	PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64) (*OrderResponse, error)
 
+	// Order status
+	GetOrderStatus(orderID int) (*OrderResponse, error)
+
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*OrderResponse, error)
 	PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error)
@@ -63,6 +66,11 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 // CloseStranglePosition closes an existing strangle position with a buy-to-close order
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*OrderResponse, error) {
 	return t.TradierAPI.PlaceStrangleBuyToClose(symbol, putStrike, callStrike, expiration, quantity, maxDebit)
+}
+
+// GetOrderStatus retrieves the status of an existing order
+func (t *TradierClient) GetOrderStatus(orderID int) (*OrderResponse, error) {
+	return t.TradierAPI.GetOrderStatus(orderID)
 }
 
 // PlaceBuyToCloseOrder places a buy-to-close order for a specific option

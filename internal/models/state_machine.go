@@ -10,10 +10,11 @@ type PositionState string
 
 const (
 	// Core states
-	StateIdle   PositionState = "idle"   // No active position
-	StateOpen   PositionState = "open"   // Position opened, ready for management
-	StateClosed PositionState = "closed" // Position closed
-	StateError  PositionState = "error"  // Error state requiring intervention
+	StateIdle      PositionState = "idle"       // No active position
+	StateSubmitted PositionState = "submitted"  // Order submitted, waiting for fill
+	StateOpen      PositionState = "open"       // Position opened, ready for management
+	StateClosed    PositionState = "closed"     // Position closed
+	StateError     PositionState = "error"      // Error state requiring intervention
 
 	// Football System management states
 	StateFirstDown  PositionState = "first_down"  // Normal theta decay monitoring
@@ -37,7 +38,10 @@ type StateTransition struct {
 // Valid state transitions (simplified)
 var ValidTransitions = []StateTransition{
 	// Position lifecycle
-	{StateIdle, StateOpen, "position_filled", "Position opened successfully"},
+	{StateIdle, StateSubmitted, "order_placed", "Order submitted to broker"},
+	{StateSubmitted, StateOpen, "order_filled", "Order filled successfully"},
+	{StateSubmitted, StateError, "order_failed", "Order failed or cancelled"},
+	{StateSubmitted, StateClosed, "order_timeout", "Order timed out without fill"},
 	{StateOpen, StateFirstDown, "start_management", "Begin football system monitoring"},
 	{StateOpen, StateClosed, "position_closed", "Position closed directly (profit target hit, time limit, etc.)"},
 
@@ -193,6 +197,8 @@ func (sm *StateMachine) GetStateDescription() string {
 	switch sm.currentState {
 	case StateIdle:
 		return "No active position, ready for new opportunities"
+	case StateSubmitted:
+		return "Order submitted, waiting for broker confirmation"
 	case StateOpen:
 		return "Position opened, transitioning to management"
 	case StateFirstDown:

@@ -101,7 +101,7 @@ dev-setup:
 # API testing
 test-api:
 	@echo "Testing Tradier API connection..."
-	cd scripts && go run test_tradier_api.go
+	cd scripts/test_otoco && go run test_otoco.go
 
 # Security scan
 security-scan:

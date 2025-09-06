@@ -155,7 +155,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			name:           "no position",
 			position:       nil,
 			expectedExit:   false,
-			expectedReason: "no position",
+			expectedReason: "",
 		},
 		{
 			name: "profit target reached",
@@ -170,7 +170,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				DTE:            35,
 			},
 			expectedExit:   true,
-			expectedReason: "profit target reached",
+			expectedReason: "profit_target",
 		},
 		{
 			name: "max DTE reached",
@@ -185,7 +185,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				DTE:            21,   // At max DTE
 			},
 			expectedExit:   true,
-			expectedReason: "max DTE reached",
+			expectedReason: "time",
 		},
 		{
 			name: "no exit conditions met",
@@ -200,7 +200,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				DTE:            35,   // Still have time
 			},
 			expectedExit:   false,
-			expectedReason: "no exit conditions met",
+			expectedReason: "",
 		},
 	}
 
@@ -245,7 +245,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				t.Errorf("CheckExitConditions() exit = %v, want %v", shouldExit, tt.expectedExit)
 			}
 
-			if !containsSubstring(reason, tt.expectedReason) {
+			if !containsSubstring(string(reason), tt.expectedReason) {
 				t.Errorf("CheckExitConditions() reason = %q, want to contain %q", reason, tt.expectedReason)
 			}
 		})
@@ -465,6 +465,32 @@ func (m *mockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike flo
 
 func (m *mockBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64) (*broker.OrderResponse, error) {
 	return nil, nil
+}
+
+func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{
+		Order: struct {
+			ID                int     `json:"id"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Quantity          float64 `json:"quantity"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			Price             float64 `json:"price"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			CreateDate        string  `json:"create_date"`
+			TransactionDate   string  `json:"transaction_date"`
+			Class             string  `json:"class"`
+		}{
+			ID:     orderID,
+			Status: "filled",
+		},
+	}, nil
 }
 
 func (m *mockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*broker.OrderResponse, error) {

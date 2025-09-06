@@ -56,7 +56,11 @@ func testStorageInterface(t *testing.T, storage StorageInterface) {
 	testPos.EntrySpot = 450.0
 
 	// Transition to open state
-	err := testPos.TransitionState(models.StateOpen, "position_filled")
+	err := testPos.TransitionState(models.StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to transition position to open: %v", err)
+	}
+	err = testPos.TransitionState(models.StateOpen, "order_filled")
 	if err != nil {
 		t.Fatalf("Failed to transition position to open: %v", err)
 	}

@@ -26,6 +26,17 @@ type StrategyConfig struct {
 	MinCredit     float64 // $2.00
 }
 
+// ExitReason represents the reason for exiting a position
+type ExitReason string
+
+const (
+	ExitReasonProfitTarget ExitReason = "profit_target"
+	ExitReasonTime         ExitReason = "time"
+	ExitReasonStopLoss     ExitReason = "stop_loss"
+	ExitReasonManual       ExitReason = "manual"
+	ExitReasonError        ExitReason = "error"
+)
+
 func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrategy {
 	return &StrangleStrategy{
 		broker: b,
@@ -387,9 +398,9 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerContract float64) int 
 }
 
 // CheckExitConditions checks if a position should be exited
-func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool, string) {
+func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool, ExitReason) {
 	if position == nil {
-		return false, "no position"
+		return false, ""
 	}
 
 	// Calculate real-time P&L
@@ -405,16 +416,16 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	totalCreditReceived := position.GetTotalCredit() * float64(position.Quantity) * 100
 	profitPct := currentPnL / totalCreditReceived
 	if profitPct >= s.config.ProfitTarget {
-		return true, fmt.Sprintf("profit target reached: %.1f%% (P&L: $%.2f)", profitPct*100, currentPnL)
+		return true, ExitReasonProfitTarget
 	}
 
 	// Check DTE
 	currentDTE := position.CalculateDTE()
 	if currentDTE <= s.config.MaxDTE {
-		return true, fmt.Sprintf("max DTE reached: %d days", currentDTE)
+		return true, ExitReasonTime
 	}
 
-	return false, "no exit conditions met"
+	return false, ""
 }
 
 func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
