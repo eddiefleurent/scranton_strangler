@@ -66,13 +66,16 @@ func main() {
 	}
 
 	// Initialize broker client
-	bot.broker = broker.NewTradierClient(
+	tradierClient := broker.NewTradierClient(
 		cfg.Broker.APIKey,
 		cfg.Broker.AccountID,
 		cfg.IsPaperTrading(),
 		cfg.Broker.UseOTOCO,
 		cfg.Strategy.Exit.ProfitTarget,
 	)
+
+	// Wrap with circuit breaker for resilience
+	bot.broker = broker.NewCircuitBreakerBroker(tradierClient)
 
 	// Initialize storage
 	storagePath := cfg.Storage.Path
@@ -86,7 +89,7 @@ func main() {
 	bot.storage = store
 
 	// Initialize strategy
-	strategyConfig := &strategy.StrategyConfig{
+	strategyConfig := &strategy.Config{
 		Symbol:              cfg.Strategy.Symbol,
 		DTETarget:           cfg.Strategy.Entry.TargetDTE,
 		DeltaTarget:         cfg.Strategy.Entry.Delta / 100, // Convert from percentage
@@ -307,6 +310,7 @@ func (b *Bot) executeEntry() {
 		order.Quantity,
 		order.Credit, // limit price
 		false,        // not preview
+		"day",        // duration
 	)
 
 	if err != nil {

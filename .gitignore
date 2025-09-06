@@ -65,3 +65,4 @@ coverage.html
 *.cover
 *.coverprofile
 gosec-results.sarif
+/test_tradier

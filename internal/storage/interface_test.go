@@ -2,7 +2,6 @@ package storage
 
 import (
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -19,16 +18,8 @@ func TestInterface(t *testing.T) {
 
 	// Test with JSONStorage (using temporary file)
 	t.Run("JSONStorage", func(t *testing.T) {
-		tmpFile := fmt.Sprintf("/tmp/test_positions_%d.json", time.Now().UnixNano())
-		// Clean up after test
-		defer func() {
-			if err := os.Remove(tmpFile); err != nil && !os.IsNotExist(err) {
-				t.Logf("Failed to remove temp file %s: %v", tmpFile, err)
-			}
-			if err := os.Remove(tmpFile + ".tmp"); err != nil && !os.IsNotExist(err) {
-				t.Logf("Failed to remove temp file %s.tmp: %v", tmpFile, err)
-			}
-		}()
+		tmpDir := t.TempDir()
+		tmpFile := fmt.Sprintf("%s/test_positions_%d.json", tmpDir, time.Now().UnixNano())
 
 		storage, err := NewJSONStorage(tmpFile)
 		if err != nil {
@@ -85,6 +76,11 @@ func testInterface(t *testing.T, storage Interface) {
 	}
 	if retrievedPos.GetCurrentState() != models.StateOpen {
 		t.Errorf("Expected position state %s, got %s", models.StateOpen, retrievedPos.GetCurrentState())
+	}
+	// Mutate the returned copy; storage should be unaffected.
+	retrievedPos.CurrentPnL = 999
+	if storage.GetCurrentPosition().CurrentPnL == 999 {
+		t.Errorf("GetCurrentPosition leaked internal state (mutation visible)")
 	}
 
 	// Test adding adjustment
@@ -201,15 +197,8 @@ func (e *MockError) Error() string {
 
 // TestExitMetadataBackup ensures exit metadata is properly set during position closure
 func TestExitMetadataBackup(t *testing.T) {
-	tmpFile := fmt.Sprintf("/tmp/test_exit_metadata_%d.json", time.Now().UnixNano())
-	defer func() {
-		if err := os.Remove(tmpFile); err != nil && !os.IsNotExist(err) {
-			t.Logf("Failed to remove temp file %s: %v", tmpFile, err)
-		}
-		if err := os.Remove(tmpFile + ".tmp"); err != nil && !os.IsNotExist(err) {
-			t.Logf("Failed to remove temp file %s.tmp: %v", tmpFile, err)
-		}
-	}()
+	tmpDir := t.TempDir()
+	tmpFile := fmt.Sprintf("%s/test_exit_metadata_%d.json", tmpDir, time.Now().UnixNano())
 
 	storage, err := NewJSONStorage(tmpFile)
 	if err != nil {
@@ -251,8 +240,9 @@ func TestExitMetadataBackup(t *testing.T) {
 	}
 
 	// Close position with valid condition
-	finalPnL := -1.25                                        // Loss to test edge case
-	err = storage.ClosePosition(finalPnL, "position_closed") // Use valid transition condition
+	finalPnL := -1.25 // Loss to test edge case
+	t0 := time.Now()
+	err = storage.ClosePosition(finalPnL, "position_closed")
 	if err != nil {
 		t.Fatalf("Failed to close position: %v", err)
 	}
@@ -276,10 +266,10 @@ func TestExitMetadataBackup(t *testing.T) {
 		t.Error("Expected exit date to be set, but it was zero time")
 	}
 
-	// Verify exit date is reasonable (within last minute)
-	timeSinceExit := time.Since(closedPos.ExitDate)
-	if timeSinceExit < 0 || timeSinceExit > time.Minute {
-		t.Errorf("Exit date seems unreasonable: %v (time since: %v)", closedPos.ExitDate, timeSinceExit)
+	// Verify exit date falls within [t0-2s, now+2s]
+	now := time.Now()
+	if closedPos.ExitDate.Before(t0.Add(-2*time.Second)) || closedPos.ExitDate.After(now.Add(2*time.Second)) {
+		t.Errorf("Exit date out of expected window: %v (t0=%v now=%v)", closedPos.ExitDate, t0, now)
 	}
 
 	// Verify final P&L is recorded
@@ -295,7 +285,8 @@ func TestInterfaceCompliance(t *testing.T) {
 	var _ Interface = (*JSONStorage)(nil)
 
 	// Test factory function
-	storage, err := NewStorage("/tmp/test_factory.json")
+	tmpFile := fmt.Sprintf("%s/factory.json", t.TempDir())
+	storage, err := NewStorage(tmpFile)
 	if err != nil {
 		t.Fatalf("Factory function failed: %v", err)
 	}

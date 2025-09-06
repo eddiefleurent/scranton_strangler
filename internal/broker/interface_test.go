@@ -39,7 +39,7 @@ func TestCalculateIVR(t *testing.T) {
 			name:         "no range (all same)",
 			currentIV:    20.0,
 			historicalIV: []float64{20.0, 20.0, 20.0},
-			expected:     0.0, // Return 0 when no range to avoid masking scenarios
+			expected:     0.0, // Return 0 when min=max (no volatility range)
 		},
 		{
 			name:         "empty history",
@@ -77,31 +77,31 @@ func TestGetOptionByStrike(t *testing.T) {
 	tests := []struct {
 		expected   *Option
 		name       string
-		optionType string
+		optionType OptionType
 		strike     float64
 	}{
 		{
 			name:       "find put option",
 			strike:     400.0,
-			optionType: "put",
+			optionType: OptionTypePut,
 			expected:   &options[0],
 		},
 		{
 			name:       "find call option",
 			strike:     420.0,
-			optionType: "call",
+			optionType: OptionTypeCall,
 			expected:   &options[1],
 		},
 		{
 			name:       "option not found",
 			strike:     500.0,
-			optionType: "put",
+			optionType: OptionTypePut,
 			expected:   nil,
 		},
 		{
 			name:       "wrong type",
 			strike:     400.0,
-			optionType: "call",
+			optionType: OptionTypeCall,
 			expected:   nil,
 		},
 	}
@@ -161,23 +161,16 @@ func TestDaysBetween(t *testing.T) {
 }
 
 func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
-	// Test that TradierClient forwards profitTarget correctly when useOTOCO is true
-	client := NewTradierClient("test", "test", true, true, 0.5) // sandbox=true, useOTOCO=true, profitTarget=50%
+	// Verify that TradierClient is created with profitTarget parameter
+	client := NewTradierClient("test", "test", true, true, 0.5)
 
-	// We can't actually make API calls in unit tests, but we can verify the method signature
-	// and that it doesn't panic with the new parameter
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("PlaceStrangleOrder panicked with profitTarget parameter: %v", r)
-		}
-	}()
-
-	// This would normally make an API call, but we're just testing that the method
-	// accepts the profitTarget parameter without panicking
-	// In a real test, we'd mock the API call
-	_ = func() (*OrderResponse, error) {
-		return client.PlaceStrangleOrder("SPY", 450.0, 460.0, "2024-12-20", 1, 2.0, false)
+	// Verify the client is not nil and has expected configuration
+	if client == nil {
+		t.Fatal("NewTradierClient returned nil")
 	}
+
+	// TODO: Add mock HTTP client to verify profitTarget is passed correctly in API calls
+	// This would require refactoring TradierClient to accept an http.Client interface
 }
 
 func TestExtractUnderlyingFromOSI(t *testing.T) {
@@ -455,6 +448,156 @@ func TestOptionTypeFromSymbol(t *testing.T) {
 	}
 }
 
+func TestIsSixDigits(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		// Valid 6-digit strings
+		{
+			name:     "valid 6 digits - expiration date",
+			input:    "241220",
+			expected: true,
+		},
+		{
+			name:     "valid 6 digits - all zeros",
+			input:    "000000",
+			expected: true,
+		},
+		{
+			name:     "valid 6 digits - mixed",
+			input:    "123456",
+			expected: true,
+		},
+		// Invalid strings
+		{
+			name:     "empty string",
+			input:    "",
+			expected: false,
+		},
+		{
+			name:     "too short - 5 digits",
+			input:    "12345",
+			expected: false,
+		},
+		{
+			name:     "too long - 7 digits",
+			input:    "1234567",
+			expected: false,
+		},
+		{
+			name:     "contains non-digits",
+			input:    "12345A",
+			expected: false,
+		},
+		{
+			name:     "contains spaces",
+			input:    "123 45",
+			expected: false,
+		},
+		{
+			name:     "contains special chars",
+			input:    "123-45",
+			expected: false,
+		},
+		{
+			name:     "unicode digits",
+			input:    "１２３４５６", // Full-width digits
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSixDigits(tt.input)
+			if result != tt.expected {
+				t.Errorf("isSixDigits(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsEightDigits(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		// Valid 8-digit strings
+		{
+			name:     "valid 8 digits - strike price",
+			input:    "00450000",
+			expected: true,
+		},
+		{
+			name:     "valid 8 digits - all zeros",
+			input:    "00000000",
+			expected: true,
+		},
+		{
+			name:     "valid 8 digits - mixed",
+			input:    "12345678",
+			expected: true,
+		},
+		{
+			name:     "valid 8 digits - high value",
+			input:    "99999999",
+			expected: true,
+		},
+		// Invalid strings
+		{
+			name:     "empty string",
+			input:    "",
+			expected: false,
+		},
+		{
+			name:     "too short - 7 digits",
+			input:    "1234567",
+			expected: false,
+		},
+		{
+			name:     "too long - 9 digits",
+			input:    "123456789",
+			expected: false,
+		},
+		{
+			name:     "contains non-digits",
+			input:    "1234567A",
+			expected: false,
+		},
+		{
+			name:     "contains spaces",
+			input:    "123456 7",
+			expected: false,
+		},
+		{
+			name:     "contains special chars",
+			input:    "12345-67",
+			expected: false,
+		},
+		{
+			name:     "unicode digits",
+			input:    "１２３４５６７８", // Full-width digits
+			expected: false,
+		},
+		{
+			name:     "mixed with letters",
+			input:    "12345ABC",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isEightDigits(tt.input)
+			if result != tt.expected {
+				t.Errorf("isEightDigits(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 // MockBroker for testing CircuitBreakerBroker
 type MockBroker struct {
 	callCount  int
@@ -486,7 +629,7 @@ func (m *MockBroker) GetQuote(symbol string) (*QuoteItem, error) {
 	return &QuoteItem{Symbol: symbol, Last: 100.0}, nil
 }
 
-func (m *MockBroker) GetExpirations(symbol string) ([]string, error) {
+func (m *MockBroker) GetExpirations(_ string) ([]string, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -494,7 +637,7 @@ func (m *MockBroker) GetExpirations(symbol string) ([]string, error) {
 	return []string{"2024-12-20"}, nil
 }
 
-func (m *MockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error) {
+func (m *MockBroker) GetOptionChain(_, _ string, _ bool) ([]Option, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -502,8 +645,8 @@ func (m *MockBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 	return []Option{}, nil
 }
 
-func (m *MockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
-	quantity int, limitPrice float64, preview bool) (*OrderResponse, error) {
+func (m *MockBroker) PlaceStrangleOrder(_ string, _, _ float64, _ string,
+	_ int, _ float64, _ bool, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -513,8 +656,8 @@ func (m *MockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike flo
 	return resp, nil
 }
 
-func (m *MockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
-	quantity int, credit, profitTarget float64) (*OrderResponse, error) {
+func (m *MockBroker) PlaceStrangleOTOCO(_ string, _, _ float64, _ string,
+	_ int, _, _ float64, _ bool) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -534,7 +677,7 @@ func (m *MockBroker) GetOrderStatus(orderID int) (*OrderResponse, error) {
 	return resp, nil
 }
 
-func (m *MockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+func (m *MockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -544,8 +687,8 @@ func (m *MockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*Order
 	return resp, nil
 }
 
-func (m *MockBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
-	quantity int, maxDebit float64) (*OrderResponse, error) {
+func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
+	_ int, _ float64) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -555,8 +698,8 @@ func (m *MockBroker) CloseStranglePosition(symbol string, putStrike, callStrike 
 	return resp, nil
 }
 
-func (m *MockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int,
-	maxPrice float64) (*OrderResponse, error) {
+func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
+	_ float64) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -698,11 +841,11 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		{"GetExpirations", func() error { _, err := cb.GetExpirations("SPY"); return err }},
 		{"GetOptionChain", func() error { _, err := cb.GetOptionChain("SPY", "2024-12-20", false); return err }},
 		{"PlaceStrangleOrder", func() error {
-			_, err := cb.PlaceStrangleOrder("SPY", 400, 420, "2024-12-20", 1, 2.0, false)
+			_, err := cb.PlaceStrangleOrder("SPY", 400, 420, "2024-12-20", 1, 2.0, false, "day")
 			return err
 		}},
 		{"PlaceStrangleOTOCO", func() error {
-			_, err := cb.PlaceStrangleOTOCO("SPY", 400, 420, "2024-12-20", 1, 2.0, 0.5)
+			_, err := cb.PlaceStrangleOTOCO("SPY", 400, 420, "2024-12-20", 1, 2.0, 0.5, false)
 			return err
 		}},
 		{"GetOrderStatus", func() error { _, err := cb.GetOrderStatus(123); return err }},

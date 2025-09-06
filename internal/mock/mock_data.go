@@ -2,10 +2,11 @@
 package mock
 
 import (
-	"crypto/rand"
+	cryptorand "crypto/rand"
 	"fmt"
 	"math"
 	"math/big"
+	"math/rand/v2"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -13,14 +14,16 @@ import (
 
 // DataProvider provides mock market data for testing.
 type DataProvider struct {
-	currentPrice float64
-	ivr          float64 // IV rank (percentile)
-	midIV        float64 // Actual IV level for pricing
+	currentPrice  float64
+	ivr           float64    // IV rank (percentile)
+	midIV         float64    // Actual IV level for pricing
+	deterministic bool       // When true, uses deterministic RNG for stable test outputs
+	rng           *rand.Rand // Optional deterministic RNG source
 }
 
 // secureFloat64 generates a cryptographically secure random float64 between 0 and 1
 func secureFloat64() float64 {
-	n, err := rand.Int(rand.Reader, big.NewInt(1<<53))
+	n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(1<<53))
 	if err != nil {
 		// Fallback to a reasonable default if crypto/rand fails
 		return 0.5
@@ -34,12 +37,31 @@ func secureInt63n(n int64) int64 {
 		return 0
 	}
 	maxVal := big.NewInt(n)
-	r, err := rand.Int(rand.Reader, maxVal)
+	r, err := cryptorand.Int(cryptorand.Reader, maxVal)
 	if err != nil {
 		// Fallback to a reasonable default if crypto/rand fails
 		return n / 2
 	}
 	return r.Int64()
+}
+
+// randomFloat64 generates a random float64 between 0 and 1, using deterministic RNG if available
+func (m *DataProvider) randomFloat64() float64 {
+	if m.deterministic && m.rng != nil {
+		return m.rng.Float64()
+	}
+	return secureFloat64()
+}
+
+// randomInt63n generates a random int64 between 0 and n-1, using deterministic RNG if available
+func (m *DataProvider) randomInt63n(n int64) int64 {
+	if m.deterministic && m.rng != nil {
+		if n <= 0 {
+			return 0
+		}
+		return int64(m.rng.IntN(int(n)))
+	}
+	return secureInt63n(n)
 }
 
 // NewDataProvider creates a new mock data provider instance.
@@ -51,10 +73,22 @@ func NewDataProvider() *DataProvider {
 	}
 }
 
+// NewDeterministicDataProvider creates a new mock data provider with deterministic RNG for testing.
+func NewDeterministicDataProvider(seed int64) *DataProvider {
+	rng := rand.New(rand.NewPCG(uint64(seed), 0)) // #nosec G404,G115 -- deterministic random for test data generation
+	return &DataProvider{
+		currentPrice:  450.0 + rng.Float64()*10, // SPY around 450-460
+		ivr:           35.0 + rng.Float64()*20,  // IVR between 35-55 (rank)
+		midIV:         12.0 + rng.Float64()*18,  // MidIV between 12-30% (actual volatility)
+		deterministic: true,
+		rng:           rng,
+	}
+}
+
 // GetQuote returns mock quote data for the given symbol.
 func (m *DataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 	// Simulate small price movements
-	m.currentPrice += (secureFloat64() - 0.5) * 2
+	m.currentPrice += (m.randomFloat64() - 0.5) * 2
 
 	spread := 0.02 // 2 cent spread
 	return &broker.QuoteItem{
@@ -62,14 +96,14 @@ func (m *DataProvider) GetQuote(symbol string) (*broker.QuoteItem, error) {
 		Last:   m.currentPrice,
 		Bid:    m.currentPrice - spread/2,
 		Ask:    m.currentPrice + spread/2,
-		Volume: secureInt63n(100000000),
+		Volume: m.randomInt63n(100000000),
 	}, nil
 }
 
 // GetIVR returns a mock implied volatility rank.
 func (m *DataProvider) GetIVR() float64 {
 	// Simulate IV rank changes
-	m.ivr += (secureFloat64() - 0.5) * 2
+	m.ivr += (m.randomFloat64() - 0.5) * 2
 	m.ivr = math.Max(10, math.Min(90, m.ivr)) // Keep between 10-90
 	return m.ivr
 }
@@ -124,8 +158,8 @@ func (m *DataProvider) GetOptionChain(symbol, expiration string, withGreeks bool
 			Bid:            putPrice - 0.05,
 			Ask:            putPrice + 0.05,
 			Last:           putPrice,
-			Volume:         secureInt63n(10000),
-			OpenInterest:   secureInt63n(50000),
+			Volume:         m.randomInt63n(10000),
+			OpenInterest:   m.randomInt63n(50000),
 			Underlying:     symbol,
 		}
 
@@ -140,8 +174,8 @@ func (m *DataProvider) GetOptionChain(symbol, expiration string, withGreeks bool
 			Bid:            callPrice - 0.05,
 			Ask:            callPrice + 0.05,
 			Last:           callPrice,
-			Volume:         secureInt63n(10000),
-			OpenInterest:   secureInt63n(50000),
+			Volume:         m.randomInt63n(10000),
+			OpenInterest:   m.randomInt63n(50000),
 			Underlying:     symbol,
 		}
 
@@ -200,6 +234,15 @@ func (m *DataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, c
 		}
 	}
 
+	// Fallback when no Greeks are present - choose strikes based on distance to current price
+	if bestPutStrike == 0 && bestCallStrike == 0 {
+		spot := m.currentPrice
+		// Simple 16-delta-ish heuristic: ~1.5–2 std devs; pick 10% OTM as placeholder
+		putStrike = spot * 0.9
+		callStrike = spot * 1.1
+		return putStrike, callStrike
+	}
+
 	return bestPutStrike, bestCallStrike
 }
 
@@ -211,12 +254,22 @@ func (m *DataProvider) CalculateStrangleCredit(
 	putCredit := 0.0
 	callCredit := 0.0
 
+	// Track found options for early exit optimization
+	foundPut, foundCall := false, false
+
 	for _, option := range options {
 		if option.Strike == putStrike && option.OptionType == "put" {
 			putCredit = (option.Bid + option.Ask) / 2
+			foundPut = true
 		}
 		if option.Strike == callStrike && option.OptionType == "call" {
 			callCredit = (option.Bid + option.Ask) / 2
+			foundCall = true
+		}
+
+		// Early exit once both legs are found
+		if foundPut && foundCall {
+			break
 		}
 	}
 

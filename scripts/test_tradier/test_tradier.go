@@ -6,11 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 )
+
+var optionSymbolRegex = regexp.MustCompile(`^[A-Z]{1,6}\d{6}[CP]\d{8}$`)
 
 func main() {
 	var sandbox bool
@@ -179,7 +182,8 @@ func main() {
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,
 							1, credit*0.95, // slightly below mid for better fill
-							true, // preview mode
+							true,  // preview mode
+							"day", // duration
 						)
 
 						if err != nil {
@@ -302,14 +306,10 @@ func abs[T float64 | int](x T) T {
 	return x
 }
 
-// isOptionSymbol performs a basic OPRA-style check: TICKER + YYMMDD + [C|P] + strike
+// isOptionSymbol performs a robust OPRA-style check: TICKER + YYMMDD + [C|P] + strike
 // Example: SPY240920P00450000
+// Uses regex pattern: ^[A-Z]{1,6}\d{6}[CP]\d{8}$
 func isOptionSymbol(s string) bool {
 	u := strings.ToUpper(strings.TrimSpace(s))
-	// len 15–25 covers common OPRA lengths; adjust as needed
-	if len(u) < 15 || len(u) > 32 {
-		return false
-	}
-	// crude check: must contain 'C' or 'P' followed by digits
-	return strings.Contains(u, "C") || strings.Contains(u, "P")
+	return optionSymbolRegex.MatchString(u)
 }

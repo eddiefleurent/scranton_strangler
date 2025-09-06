@@ -28,7 +28,11 @@ func NewMockStorage() *MockStorage {
 
 // GetCurrentPosition returns the mock current position.
 func (m *MockStorage) GetCurrentPosition() *models.Position {
-	return m.currentPosition
+	if m.currentPosition == nil {
+		return nil
+	}
+	// Return a deep copy to prevent external mutation of internal state
+	return clonePosition(m.currentPosition)
 }
 
 // SetCurrentPosition updates the mock current position.

@@ -46,7 +46,7 @@ func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 			// Create mock broker that returns the test balance
 			mockClient := newMockBroker(tt.accountBalance)
 
-			cfg := &StrategyConfig{
+			cfg := &Config{
 				AllocationPct: tt.allocationPct,
 			}
 
@@ -141,7 +141,7 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 }
 
 func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
-	cfg := &StrategyConfig{
+	cfg := &Config{
 		Symbol:       "SPY",
 		ProfitTarget: 0.50, // 50%
 		MaxDTE:       21,   // Default MaxDTE value
@@ -491,6 +491,7 @@ func (m *mockBroker) PlaceStrangleOrder(
 	_ int,
 	_ float64,
 	_ bool,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -501,6 +502,7 @@ func (m *mockBroker) PlaceStrangleOTOCO(
 	_ string,
 	_ int,
 	_, _ float64,
+	_ bool,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }

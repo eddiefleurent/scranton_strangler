@@ -14,11 +14,11 @@ import (
 // StrangleStrategy implements a short strangle options strategy.
 type StrangleStrategy struct {
 	broker broker.Broker
-	config *StrategyConfig
+	config *Config
 }
 
-// StrategyConfig contains configuration parameters for the strangle strategy.
-type StrategyConfig struct {
+// Config contains configuration parameters for the strangle strategy.
+type Config struct {
 	Symbol              string
 	DTETarget           int     // 45 days
 	DeltaTarget         float64 // 0.16 for 16 delta
@@ -53,7 +53,7 @@ const (
 )
 
 // NewStrangleStrategy creates a new strangle strategy instance.
-func NewStrangleStrategy(b broker.Broker, config *StrategyConfig) *StrangleStrategy {
+func NewStrangleStrategy(b broker.Broker, config *Config) *StrangleStrategy {
 	return &StrangleStrategy{
 		broker: b,
 		config: config,
@@ -182,10 +182,12 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 		return 0, fmt.Errorf("no options available for ATM calculation")
 	}
 	// Try call then put at ATM
-	if opt := broker.GetOptionByStrike(chain, atmStrike, "call"); opt != nil && opt.Greeks != nil && opt.Greeks.MidIV > 0 {
+	if opt := broker.GetOptionByStrike(chain, atmStrike, broker.OptionTypeCall); opt != nil &&
+		opt.Greeks != nil && opt.Greeks.MidIV > 0 {
 		return opt.Greeks.MidIV, nil
 	}
-	if opt := broker.GetOptionByStrike(chain, atmStrike, "put"); opt != nil && opt.Greeks != nil && opt.Greeks.MidIV > 0 {
+	if opt := broker.GetOptionByStrike(chain, atmStrike, broker.OptionTypePut); opt != nil &&
+		opt.Greeks != nil && opt.Greeks.MidIV > 0 {
 		return opt.Greeks.MidIV, nil
 	}
 	// Nearest strike with a valid IV
@@ -316,8 +318,8 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 	}
 
 	// Find current put and call values
-	putOption := broker.GetOptionByStrike(chain, position.PutStrike, "put")
-	callOption := broker.GetOptionByStrike(chain, position.CallStrike, "call")
+	putOption := broker.GetOptionByStrike(chain, position.PutStrike, broker.OptionTypePut)
+	callOption := broker.GetOptionByStrike(chain, position.CallStrike, broker.OptionTypeCall)
 
 	if putOption == nil || callOption == nil {
 		return 0, fmt.Errorf("could not find options for strikes Put %.0f / Call %.0f",
@@ -351,8 +353,8 @@ func (s *StrangleStrategy) GetCurrentPositionValue(position *models.Position) (f
 	}
 
 	// Find current put and call values
-	putOption := broker.GetOptionByStrike(chain, position.PutStrike, "put")
-	callOption := broker.GetOptionByStrike(chain, position.CallStrike, "call")
+	putOption := broker.GetOptionByStrike(chain, position.PutStrike, broker.OptionTypePut)
+	callOption := broker.GetOptionByStrike(chain, position.CallStrike, broker.OptionTypeCall)
 
 	if putOption == nil || callOption == nil {
 		return 0, fmt.Errorf("could not find options for strikes Put %.0f / Call %.0f",
@@ -421,8 +423,8 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 }
 
 func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putStrike, callStrike float64) float64 {
-	put := broker.GetOptionByStrike(options, putStrike, "put")
-	call := broker.GetOptionByStrike(options, callStrike, "call")
+	put := broker.GetOptionByStrike(options, putStrike, broker.OptionTypePut)
+	call := broker.GetOptionByStrike(options, callStrike, broker.OptionTypeCall)
 	if put == nil || call == nil {
 		return 0
 	}

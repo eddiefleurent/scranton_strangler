@@ -410,6 +410,10 @@ type CircuitBreakerSettings struct {
 
 // Production settings: 60s interval, 30s timeout
 // Test settings: 1s interval, 2s timeout (for fast CI)
+//
+// Usage in main.go:
+// tradierClient := broker.NewTradierClient(...)
+// bot.broker = broker.NewCircuitBreakerBroker(tradierClient)
 ```
 
 #### Success Metrics

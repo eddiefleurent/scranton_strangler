@@ -109,7 +109,7 @@ func Load(configPath string) (*Config, error) {
 		configPath = "config.yaml"
 	}
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- configPath is a user-provided config file path
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}

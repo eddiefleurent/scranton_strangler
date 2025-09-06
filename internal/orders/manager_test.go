@@ -51,7 +51,9 @@ func TestManager_HandleOrderTimeout_EntryOrder(t *testing.T) {
 		t.Fatalf("Failed to set up test position: %v", err)
 	}
 
-	_ = mockStorage.SetCurrentPosition(position) // Ignore error in test setup
+	if err := mockStorage.SetCurrentPosition(position); err != nil {
+		t.Fatalf("Failed to set up test position in storage: %v", err)
+	}
 
 	m := NewManager(nil, mockStorage, logger, nil)
 
@@ -100,7 +102,9 @@ func TestManager_HandleOrderTimeout_ExitOrderFromAdjusting(t *testing.T) {
 	position.ExitOrderID = "456" // Exit order is active
 	position.ExitReason = "stop_loss"
 
-	_ = mockStorage.SetCurrentPosition(position) // Ignore error in test setup
+	if err := mockStorage.SetCurrentPosition(position); err != nil {
+		t.Fatalf("Failed to set up test position in storage: %v", err)
+	}
 
 	m := NewManager(nil, mockStorage, logger, nil)
 

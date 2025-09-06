@@ -112,11 +112,6 @@ func (s *JSONStorage) Save() error {
 func (s *JSONStorage) saveUnsafe() error {
 	s.data.LastUpdated = time.Now().UTC()
 
-	data, err := json.MarshalIndent(s.data, "", "  ")
-	if err != nil {
-		return err
-	}
-
 	// Create temp file in the same directory as the target file to avoid EXDEV
 	dir := filepath.Dir(s.filepath)
 	f, err := os.CreateTemp(dir, ".storage-*")
@@ -146,7 +141,10 @@ func (s *JSONStorage) saveUnsafe() error {
 		}
 	}()
 
-	if _, err := f.Write(data); err != nil {
+	// Encode directly to the temp file to reduce memory usage
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(s.data); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
@@ -371,8 +369,12 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	s.updateStatistics(finalPnL)
 
 	// Update daily P&L
-	today := time.Now().UTC().Format("2006-01-02")
-	s.data.DailyPnL[today] += finalPnL
+	closedAt := s.data.CurrentPosition.ExitDate
+	if closedAt.IsZero() {
+		closedAt = time.Now().UTC()
+	}
+	day := closedAt.Format("2006-01-02")
+	s.data.DailyPnL[day] += finalPnL
 
 	// Clear current position
 	s.data.CurrentPosition = nil

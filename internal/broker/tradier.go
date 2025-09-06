@@ -25,6 +25,16 @@ const (
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
 var ErrOTOCOUnsupported = errors.New("otoco unsupported for multi-leg strangle")
 
+// APIError represents an API error with status code and response body
+type APIError struct {
+	Status int
+	Body   string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error %d: %s", e.Status, e.Body)
+}
+
 // TradierAPI - Accurate implementation based on actual API docs
 type TradierAPI struct {
 	client     *http.Client
@@ -44,11 +54,26 @@ type RateLimits struct {
 
 // NewTradierAPI creates a new TradierAPI client with default settings.
 func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
-	return NewTradierAPIWithBaseURL(apiKey, accountID, sandbox, "")
+	return NewTradierAPIWithLimits(apiKey, accountID, sandbox, "", RateLimits{})
 }
 
-// NewTradierAPIWithBaseURL creates a new TradierAPI client with optional custom baseURL
-func NewTradierAPIWithBaseURL(apiKey, accountID string, sandbox bool, baseURL string) *TradierAPI {
+// NewTradierAPIWithLimits creates a new TradierAPI client with custom rate limits.
+func NewTradierAPIWithLimits(
+	apiKey, accountID string,
+	sandbox bool,
+	baseURL string,
+	customLimits RateLimits,
+) *TradierAPI {
+	return NewTradierAPIWithBaseURL(apiKey, accountID, sandbox, baseURL, customLimits)
+}
+
+// NewTradierAPIWithBaseURL creates a new TradierAPI client with optional custom baseURL and rate limits
+func NewTradierAPIWithBaseURL(
+	apiKey, accountID string,
+	sandbox bool,
+	baseURL string,
+	customLimits ...RateLimits,
+) *TradierAPI {
 	var limits RateLimits
 
 	if baseURL == "" {
@@ -59,17 +84,25 @@ func NewTradierAPIWithBaseURL(apiKey, accountID string, sandbox bool, baseURL st
 		}
 	}
 
-	if sandbox {
+	// Use custom limits if provided, otherwise use defaults based on sandbox mode
+	var providedLimits RateLimits
+	if len(customLimits) > 0 {
+		providedLimits = customLimits[0]
+	}
+
+	if providedLimits.MarketData > 0 || providedLimits.Trading > 0 || providedLimits.Standard > 0 {
+		limits = providedLimits
+	} else if sandbox {
 		limits = RateLimits{
-			MarketData: 60,
-			Trading:    60,
-			Standard:   60,
+			MarketData: 120,
+			Trading:    120,
+			Standard:   120,
 		}
 	} else {
 		limits = RateLimits{
-			MarketData: 120,
-			Trading:    60,
-			Standard:   120,
+			MarketData: 500,
+			Trading:    500,
+			Standard:   500,
 		}
 	}
 
@@ -314,8 +347,12 @@ func (t *TradierAPI) PlaceStrangleOrder(
 	quantity int,
 	limitPrice float64,
 	preview bool,
+	duration string,
 ) (*OrderResponse, error) {
-	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview, false)
+	return t.placeStrangleOrderInternal(
+		symbol, putStrike, callStrike, expiration,
+		quantity, limitPrice, preview, false, duration,
+	)
 }
 
 func (t *TradierAPI) placeStrangleOrderInternal(
@@ -326,6 +363,7 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	limitPrice float64,
 	preview bool,
 	buyToClose bool,
+	duration string,
 ) (*OrderResponse, error) {
 	// Validate price for credit/debit orders
 	if limitPrice <= 0 {
@@ -337,6 +375,14 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	if quantity <= 0 {
 		return nil, fmt.Errorf("invalid quantity for %s order: %d, quantity must be greater than zero",
 			map[bool]string{true: "debit", false: "credit"}[buyToClose], quantity)
+	}
+
+	// Validate strikes - put strike must be less than call strike
+	if putStrike >= callStrike {
+		return nil, fmt.Errorf(
+			"invalid strikes for strangle: put strike (%.2f) must be less than call strike (%.2f)",
+			putStrike, callStrike,
+		)
 	}
 
 	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
@@ -355,7 +401,7 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	params := url.Values{}
 	params.Add("class", "multileg")
 	params.Add("symbol", symbol)
-	params.Add("duration", "day")
+	params.Add("duration", duration)
 	params.Add("price", fmt.Sprintf("%.2f", limitPrice))
 
 	// Determine order type and side based on buyToClose flag
@@ -401,7 +447,7 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 	quantity int,
 	maxDebit float64,
 ) (*OrderResponse, error) {
-	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true)
+	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, "day")
 }
 
 // GetOrderStatus retrieves the status of an existing order by ID
@@ -429,6 +475,11 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	// Validate price for limit orders
 	if maxPrice <= 0 {
 		return nil, fmt.Errorf("invalid price for limit order: %.2f, price must be positive", maxPrice)
+	}
+
+	// Validate quantity for order
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
 	}
 
 	// Extract underlying symbol from option OCC/OSI code
@@ -463,8 +514,7 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	_, _ float64,
 	_ string,
 	_ int,
-	_ float64,
-	_ float64, // percentage as decimal (0.5 for 50%)
+	_, _ float64,
 	_ bool,
 ) (*OrderResponse, error) {
 	// OTOCO orders in Tradier API do not support multi-leg orders like strangles
@@ -525,9 +575,9 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return fmt.Errorf("API error %d: failed to read error body", resp.StatusCode)
+			return &APIError{Status: resp.StatusCode, Body: "failed to read error body"}
 		}
-		return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+		return &APIError{Status: resp.StatusCode, Body: string(body)}
 	}
 
 	decErr := json.NewDecoder(resp.Body).Decode(response)

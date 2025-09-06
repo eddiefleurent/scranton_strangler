@@ -121,6 +121,7 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 				m.logger.Printf("Order payload missing for %d", orderID)
 				continue
 			}
+
 			if orderStatus.Order.Status == "" {
 				m.logger.Printf("Order %d has empty status field, cannot determine status", orderID)
 				continue
@@ -213,8 +214,8 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		// and clear the exit order ID
 		position.ExitOrderID = ""
 		position.ExitReason = ""
-		if err := position.TransitionState(models.StateOpen, "adjustment_failed"); err != nil {
-			m.logger.Printf("Failed to revert position %s state: %v", positionID, err)
+		if err := position.TransitionState(models.StateError, "adjustment_failed"); err != nil {
+			m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
 		}
 	} else {
 		if err := position.TransitionState(models.StateError, "order_failed"); err != nil {
@@ -254,9 +255,25 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		transitionReason = "order_timeout"
 	}
 
-	if err := position.TransitionState(models.StateClosed, transitionReason); err != nil {
-		m.logger.Printf("Failed to transition position %s to closed: %v", positionID, err)
-		return
+	// For entry timeouts (from StateSubmitted), transition to StateClosed with "order_timeout"
+	// For other states, check if the transition is valid
+	currentState := position.GetCurrentState()
+	if currentState == models.StateSubmitted && !isExitOrder {
+		if err := position.TransitionState(models.StateClosed, "order_timeout"); err != nil {
+			m.logger.Printf("Failed to close position %s on entry timeout: %v", positionID, err)
+			return
+		}
+	} else {
+		// For exit timeouts, use the state-specific transition reason
+		if err := position.TransitionState(models.StateClosed, transitionReason); err != nil {
+			// If direct transition to closed fails, transition to error state
+			m.logger.Printf("Cannot transition %s from %s to closed: %v. Marking as error.",
+				positionID, currentState, err)
+			if errFallback := position.TransitionState(models.StateError, "order_timeout"); errFallback != nil {
+				m.logger.Printf("Failed to transition position %s to error: %v", positionID, errFallback)
+				return
+			}
+		}
 	}
 
 	if err := m.storage.SetCurrentPosition(position); err != nil {
