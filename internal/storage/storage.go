@@ -201,7 +201,9 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 func (s *JSONStorage) GetStatistics() *Statistics {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.data.Statistics
+	// Return a copy to prevent external mutation of internal state
+	stats := *s.data.Statistics
+	return &stats
 }
 
 func (s *JSONStorage) GetDailyPnL(date string) float64 {
@@ -213,7 +215,10 @@ func (s *JSONStorage) GetDailyPnL(date string) float64 {
 func (s *JSONStorage) GetHistory() []models.Position {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.data.History
+	// Return a copy to prevent external mutation of internal state
+	history := make([]models.Position, len(s.data.History))
+	copy(history, s.data.History)
+	return history
 }
 
 func (s *JSONStorage) AddAdjustment(adj models.Adjustment) error {
