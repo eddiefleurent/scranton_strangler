@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -71,6 +72,9 @@ const (
 
 // NewStrangleStrategy creates a new strangle strategy instance.
 func NewStrangleStrategy(b broker.Broker, config *Config, logger *log.Logger, storage storage.Interface) *StrangleStrategy {
+	if logger == nil {
+		logger = log.Default()
+	}
 	return &StrangleStrategy{
 		broker:     b,
 		config:     config,
@@ -330,7 +334,8 @@ func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, 
 		}
 	}
 
-	// Extract IV values from readings, sorted by date
+	// Extract IV values (sorted by reading.Date asc for determinism)
+	sort.Slice(readings, func(i, j int) bool { return readings[i].Date.Before(readings[j].Date) })
 	ivs := make([]float64, len(readings))
 	for i, reading := range readings {
 		ivs[i] = reading.IV

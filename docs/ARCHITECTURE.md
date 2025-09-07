@@ -498,7 +498,7 @@ type CircuitBreakerSettings struct {
 CREATE TABLE positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('idle','scanning','entering','positioned','adjusting','closing')),
+    state TEXT NOT NULL CHECK(state IN ('idle','submitted','open','closed','error','first_down','second_down','third_down','fourth_down','adjusting','rolling')),
     entry_date TIMESTAMP NOT NULL,
     put_strike REAL NOT NULL,
     call_strike REAL NOT NULL,
@@ -601,15 +601,17 @@ spy-strangle-bot/
 #### PostgreSQL Migration
 ```sql
 -- Production-ready PostgreSQL schema
-CREATE TYPE position_status AS ENUM (
-    'idle', 'scanning', 'entering', 
-    'positioned', 'adjusting', 'closing'
+CREATE TYPE position_state AS ENUM (
+    'idle', 'submitted', 'open',
+    'closed', 'error', 'first_down',
+    'second_down', 'third_down', 'fourth_down',
+    'adjusting', 'rolling'
 );
 
 CREATE TABLE positions (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     symbol VARCHAR(10) NOT NULL,
-    status position_status NOT NULL,
+    state position_state NOT NULL,
     entry_date TIMESTAMPTZ NOT NULL,
     put_strike DECIMAL(10,2) NOT NULL,
     call_strike DECIMAL(10,2) NOT NULL,
@@ -624,7 +626,7 @@ CREATE TABLE positions (
 );
 
 -- Performance indexes
-CREATE INDEX idx_positions_status ON positions(status);
+CREATE INDEX idx_positions_state ON positions(state);
 CREATE INDEX idx_positions_symbol ON positions(symbol);
 CREATE INDEX idx_positions_expiration ON positions(expiration);
 ```

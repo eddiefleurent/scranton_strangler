@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -66,6 +67,7 @@ func main() {
 	// Test 1: Get SPY Quote
 	fmt.Println("Test 1: Get SPY Quote")
 	fmt.Println("=" + strings.Repeat("=", 40))
+
 	quote, err := client.GetQuote("SPY")
 	if err != nil {
 		fmt.Printf("❌ Error: %v\n\n", err)
@@ -81,6 +83,7 @@ func main() {
 	// Test 2: Get Option Expirations
 	fmt.Println("Test 2: Get SPY Option Expirations")
 	fmt.Println("=" + strings.Repeat("=", 40))
+
 	expirations, err := client.GetExpirations("SPY")
 	if err != nil {
 		fmt.Printf("❌ Error: %v\n\n", err)
@@ -134,7 +137,11 @@ func main() {
 			fmt.Printf("Test 3: Get Option Chain for %s\n", selectedExp)
 			fmt.Println("=" + strings.Repeat("=", 40))
 
-			options, err := client.GetOptionChain("SPY", selectedExp, true) // with Greeks
+			// Create context with timeout for option chain request
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			options, err := client.GetOptionChainCtx(ctx, "SPY", selectedExp, true) // with Greeks
 			if err != nil {
 				fmt.Printf("❌ Error: %v\n\n", err)
 			} else {
@@ -190,11 +197,15 @@ func main() {
 
 						// Preview the order - get appropriate tick size
 						tickSize := 0.01 // Default fallback
+
 						if ts, err := client.GetTickSize("SPY"); err == nil {
 							tickSize = ts
+						} else {
+							fmt.Printf("  ⚠️  Tick size request failed (using default): %v\n", err)
 						}
 						px := util.FloorToTick(credit*0.95, tickSize)
 						fmt.Printf("  - Limit Price: $%.2f (95%% of mid, rounded to %.4f tick)\n", px, tickSize)
+
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,
 							1, px, // slightly below mid for better fill (rounded)
