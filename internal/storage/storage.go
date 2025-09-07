@@ -601,13 +601,13 @@ func (s *JSONStorage) StoreIVReading(reading *models.IVReading) error {
 		if existing.Symbol == reading.Symbol && existing.Date.Equal(reading.Date) {
 			// Update existing reading
 			s.data.IVReadings[i] = *reading
-			return s.Save()
+			return s.saveUnsafe()
 		}
 	}
 
 	// Add new reading
 	s.data.IVReadings = append(s.data.IVReadings, *reading)
-	return s.Save()
+	return s.saveUnsafe()
 }
 
 // GetIVReadings retrieves IV readings for a symbol within a date range
