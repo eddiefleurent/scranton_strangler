@@ -42,6 +42,8 @@ type Broker interface {
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
 		quantity int, maxDebit float64, tag string) (*OrderResponse, error)
+	CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64, expiration string,
+		quantity int, maxDebit float64, tag string) (*OrderResponse, error)
 	PlaceBuyToCloseOrder(optionSymbol string, quantity int,
 		maxPrice float64, duration string) (*OrderResponse, error)
 }
@@ -137,6 +139,13 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
+		expiration, quantity, maxDebit, "day", tag)
+}
+
+// CloseStranglePositionCtx closes an existing strangle position with a buy-to-close order with context support
+func (t *TradierClient) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64,
+	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
+	return t.PlaceStrangleBuyToCloseCtx(ctx, symbol, putStrike, callStrike,
 		expiration, quantity, maxDebit, "day", tag)
 }
 
@@ -417,6 +426,14 @@ func (c *CircuitBreakerBroker) CloseStranglePosition(symbol string, putStrike, c
 	quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
 		return b.CloseStranglePosition(symbol, putStrike, callStrike, expiration, quantity, maxDebit, tag)
+	})
+}
+
+// CloseStranglePositionCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64, expiration string,
+	quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
+		return b.CloseStranglePositionCtx(ctx, symbol, putStrike, callStrike, expiration, quantity, maxDebit, tag)
 	})
 }
 

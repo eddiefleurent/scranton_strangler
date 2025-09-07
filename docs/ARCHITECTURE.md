@@ -720,7 +720,7 @@ strategy:
 risk:
   max_contracts: 2
   max_daily_loss: 1000
-  max_position_loss: 2.0  # 250% of credit
+  max_position_loss: 2.5  # 250% of credit
   
 schedule:
   market_check_interval: "15m"

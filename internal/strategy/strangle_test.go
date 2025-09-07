@@ -541,6 +541,18 @@ func (m *mockBroker) CloseStranglePosition(
 	return nil, nil
 }
 
+func (m *mockBroker) CloseStranglePositionCtx(
+	_ context.Context,
+	_ string,
+	_, _ float64,
+	_ string,
+	_ int,
+	_ float64,
+	_ string,
+) (*broker.OrderResponse, error) {
+	return nil, nil
+}
+
 func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{
 		Order: struct {

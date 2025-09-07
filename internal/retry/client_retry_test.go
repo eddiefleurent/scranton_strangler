@@ -121,6 +121,34 @@ func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike 
 	return f.successResponse(), nil
 }
 
+func (f *fakeBroker) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64, expiration string, qty int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
+	callNum := atomic.AddInt32(&f.callCount, 1)
+
+	// If configured to succeed after N attempts, return transient errors until then.
+	if f.successAfterN > 0 {
+		if int(callNum) < f.successAfterN {
+			if f.errTransient != nil {
+				return nil, f.errTransient
+			}
+			return nil, errors.New("timeout") // default transient
+		}
+		return f.successResponse(), nil
+	}
+
+	// If permanent error requested, return it
+	if f.errPermanent != nil {
+		return nil, f.errPermanent
+	}
+
+	// If transient error is set, always return it (for timeout testing)
+	if f.errTransient != nil {
+		return nil, f.errTransient
+	}
+
+	// Otherwise return success
+	return f.successResponse(), nil
+}
+
 func (f *fakeBroker) successResponse() *broker.OrderResponse {
 	if f.resp != nil {
 		return f.resp

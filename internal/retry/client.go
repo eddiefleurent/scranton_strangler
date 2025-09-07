@@ -62,6 +62,9 @@ func NewClient(broker broker.Broker, logger *log.Logger, config ...Config) *Clie
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultConfig.Timeout
 	}
+	if cfg.MaxBackoff < cfg.InitialBackoff {
+		cfg.MaxBackoff = cfg.InitialBackoff
+	}
 
 	return &Client{
 		broker: broker,
@@ -85,6 +88,13 @@ func (c *Client) ClosePositionWithRetry(
 	closeCtx, cancel := context.WithTimeout(ctx, c.config.Timeout)
 	defer cancel()
 
+	// Generate a stable client-order ID for deduplication across retry attempts
+	// Format: close-{positionID}-{expiration}-{timestamp}
+	clientOrderID := fmt.Sprintf("close-%s-%s-%d",
+		position.ID,
+		position.Expiration.Format("20060102"),
+		time.Now().Unix())
+
 	var lastErr error
 	backoff := c.config.InitialBackoff
 
@@ -101,14 +111,15 @@ func (c *Client) ClosePositionWithRetry(
 
 		c.logger.Printf("Close attempt %d/%d for position %s", attempt+1, c.config.MaxRetries+1, position.ID)
 
-		closeOrder, err := c.broker.CloseStranglePosition(
+		closeOrder, err := c.broker.CloseStranglePositionCtx(
+			closeCtx,
 			position.Symbol,
 			position.PutStrike,
 			position.CallStrike,
 			position.Expiration.Format("2006-01-02"),
 			position.Quantity,
 			maxDebit,
-			"close",
+			clientOrderID,
 		)
 
 		if err == nil {
@@ -148,7 +159,7 @@ func (c *Client) calculateNextBackoff(currentBackoff time.Duration) time.Duratio
 	if maxJitter > 0 {
 		jitterVal, err := rand.Int(rand.Reader, big.NewInt(maxJitter))
 		if err != nil {
-			log.Printf("Failed to generate jitter: %v", err)
+			c.logger.Printf("Failed to generate jitter: %v", err)
 		} else {
 			jitter := time.Duration(jitterVal.Int64())
 			backoff += jitter
@@ -167,9 +178,11 @@ func (c *Client) isTransientError(err error) bool {
 
 	transientPatterns := []string{
 		"timeout",
+		"i/o timeout",
 		"connection refused",
 		"connection reset",
 		"temporary failure",
+		"temporarily unavailable",
 		"server error",
 		"rate limit",
 		"429", // HTTP 429 Too Many Requests
@@ -182,6 +195,8 @@ func (c *Client) isTransientError(err error) bool {
 		"no such host",
 		"deadline exceeded",
 		"tls handshake",
+		"broken pipe",
+		"eof",
 	}
 
 	for _, pattern := range transientPatterns {

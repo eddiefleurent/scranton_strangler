@@ -11,8 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
-	"github.com/google/uuid"
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
@@ -21,6 +21,7 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 	"github.com/eddiefleurent/scranton_strangler/internal/util"
+	"github.com/google/uuid"
 )
 
 // Bot represents the main trading bot instance.
@@ -341,16 +342,24 @@ func (b *Bot) executeEntry() {
 	px := util.FloorToTick(order.Credit, tickSize)
 	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
 
+	// Generate stable client-order ID for potential deduplication
+	clientOrderID := fmt.Sprintf("entry-%s-%s-%s-%d-%d",
+		order.Symbol,
+		order.Expiration,
+		fmt.Sprintf("%.2f-%.2f", order.PutStrike, order.CallStrike),
+		order.Quantity,
+		time.Now().Unix())
+
 	placedOrder, err := b.broker.PlaceStrangleOrder(
 		order.Symbol,
 		order.PutStrike,
 		order.CallStrike,
 		order.Expiration,
 		order.Quantity,
-		px,      // limit price (rounded to tick)
-		false,   // not preview
-		"day",   // duration
-		"entry", // tag
+		px,            // limit price (rounded to tick)
+		false,         // not preview
+		"day",         // duration
+		clientOrderID, // stable client-order ID for deduplication
 	)
 
 	if err != nil {

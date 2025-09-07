@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"time"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
+	"strings"
+	"time"
 )
 
 func main() {
@@ -35,12 +36,14 @@ func main() {
 
 	fmt.Printf("JSON representation:\n%s\n", string(jsonData))
 
-	// Check if StateMachine appears in JSON (it shouldn't)
-	if string(jsonData) != "" {
-		if !json.Valid(jsonData) {
-			fmt.Println("JSON is not valid!")
-			return
-		}
+	// Validate JSON and ensure StateMachine is omitted
+	if !json.Valid(jsonData) {
+		fmt.Println("JSON is not valid!")
+		return
+	}
+	if strings.Contains(string(jsonData), "StateMachine") {
+		fmt.Println("StateMachine leaked into JSON!")
+		return
 	}
 
 	// Deserialize from JSON

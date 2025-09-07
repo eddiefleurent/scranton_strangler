@@ -121,6 +121,11 @@ func TestSaveAndLoad_RoundTrip_WithPermissionsAndAtomicity(t *testing.T) {
 		t.Fatalf("SetCurrentPosition: %v", err)
 	}
 
+	// Explicitly persist to disk and verify Save succeeded
+	if err := s.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
 	// Verify file exists and permissions are 0600-ish (on Windows, perms are not POSIX)
 	st, err := os.Stat(path)
 	if err != nil {

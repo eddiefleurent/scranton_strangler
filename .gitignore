@@ -67,3 +67,5 @@ coverage.html
 gosec-results.sarif
 /test_tradier
 /test_tag
+/test_helper
+/test_otoco

@@ -41,6 +41,10 @@ func (m *MockStorage) GetCurrentPosition() *models.Position {
 
 // SetCurrentPosition updates the mock current position.
 func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
+	if pos == nil {
+		m.currentPosition = nil
+		return nil
+	}
 	cloned := clonePosition(pos)
 	// For mock storage, don't carry over runtime StateMachine
 	cloned.StateMachine = nil
@@ -97,7 +101,15 @@ func (m *MockStorage) Load() error {
 
 // GetHistory returns the mock historical position data.
 func (m *MockStorage) GetHistory() []models.Position {
-	return append([]models.Position(nil), m.history...)
+	out := make([]models.Position, len(m.history))
+	for i := range m.history {
+		if cp := clonePosition(&m.history[i]); cp != nil {
+			out[i] = *cp
+		} else {
+			out[i] = m.history[i]
+		}
+	}
+	return out
 }
 
 // HasInHistory checks if a position with the given ID exists in the mock history.
@@ -146,6 +158,10 @@ func (m *MockStorage) GetLoadCallCount() int {
 
 // AddHistoryPosition adds a position to the mock history.
 func (m *MockStorage) AddHistoryPosition(pos models.Position) {
+	if cp := clonePosition(&pos); cp != nil {
+		m.history = append(m.history, *cp)
+		return
+	}
 	m.history = append(m.history, pos)
 }
 

@@ -561,6 +561,108 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	return &response, nil
 }
 
+// placeStrangleOrderInternalCtx is the context-aware version of placeStrangleOrderInternal
+func (t *TradierAPI) placeStrangleOrderInternalCtx(
+	ctx context.Context,
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	limitPrice float64,
+	preview bool,
+	buyToClose bool,
+	duration string,
+	tag string,
+) (*OrderResponse, error) {
+	// Validate duration (should be normalized by caller)
+	switch duration {
+	case "day", "gtc":
+		// Valid duration
+	default:
+		return nil, fmt.Errorf("invalid duration '%s': must be one of 'day' or 'gtc'", duration)
+	}
+
+	// Validate price for credit/debit orders
+	if limitPrice <= 0 {
+		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
+			map[bool]string{true: "debit", false: "credit"}[buyToClose], limitPrice)
+	}
+
+	// Validate quantity for orders
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid quantity for %s order: %d, quantity must be greater than zero",
+			map[bool]string{true: "debit", false: "credit"}[buyToClose], quantity)
+	}
+
+	// Validate strikes - put strike must be less than call strike
+	if putStrike >= callStrike {
+		return nil, fmt.Errorf(
+			"invalid strikes for strangle: put strike (%.2f) must be less than call strike (%.2f)",
+			putStrike, callStrike,
+		)
+	}
+
+	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
+	expDate, err := time.Parse("2006-01-02", expiration)
+	if err != nil {
+		return nil, fmt.Errorf("invalid expiration format: %w", err)
+	}
+	expFormatted := expDate.Format("060102")
+
+	// Build option symbols: SYMBOL + YYMMDD + P/C + 8-digit strike
+	// Use rounded 1/1000th dollars to build OCC strike field
+	// Note: Rounding to 1/1000 and %08d is standard OCC format, but edge cases like
+	// strikes ending in .995 (e.g., 394.995) may round to unexpected values.
+	putStrikeInt := int(putStrike*1000 + 0.5)
+	callStrikeInt := int(callStrike*1000 + 0.5)
+
+	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, putStrikeInt)
+	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, callStrikeInt)
+
+	params := url.Values{}
+	params.Add("class", "multileg")
+	params.Add("symbol", symbol)
+	params.Add("duration", duration)
+
+	var orderType, side string
+	if buyToClose {
+		orderType = "debit"
+		side = "buy_to_close"
+	} else {
+		orderType = "credit"
+		side = "sell_to_open"
+	}
+	params.Add("type", orderType)
+
+	if preview {
+		params.Add("preview", "true")
+	}
+
+	// Add idempotency tag if provided
+	if tag != "" {
+		params.Add("tag", tag)
+	}
+
+	// Leg 0: Put option
+	params.Add("option_symbol[0]", putSymbol)
+	params.Add("side[0]", side)
+	params.Add("quantity[0]", fmt.Sprintf("%d", quantity))
+
+	// Leg 1: Call option
+	params.Add("option_symbol[1]", callSymbol)
+	params.Add("side[1]", side)
+	params.Add("quantity[1]", fmt.Sprintf("%d", quantity))
+
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+
+	var response OrderResponse
+	if err := t.makeRequestCtx(ctx, "POST", endpoint, params, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
 // PlaceStrangleBuyToClose places a buy-to-close order for a strangle position
 func (t *TradierAPI) PlaceStrangleBuyToClose(
 	symbol string,
@@ -576,6 +678,24 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 		return nil, err
 	}
 	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, nd, tag)
+}
+
+// PlaceStrangleBuyToCloseCtx places a buy-to-close order for a strangle position with context support
+func (t *TradierAPI) PlaceStrangleBuyToCloseCtx(
+	ctx context.Context,
+	symbol string,
+	putStrike, callStrike float64,
+	expiration string,
+	quantity int,
+	maxDebit float64,
+	duration string,
+	tag string,
+) (*OrderResponse, error) {
+	nd, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
+	}
+	return t.placeStrangleOrderInternalCtx(ctx, symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, nd, tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order by ID
@@ -786,6 +906,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 // CalculateStrangleCredit calculates expected credit from put and call
 func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (float64, error) {
 	var putCredit, callCredit float64
+	var putFound, callFound bool
 
 	for _, opt := range options {
 		putDiff := math.Abs(opt.Strike - putStrike)
@@ -793,16 +914,18 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (f
 		if putDiff <= StrikeMatchEpsilon && opt.OptionType == "put" {
 			// Use mid price between bid and ask
 			putCredit = (opt.Bid + opt.Ask) / 2
+			putFound = true
 		}
 		if callDiff <= StrikeMatchEpsilon && opt.OptionType == "call" {
 			// Use mid price between bid and ask
 			callCredit = (opt.Bid + opt.Ask) / 2
+			callFound = true
 		}
 	}
 
-	if putCredit == 0 || callCredit == 0 {
-		return 0, fmt.Errorf("missing strikes: putCredit=%.2f callCredit=%.2f for strikes put=%.2f call=%.2f",
-			putCredit, callCredit, putStrike, callStrike)
+	if !putFound || !callFound {
+		return 0, fmt.Errorf("missing strikes: putFound=%t callFound=%t for strikes put=%.2f call=%.2f",
+			putFound, callFound, putStrike, callStrike)
 	}
 
 	return putCredit + callCredit, nil

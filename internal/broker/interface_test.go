@@ -853,6 +853,17 @@ func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
 	return resp, nil
 }
 
+func (m *MockBroker) CloseStranglePositionCtx(_ context.Context, _ string, _, _ float64, _ string,
+	_ int, _ float64, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 123
+	return resp, nil
+}
+
 func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
 	_ float64, _ string) (*OrderResponse, error) {
 	m.callCount++

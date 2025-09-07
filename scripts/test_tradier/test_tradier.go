@@ -331,7 +331,6 @@ func maskAPIKey(apiKey string) string {
 	return fmt.Sprintf("%s...%s", apiKey[:showFirst], apiKey[len(apiKey)-showLast:])
 }
 
-
 func absInt(x int) int {
 	if x < 0 {
 		return -x

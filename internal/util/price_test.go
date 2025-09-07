@@ -5,7 +5,12 @@ import (
 	"testing"
 )
 
+const tol = 1e-10
+
+func almostEq(a, b float64) bool { return math.Abs(a-b) <= tol }
+
 func TestRoundToTick(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		x        float64
@@ -48,12 +53,18 @@ func TestRoundToTick(t *testing.T) {
 			tick:     0.05,
 			expected: 1.25,
 		},
+		{
+			name:     "tick larger than magnitude",
+			x:        0.004,
+			tick:     0.01,
+			expected: 0.00,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := RoundToTick(tt.x, tt.tick)
-			if math.Abs(result-tt.expected) > 1e-10 {
+			if !almostEq(result, tt.expected) {
 				t.Errorf("RoundToTick(%v, %v) = %v, expected %v", tt.x, tt.tick, result, tt.expected)
 			}
 		})
@@ -61,6 +72,7 @@ func TestRoundToTick(t *testing.T) {
 }
 
 func TestFloorToTick(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		x        float64
@@ -103,12 +115,24 @@ func TestFloorToTick(t *testing.T) {
 			tick:     0.05,
 			expected: -1.25,
 		},
+		{
+			name:     "negative boundary - just above",
+			x:        -1.2500000000001,
+			tick:     0.05,
+			expected: -1.30,
+		},
+		{
+			name:     "negative tick uses absolute value",
+			x:        1.237,
+			tick:     -0.01,
+			expected: 1.23,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := FloorToTick(tt.x, tt.tick)
-			if math.Abs(result-tt.expected) > 1e-10 {
+			if !almostEq(result, tt.expected) {
 				t.Errorf("FloorToTick(%v, %v) = %v, expected %v", tt.x, tt.tick, result, tt.expected)
 			}
 		})
@@ -116,6 +140,7 @@ func TestFloorToTick(t *testing.T) {
 }
 
 func TestCeilToTick(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		x        float64
@@ -158,12 +183,24 @@ func TestCeilToTick(t *testing.T) {
 			tick:     0.05,
 			expected: -1.25,
 		},
+		{
+			name:     "negative boundary - just below",
+			x:        -1.2999999999999,
+			tick:     0.05,
+			expected: -1.25,
+		},
+		{
+			name:     "negative tick uses absolute value",
+			x:        -1.231,
+			tick:     -0.01,
+			expected: -1.23,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := CeilToTick(tt.x, tt.tick)
-			if math.Abs(result-tt.expected) > 1e-10 {
+			if !almostEq(result, tt.expected) {
 				t.Errorf("CeilToTick(%v, %v) = %v, expected %v", tt.x, tt.tick, result, tt.expected)
 			}
 		})
@@ -207,13 +244,38 @@ func TestTickRoundingEdgeCases(t *testing.T) {
 		if result := RoundToTick(negInf, 0.01); result != negInf {
 			t.Errorf("RoundToTick(-Inf, 0.01) = %v, expected -Inf", result)
 		}
+		if result := FloorToTick(posInf, 0.01); result != posInf {
+			t.Errorf("FloorToTick(+Inf, 0.01) = %v, expected +Inf", result)
+		}
+		if result := FloorToTick(negInf, 0.01); result != negInf {
+			t.Errorf("FloorToTick(-Inf, 0.01) = %v, expected -Inf", result)
+		}
+		if result := CeilToTick(posInf, 0.01); result != posInf {
+			t.Errorf("CeilToTick(+Inf, 0.01) = %v, expected +Inf", result)
+		}
+		if result := CeilToTick(negInf, 0.01); result != negInf {
+			t.Errorf("CeilToTick(-Inf, 0.01) = %v, expected -Inf", result)
+		}
 	})
 
 	t.Run("negative tick uses absolute value", func(t *testing.T) {
 		result := RoundToTick(1.235, -0.01)
 		expected := 1.24
-		if math.Abs(result-expected) > 1e-10 {
+		if !almostEq(result, expected) {
 			t.Errorf("RoundToTick(1.235, -0.01) = %v, expected %v", result, expected)
+		}
+	})
+
+	t.Run("NaN tick yields NaN", func(t *testing.T) {
+		nan := math.NaN()
+		if result := RoundToTick(1.23, nan); !math.IsNaN(result) {
+			t.Errorf("RoundToTick(1.23, NaN) = %v, expected NaN", result)
+		}
+		if result := FloorToTick(1.23, nan); !math.IsNaN(result) {
+			t.Errorf("FloorToTick(1.23, NaN) = %v, expected NaN", result)
+		}
+		if result := CeilToTick(1.23, nan); !math.IsNaN(result) {
+			t.Errorf("CeilToTick(1.23, NaN) = %v, expected NaN", result)
 		}
 	})
 }

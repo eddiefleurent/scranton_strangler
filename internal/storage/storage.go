@@ -3,6 +3,7 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -163,7 +164,7 @@ func (s *JSONStorage) saveUnsafe() error {
 	// Try atomic rename first
 	if err := os.Rename(tmpFile, s.filepath); err != nil {
 		// Check if it's an EXDEV error (cross-device link)
-		if linkErr, ok := err.(*os.LinkError); ok && linkErr.Err == syscall.EXDEV {
+		if linkErr, ok := err.(*os.LinkError); ok && errors.Is(linkErr.Err, syscall.EXDEV) {
 			// Handle EXDEV by copying the temp file to destination
 			if copyErr := s.copyFile(tmpFile, s.filepath); copyErr != nil {
 				return fmt.Errorf("failed to copy temp file: %w", copyErr)
@@ -603,7 +604,10 @@ func (s *JSONStorage) StoreIVReading(reading *models.IVReading) error {
 
 	// Check if reading already exists for this symbol and date
 	for i, existing := range s.data.IVReadings {
-		if existing.Symbol == reading.Symbol && existing.Date.Equal(reading.Date) {
+		sameDay := existing.Date.UTC().Truncate(24 * time.Hour).Equal(
+			reading.Date.UTC().Truncate(24 * time.Hour),
+		)
+		if existing.Symbol == reading.Symbol && sameDay {
 			// Update existing reading
 			s.data.IVReadings[i] = *reading
 			return s.saveUnsafe()

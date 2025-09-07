@@ -15,8 +15,8 @@ type IVReading struct {
 
 // Position represents a short strangle trading position with state management.
 type Position struct {
-	StateMachine   *StateMachine `json:"-"`             // Runtime only, excluded from JSON
-	State          PositionState `json:"state"`         // Canonical persisted state
+	StateMachine   *StateMachine `json:"-"`     // Runtime only, excluded from JSON
+	State          PositionState `json:"state"` // Canonical persisted state
 	Adjustments    []Adjustment  `json:"adjustments"`
 	ID             string        `json:"id"`
 	Symbol         string        `json:"symbol"`
@@ -85,7 +85,8 @@ func (p *Position) GetTotalCredit() float64 {
 	return p.GetNetCredit()
 }
 
-// ProfitPercent returns the profit/loss as a percentage (0-100), not a ratio
+// ProfitPercent returns P/L as a percentage of initial credit.
+// May be negative (loss) and can exceed 100% with adjustments.
 func (p *Position) ProfitPercent() float64 {
 	totalCredit := p.GetNetCredit() * float64(p.Quantity) * 100
 	if totalCredit == 0 {
@@ -105,7 +106,7 @@ func NewPosition(id, symbol string, putStrike, callStrike float64, expiration ti
 		Quantity:     quantity,
 		Adjustments:  make([]Adjustment, 0),
 		StateMachine: NewStateMachine(),
-		State:        StateIdle, // Initialize with canonical persisted state
+		State:        StateIdle,   // Initialize with canonical persisted state
 		ExitDate:     time.Time{}, // Initialize as zero time
 	}
 }
@@ -216,6 +217,10 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for active positions (current: %.2f)",
 				p.ID, currentState, p.CreditReceived)
 		}
+		if p.Quantity <= 0 {
+			return fmt.Errorf("position %s in state %s: Quantity must be > 0 for active positions (current: %d)",
+				p.ID, currentState, p.Quantity)
+		}
 	case StateClosed:
 		// Closed position invariants: must have complete lifecycle data
 		if p.EntryDate.IsZero() {
@@ -229,6 +234,10 @@ func (p *Position) ValidateState() error {
 		if p.CreditReceived <= 0 {
 			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for closed positions (current: %.2f)",
 				p.ID, currentState, p.CreditReceived)
+		}
+		if p.Quantity <= 0 {
+			return fmt.Errorf("position %s in state %s: Quantity must be > 0 for closed positions (current: %d)",
+				p.ID, currentState, p.Quantity)
 		}
 		// Validate temporal ordering: EntryDate must be before ExitDate
 		if !p.EntryDate.Before(p.ExitDate) {

@@ -13,6 +13,8 @@ type PositionState string
 type FourthDownOption string
 
 const (
+	// OptionNone indicates no Fourth Down option has been selected
+	OptionNone FourthDownOption = ""
 	// OptionA represents aggressive adjustment strategy
 	OptionA FourthDownOption = "option_a"
 	// OptionB represents conservative adjustment strategy
@@ -186,16 +188,9 @@ func (sm *StateMachine) IsValidTransition(to PositionState, condition string) er
 func (sm *StateMachine) isTransitionDefined(to PositionState, condition string) bool {
 	if fromMap, exists := transitionLookup[sm.currentState]; exists {
 		if toMap, exists := fromMap[to]; exists {
-			// Check if condition exists in the map (handles empty condition case)
-			if _, exists := toMap[condition]; exists {
-				return true
-			}
-			// Also check for empty condition if provided condition is not found
-			if condition != "" {
-				if _, exists := toMap[""]; exists {
-					return true
-				}
-			}
+			// Check if condition exists in the map
+			_, exists := toMap[condition]
+			return exists
 		}
 	}
 	return false
@@ -244,7 +239,7 @@ func (sm *StateMachine) Reset() {
 	sm.previousState = StateIdle
 	sm.transitionTime = time.Now().UTC()
 	sm.transitionCount = make(map[PositionState]int)
-	sm.fourthDownOption = ""
+	sm.fourthDownOption = OptionNone // No option selected
 	sm.fourthDownStartTime = time.Time{}
 	sm.puntCount = 0
 }
