@@ -41,7 +41,7 @@ test-coverage:
 	@echo "Coverage report generated: coverage.html"
 
 # Run linter
-lint:
+lint: tools
 	@echo "Running linter..."
 	golangci-lint run
 	go vet ./...
@@ -105,7 +105,7 @@ build-test-helper:
 	go build -tags test -o $(BIN_DIR)/test_helper scripts/test_helper/test_helper.go
 
 # Security scan
-security-scan:
+security-scan: tools
 	@echo "Running security scan..."
 	gosec ./...
 	govulncheck ./...
@@ -115,3 +115,4 @@ tools:
 	@echo "Installing security tools..."
 	@go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@go install golang.org/x/vuln/cmd/govulncheck@latest
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest

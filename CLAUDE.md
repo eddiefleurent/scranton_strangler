@@ -34,6 +34,7 @@ make logs             # Show container logs
 make stop             # Stop all containers
 
 # Development setup
+> **SECURITY WARNING**: Add config.yaml to .gitignore and NEVER commit it. Populate secrets from environment variables or CI secrets using `envsubst < config.yaml.template > config.yaml` or similar secure injection methods.
 make dev-setup        # Create config.yaml from example
 
 # Cleanup
@@ -187,10 +188,15 @@ go run test_tradier.go --sandbox=false   # Use production (careful!)
 - ✅ Configuration management
 - ✅ Basic strategy logic structure
 
+**Recently completed in this PR**:
+- ✅ IVR calculation implementation
+- ✅ Complete option chain processing
+- ✅ Order execution via Tradier API
+
 **In Progress**:
-- 🔧 IVR calculation implementation
-- 🔧 Complete option chain processing
-- 🔧 Order execution via Tradier API
+- 🔧 Advanced adjustment logic ("Football System")
+- 🔧 Production hardening and monitoring
+- 🔧 Multi-asset portfolio support
 
 ## CI/CD Pipeline
 

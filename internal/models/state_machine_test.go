@@ -790,6 +790,13 @@ func TestPosition_ProfitPercent(t *testing.T) {
 			currentPnL:     100,
 			expectedPct:    0,
 		},
+		{
+			name:           "Negative credit received (debit spread)",
+			quantity:       1,
+			creditReceived: -2.50, // Debit of $2.50
+			currentPnL:     125.0, // Profit of $125
+			expectedPct:    50.0,  // 125 / |(-2.50 * 1 * 100)| * 100 = 125 / 250 * 100 = 50%
+		},
 	}
 
 	for _, tc := range testCases {

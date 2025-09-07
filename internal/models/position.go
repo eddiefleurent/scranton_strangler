@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 )
@@ -89,11 +90,11 @@ func (p *Position) GetTotalCredit() float64 {
 // ProfitPercent returns P/L as a percentage of initial credit.
 // May be negative (loss) and can exceed 100% with adjustments.
 func (p *Position) ProfitPercent() float64 {
-	totalCredit := p.GetNetCredit() * float64(p.Quantity) * 100
-	if totalCredit == 0 {
+	denom := math.Abs(p.GetNetCredit() * float64(p.Quantity) * 100)
+	if denom == 0 {
 		return 0
 	}
-	return (p.CurrentPnL / totalCredit) * 100
+	return (p.CurrentPnL / denom) * 100
 }
 
 // NewPosition creates a new position with initialized state machine
@@ -192,6 +193,14 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s in state %s: EntryDate must be zero for idle positions (current: %v)",
 				p.ID, currentState, p.EntryDate)
 		}
+		if !p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
+				p.ID, currentState, p.ExitDate)
+		}
+		if strings.TrimSpace(p.ExitReason) != "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be empty for non-closed positions (current: %s)",
+				p.ID, currentState, p.ExitReason)
+		}
 		if p.CreditReceived != 0 {
 			return fmt.Errorf("position %s in state %s: CreditReceived must be zero for idle positions (current: %.2f)",
 				p.ID, currentState, p.CreditReceived)
@@ -205,6 +214,14 @@ func (p *Position) ValidateState() error {
 		if p.EntryDate.IsZero() {
 			return fmt.Errorf("position %s in state %s: EntryDate must be set for active positions",
 				p.ID, currentState)
+		}
+		if !p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
+				p.ID, currentState, p.ExitDate)
+		}
+		if strings.TrimSpace(p.ExitReason) != "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be empty for non-closed positions (current: %s)",
+				p.ID, currentState, p.ExitReason)
 		}
 		if p.CreditReceived <= 0 {
 			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for active positions (current: %.2f)",
