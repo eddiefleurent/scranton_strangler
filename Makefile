@@ -2,18 +2,13 @@
 
 .PHONY: all help build build-prod test test-coverage lint run clean \
         docker-build docker-run deploy-staging deploy-prod logs stop \
-        dev-setup test-api security-scan build-test-helper
+        dev-setup test-api security-scan build-test-helper tools
 
 all: build
 
 # Default target
 help:
-	@echo "Targets:"
-	@echo "  build/test/lint/run/clean"
-	@echo "  docker-build/docker-run/logs/stop"
-	@echo "  deploy-staging/deploy-prod"
-	@echo "  test-coverage/security-scan/build-test-helper"
-	@echo "  dev-setup"
+	@printf "Targets:\n  build/test/lint/run/clean\n  docker-build/docker-run/logs/stop\n  deploy-staging/deploy-prod\n  test-coverage/security-scan/build-test-helper\n  dev-setup\n"
 
 # Go binary name and paths
 BINARY_NAME=strangle-bot
@@ -30,7 +25,7 @@ build:
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
 	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o $(BIN_DIR)/$(BINARY_NAME) cmd/bot/main.go
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BIN_DIR)/$(BINARY_NAME) cmd/bot/main.go
 
 # Run tests
 test:
@@ -42,12 +37,14 @@ test-coverage:
 	@echo "Running tests with coverage..."
 	go test -race -covermode=atomic -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
+	go tool cover -func=coverage.out | tail -n1
 	@echo "Coverage report generated: coverage.html"
 
 # Run linter
 lint:
 	@echo "Running linter..."
 	golangci-lint run
+	go vet ./...
 
 # Run the bot locally
 run: build
@@ -112,3 +109,9 @@ security-scan:
 	@echo "Running security scan..."
 	gosec ./...
 	govulncheck ./...
+
+# Install security tools
+tools:
+	@echo "Installing security tools..."
+	@go install github.com/securego/gosec/v2/cmd/gosec@latest
+	@go install golang.org/x/vuln/cmd/govulncheck@latest

@@ -16,6 +16,14 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
+// Transition condition constants to avoid stringly-typed conditions
+const (
+	ConditionPositionClosed = "position_closed"
+	ConditionExitConditions = "exit_conditions"
+	ConditionForceClose     = "force_close"
+	ConditionHardStop       = "hard_stop"
+)
+
 // JSONStorage implements Interface using JSON file persistence
 type JSONStorage struct {
 	data     *Data
@@ -407,17 +415,17 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	currentState := s.data.CurrentPosition.GetCurrentState()
 	switch currentState {
 	case models.StateOpen:
-		condition = "position_closed"
+		condition = ConditionPositionClosed
 	case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
-		condition = "exit_conditions"
+		condition = ConditionExitConditions
 	case models.StateError:
-		condition = "force_close"
+		condition = ConditionForceClose
 	case models.StateAdjusting:
-		condition = "hard_stop"
+		condition = ConditionHardStop
 	case models.StateRolling:
-		condition = "force_close"
+		condition = ConditionForceClose
 	default:
-		condition = "exit_conditions" // fallback
+		condition = ConditionExitConditions // fallback
 	}
 
 	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, condition); err != nil {
@@ -653,10 +661,17 @@ func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 	var latestTime time.Time
 
 	for _, reading := range s.data.IVReadings {
-		if reading.Symbol == symbol && reading.Timestamp.After(latestTime) {
+		if reading.Symbol != symbol {
+			continue
+		}
+		t := reading.Timestamp
+		if t.IsZero() {
+			t = reading.Date
+		}
+		if t.After(latestTime) {
 			readingCopy := reading // Create a copy
 			latest = &readingCopy
-			latestTime = reading.Timestamp
+			latestTime = t
 		}
 	}
 

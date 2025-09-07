@@ -8,42 +8,61 @@ SPY Short Strangle Trading Bot - An automated options trading system implementin
 
 ## Build and Development Commands
 
+The project includes a comprehensive Makefile for common development tasks:
+
 ```bash
 # Build the bot
-go build -o strangle-bot cmd/bot/main.go
+make build              # Standard build
+make build-prod        # Production build (optimized)
 
 # Run the bot
-./strangle-bot --config=config.yaml
+make run               # Build and run with config.yaml
 
-# Test Tradier API connection
+# Testing
+make test              # Run all tests
+make test-coverage     # Run tests with coverage report
+make test-api          # Test Tradier API connection
+
+# Code quality
+make lint              # Run golangci-lint
+make security-scan     # Run security scans (gosec, govulncheck)
+
+# Docker operations
+make docker-build      # Build Docker image
+make docker-run        # Run with Docker Compose
+make logs             # Show container logs
+make stop             # Stop all containers
+
+# Development setup
+make dev-setup        # Create config.yaml from example
+
+# Cleanup
+make clean            # Remove build artifacts
+
+# Help
+make help             # Show all available targets
+```
+
+### Direct Go Commands (when needed)
+
+```bash
+# Dependency management
+go mod download       # Download dependencies
+go mod tidy          # Clean up module dependencies
+go mod verify        # Verify dependencies
+
+# Testing specific packages
+go test ./internal/models -v      # State machine tests
+go test ./internal/strategy -v    # Strategy logic tests  
+go test ./internal/storage -v     # Storage interface tests
+go test ./internal/broker -v      # Broker interface tests
+
+# Formatting
+go fmt ./...         # Format all Go files
+
+# Environment setup for API testing
 export TRADIER_API_KEY='your_sandbox_token_here'
 export TRADIER_ACCOUNT_ID='your_account_id_here'
-cd scripts/test_tradier
-go run test_tradier.go
-
-# Run all tests
-go test ./...
-
-# Run specific package tests with verbose output
-go test ./internal/models -v
-go test ./internal/strategy -v
-go test ./internal/storage -v
-go test ./internal/broker -v
-
-# Run tests with coverage
-go test ./... -cover
-
-# Run CI pipeline locally
-go mod download
-go mod verify
-go vet ./...
-go test -race -covermode=atomic -coverprofile=coverage.out ./...
-go build -o strangle-bot cmd/bot/main.go
-./strangle-bot --help
-
-# Run linting (local development only)
-go vet ./...
-go fmt ./...
 ```
 
 ## Architecture Overview
@@ -141,12 +160,11 @@ go test ./internal/broker -v      # Broker interface tests
 
 ### Integration Tests
 ```bash
-# Test API connectivity
-export TRADIER_API_KEY='your_sandbox_token'
-export TRADIER_ACCOUNT_ID='your_account_id'
-cd scripts/test_tradier && go run test_tradier.go
+# Test API connectivity (after setting environment variables)
+make test-api
 
-# Test with specific flags
+# Or run directly with flags
+cd scripts/test_tradier
 go run test_tradier.go --sandbox=true    # Use sandbox (default)
 go run test_tradier.go --sandbox=false   # Use production (careful!)
 ```
@@ -251,6 +269,7 @@ When running CI checks, watch for these common issues:
 ### Local Development Setup
 1. Clone the repository
 2. Run `go mod download` to fetch dependencies
-3. Copy `config.yaml` and update with your Tradier credentials
-4. Test connection: `cd scripts/test_tradier && go run test_tradier.go`
-5. Run tests: `go test ./...`
+3. Run `make dev-setup` to create config.yaml from example
+4. Update config.yaml with your Tradier credentials
+5. Test connection: `make test-api`
+6. Run tests: `make test`

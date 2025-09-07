@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -154,13 +156,30 @@ func (b *Bot) Run(ctx context.Context) error {
 	b.ctx = ctx // Store context for use in operations
 	b.logger.Println("Bot starting main loop...")
 
-	// Verify broker connection
+	// Verify broker connection with timeout
 	b.logger.Println("Verifying broker connection...")
-	balance, err := b.broker.GetAccountBalance()
-	if err != nil {
+	balanceChan := make(chan float64, 1)
+	errChan := make(chan error, 1)
+
+	go func() {
+		balance, err := b.broker.GetAccountBalance()
+		if err != nil {
+			errChan <- err
+		} else {
+			balanceChan <- balance
+		}
+	}()
+
+	select {
+	case balance := <-balanceChan:
+		b.logger.Printf("Connected to broker. Account balance: $%.2f", balance)
+	case err := <-errChan:
 		return fmt.Errorf("failed to connect to broker: %w", err)
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("broker health check timed out after 10 seconds")
+	case <-ctx.Done():
+		return fmt.Errorf("broker health check cancelled: %w", ctx.Err())
 	}
-	b.logger.Printf("Connected to broker. Account balance: $%.2f", balance)
 
 	// Main trading loop
 	ticker := time.NewTicker(b.config.GetCheckInterval())
@@ -204,7 +223,7 @@ func (b *Bot) runTradingCycle() {
 	b.logger.Println("Starting trading cycle...")
 
 	// Check for existing position
-	hasPosition := b.checkExistingPosition()
+	hasPosition := b.checkExistingPosition(now)
 
 	if hasPosition {
 		// Check exit conditions
@@ -241,7 +260,7 @@ func (b *Bot) runTradingCycle() {
 	b.logger.Println("Trading cycle complete")
 }
 
-func (b *Bot) checkExistingPosition() bool {
+func (b *Bot) checkExistingPosition(now time.Time) bool {
 	position := b.storage.GetCurrentPosition()
 	if position == nil {
 		return false
@@ -273,7 +292,6 @@ func (b *Bot) checkExistingPosition() bool {
 		realTimePnL = position.CurrentPnL // Fall back to stored value
 	} else {
 		delta := math.Abs(realTimePnL - position.CurrentPnL)
-		now := time.Now()
 
 		// Throttle P&L updates to reduce write amplification
 		// Update if: significant change (>= $1.00) OR enough time has passed since last update
@@ -345,13 +363,16 @@ func (b *Bot) executeEntry() {
 	px := util.FloorToTick(order.Credit, tickSize)
 	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
 
-	// Generate stable client-order ID for potential deduplication
-	clientOrderID := fmt.Sprintf("entry-%s-%s-%s-%d-%d",
+	// Generate deterministic client-order ID for potential deduplication
+	canonicalString := fmt.Sprintf("entry-%s-%s-%.2f-%.2f-%d",
 		order.Symbol,
 		order.Expiration,
-		fmt.Sprintf("%.2f-%.2f", order.PutStrike, order.CallStrike),
-		order.Quantity,
-		time.Now().Unix())
+		order.PutStrike,
+		order.CallStrike,
+		order.Quantity)
+
+	hash := sha256.Sum256([]byte(canonicalString))
+	clientOrderID := "entry-" + hex.EncodeToString(hash[:])[:8]
 
 	placedOrder, err := b.broker.PlaceStrangleOrder(
 		order.Symbol,
@@ -440,8 +461,16 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 		return
 	}
 
-	b.logger.Printf("Placing buy-to-close order with max debit: $%.2f", maxDebit)
-	closeOrder, err := b.retryClient.ClosePositionWithRetry(ctx, position, maxDebit)
+	// Get appropriate tick size for the symbol and round maxDebit up to tick size
+	tickSize, err := b.broker.GetTickSize(position.Symbol)
+	if err != nil {
+		b.logger.Printf("Warning: Failed to get tick size for %s, using default 0.01: %v", position.Symbol, err)
+		tickSize = 0.01
+	}
+
+	roundedMaxDebit := util.CeilToTick(maxDebit, tickSize)
+	b.logger.Printf("Using tick size %.4f for symbol %s, rounded max debit: $%.2f (was $%.2f)", tickSize, position.Symbol, roundedMaxDebit, maxDebit)
+	closeOrder, err := b.retryClient.ClosePositionWithRetry(ctx, position, roundedMaxDebit)
 	if err != nil {
 		b.logger.Printf("Failed to place close order after retries: %v", err)
 		return
@@ -485,13 +514,29 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 			state == models.StateFourthDown
 	}
 
-	// Only allow exits from Open state or management states
+	// Always allow exits from Open state or management states
 	if currentState == models.StateOpen || isManagementState(currentState) {
 		return true
 	}
 
-	// For all other states (including Submitted, Idle, Error, Adjusting, Rolling)
-	b.logger.Printf("Position %s is in state %s, not eligible for close (only Open and management states allowed)",
+	// Allow controlled re-attempts from Adjusting state if there is no active ExitOrderID
+	// or the prior close order has terminal status (allowing idempotent retries)
+	if currentState == models.StateAdjusting {
+		// Check if there's no active exit order ID (order was never placed or was cleared)
+		if position.ExitOrderID == "" {
+			b.logger.Printf("Position %s in Adjusting state with no active exit order, allowing re-attempt", position.ID)
+			return true
+		}
+
+		// TODO: Add order status check here to allow re-attempts if prior order is terminal (cancelled, rejected, filled)
+		// For now, block Adjusting state exits to prevent duplicate orders
+		b.logger.Printf("Position %s in Adjusting state with active exit order %s, blocking duplicate close attempt",
+			position.ID, position.ExitOrderID)
+		return false
+	}
+
+	// For all other states (Submitted, Idle, Error, Rolling)
+	b.logger.Printf("Position %s is in state %s, not eligible for close (only Open, management, or controlled Adjusting states allowed)",
 		position.ID, currentState)
 	return false
 }
@@ -513,8 +558,8 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 	}
 
 	sl := b.config.Strategy.Exit.StopLossPct
-	if sl <= 0 {
-		b.logger.Printf("ERROR: Invalid StopLossPct %.3f, must be > 0. Using default 2.5", sl)
+	if sl <= 1.0 {
+		b.logger.Printf("ERROR: Invalid StopLossPct %.3f, must be > 1.0 (multiple of credit). Using default 2.5", sl)
 		sl = 2.5
 	}
 
@@ -583,10 +628,14 @@ func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.Exit
 	if err != nil {
 		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
 		if reason == strategy.ExitReasonProfitTarget {
-			return position.CreditReceived * float64(position.Quantity) * 100 * b.config.Strategy.Exit.ProfitTarget
+			pt := b.config.Strategy.Exit.ProfitTarget
+			if pt < 0 || pt > 1 {
+				pt = 0.50
+			}
+			return position.CreditReceived * float64(position.Quantity) * 100 * pt
 		}
 		multiple := b.config.Strategy.Exit.StopLossPct
-		if multiple <= 0 {
+		if multiple <= 1.0 {
 			multiple = 2.5
 		}
 		return -1 * position.CreditReceived * multiple * float64(position.Quantity) * 100

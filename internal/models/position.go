@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -118,8 +119,8 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 		return fmt.Errorf("position %s state transition failed: %w", p.ID, err)
 	}
 
-	// Update the canonical persisted state to match the StateMachine
-	p.State = p.StateMachine.GetCurrentState()
+	// Update canonical state
+	p.State = to
 
 	// Set EntryDate when transitioning to open state (only if not already set)
 	if to == StateOpen && p.EntryDate.IsZero() {
@@ -195,6 +196,10 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s in state %s: CreditReceived must be zero for idle positions (current: %.2f)",
 				p.ID, currentState, p.CreditReceived)
 		}
+		if len(p.Adjustments) > 0 {
+			return fmt.Errorf("position %s in state %s: Adjustments must be empty for idle positions (current: %d)",
+				p.ID, currentState, len(p.Adjustments))
+		}
 	case StateOpen, StateFirstDown, StateSecondDown, StateThirdDown, StateFourthDown:
 		// Active position invariants: must have entry data and positive credit
 		if p.EntryDate.IsZero() {
@@ -218,6 +223,9 @@ func (p *Position) ValidateState() error {
 		if p.ExitDate.IsZero() {
 			return fmt.Errorf("position %s in state %s: ExitDate must be set for closed positions",
 				p.ID, currentState)
+		}
+		if strings.TrimSpace(p.ExitReason) == "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be set for closed positions", p.ID, currentState)
 		}
 		if p.CreditReceived <= 0 {
 			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for closed positions (current: %.2f)",
