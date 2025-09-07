@@ -25,16 +25,18 @@ import (
 
 // Bot represents the main trading bot instance.
 type Bot struct {
-	config       *config.Config
-	broker       broker.Broker
-	strategy     *strategy.StrangleStrategy
-	storage      storage.Interface
-	logger       *log.Logger
-	stop         chan struct{}
-	ctx          context.Context // Main bot context for operations
-	orderManager *orders.Manager
-	retryClient  *retry.Client
-	nyLocation   *time.Location // Cached NY timezone location
+	config           *config.Config
+	broker           broker.Broker
+	strategy         *strategy.StrangleStrategy
+	storage          storage.Interface
+	logger           *log.Logger
+	stop             chan struct{}
+	ctx              context.Context // Main bot context for operations
+	orderManager     *orders.Manager
+	retryClient      *retry.Client
+	nyLocation       *time.Location // Cached NY timezone location
+	lastPnLUpdate    time.Time     // Last time P&L was persisted to reduce write amplification
+	pnlThrottle      time.Duration // Minimum interval between P&L updates
 }
 
 func main() {
@@ -62,9 +64,11 @@ func main() {
 
 	// Initialize bot
 	bot := &Bot{
-		config: cfg,
-		logger: logger,
-		stop:   make(chan struct{}),
+		config:        cfg,
+		logger:        logger,
+		stop:          make(chan struct{}),
+		pnlThrottle:   30 * time.Second, // Throttle P&L updates to every 30 seconds minimum
+		lastPnLUpdate: time.Now().Add(-time.Hour), // Initialize to past time to allow immediate first update
 	}
 
 	// Cache NY timezone location
@@ -114,7 +118,7 @@ func main() {
 		UseMockHistoricalIV: cfg.Strategy.UseMockHistoricalIV,
 		FailOpenOnIVError:   false, // Default to fail-closed for safety
 	}
-	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger)
+	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger, bot.storage)
 
 	// Initialize order manager
 	bot.orderManager = orders.NewManager(bot.broker, bot.storage, logger, bot.stop)
@@ -267,10 +271,18 @@ func (b *Bot) checkExistingPosition() bool {
 		realTimePnL = position.CurrentPnL // Fall back to stored value
 	} else {
 		delta := math.Abs(realTimePnL - position.CurrentPnL)
-		if delta >= 0.01 {
+		now := time.Now()
+
+		// Throttle P&L updates to reduce write amplification
+		// Update if: significant change (>= $1.00) OR enough time has passed since last update
+		shouldUpdate := delta >= 1.00 || now.Sub(b.lastPnLUpdate) >= b.pnlThrottle
+
+		if shouldUpdate {
 			position.CurrentPnL = realTimePnL
 			if err := b.storage.SetCurrentPosition(position); err != nil {
 				b.logger.Printf("Warning: Failed to update position P&L: %v", err)
+			} else {
+				b.lastPnLUpdate = now
 			}
 		}
 	}
@@ -317,7 +329,17 @@ func (b *Bot) executeEntry() {
 
 	// Place order
 	b.logger.Printf("Placing strangle order for %d contracts...", order.Quantity)
-	px := util.RoundToTick(order.Credit, 0.01)
+
+	// Get appropriate tick size for the symbol
+	tickSize, err := b.broker.GetTickSize(order.Symbol)
+	if err != nil {
+		b.logger.Printf("Warning: Failed to get tick size for %s, using default 0.01: %v", order.Symbol, err)
+		tickSize = 0.01
+	}
+
+	px := util.RoundToTick(order.Credit, tickSize)
+	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
+
 	placedOrder, err := b.broker.PlaceStrangleOrder(
 		order.Symbol,
 		order.PutStrike,
@@ -464,23 +486,55 @@ func (b *Bot) logPositionClose(position *models.Position) {
 func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitReason) float64 {
 	currentVal, cvErr := b.strategy.GetCurrentPositionValue(position)
 
+	// Guardrails for config - prevent invalid calculations that could block exits
+	pt := b.config.Strategy.Exit.ProfitTarget
+	if pt <= 0 || pt >= 1 {
+		b.logger.Printf("ERROR: Invalid ProfitTarget %.3f, must be in (0,1). Using default 0.50", pt)
+		pt = 0.50
+	}
+
+	sl := b.config.Strategy.Exit.StopLossPct
+	if sl <= 0 {
+		b.logger.Printf("ERROR: Invalid StopLossPct %.3f, must be > 0. Using default 2.5", sl)
+		sl = 2.5
+	}
+
 	switch reason {
 	case strategy.ExitReasonProfitTarget:
 		// Close at max debit that locks in the configured profit fraction:
-		// debit = credit * (1 - profitTarget). Example: credit=$2, pt=0.5 → debit=$1.
-		return position.CreditReceived * (1.0 - b.config.Strategy.Exit.ProfitTarget)
+		// debit = credit * (1 - pt). Example: credit=$2, pt=0.5 → debit=$1.
+		result := position.CreditReceived * (1.0 - pt)
+		if result <= 0 {
+			b.logger.Printf("ERROR: Calculated profit target debit (%.2f) is invalid. Credit: %.2f, PT: %.2f",
+				result, position.CreditReceived, pt)
+			// Emergency fallback: allow any debit > 0 to prevent position lock-in
+			result = position.CreditReceived * 0.01
+		}
+		return result
 	case strategy.ExitReasonTime:
 		if cvErr == nil && position.Quantity != 0 {
 			return currentVal / (float64(position.Quantity) * 100)
 		}
-		// Fallback: use configured profit target when quantity is zero or GetCurrentPositionValue failed
-		return position.CreditReceived * (1.0 - b.config.Strategy.Exit.ProfitTarget)
+		// Fallback: use profit target when quantity is zero or value lookup failed
+		result := position.CreditReceived * (1.0 - pt)
+		if result <= 0 {
+			b.logger.Printf("ERROR: Fallback profit target debit (%.2f) is invalid. Using emergency value", result)
+			result = position.CreditReceived * 0.01
+		}
+		return result
 	case strategy.ExitReasonStopLoss:
 		if cvErr == nil && position.Quantity != 0 {
 			return currentVal / (float64(position.Quantity) * 100)
 		}
-		// Fallback: use configured stop loss percentage when quantity is zero or GetCurrentPositionValue failed
-		return position.CreditReceived * b.config.Strategy.Exit.StopLossPct
+		// Fallback: treat StopLossPct as a debit multiple of credit (e.g., 2.5x)
+		result := position.CreditReceived * sl
+		if result <= 0 {
+			b.logger.Printf("ERROR: Calculated stop loss debit (%.2f) is invalid. Credit: %.2f, SL: %.2f",
+				result, position.CreditReceived, sl)
+			// Emergency fallback: allow reasonable stop loss
+			result = position.CreditReceived * 2.0
+		}
+		return result
 	default:
 		return position.CreditReceived * 1.0
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
+	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 )
 
 // optionChainCacheEntry represents a cached option chain entry
@@ -26,6 +27,7 @@ type StrangleStrategy struct {
 	logger     *log.Logger
 	chainCache map[string]*optionChainCacheEntry // Cache for option chains by symbol+expiration
 	cacheMutex sync.RWMutex                      // Protects concurrent access to chainCache
+	storage    storage.Interface                 // Storage for historical IV data
 }
 
 // Config contains configuration parameters for the strangle strategy.
@@ -44,6 +46,7 @@ type Config struct {
 	MaxContracts        int     // Maximum number of contracts per position
 	UseMockHistoricalIV bool    // Whether to use mock historical IV data
 	FailOpenOnIVError   bool    // If true, allow entries when IV data is unavailable (dev/test only)
+	BPRMultiplier       float64 // Buying power requirement multiplier (default: 10.0)
 }
 
 // ExitReason represents the reason for exiting a position
@@ -67,12 +70,13 @@ const (
 )
 
 // NewStrangleStrategy creates a new strangle strategy instance.
-func NewStrangleStrategy(b broker.Broker, config *Config, logger *log.Logger) *StrangleStrategy {
+func NewStrangleStrategy(b broker.Broker, config *Config, logger *log.Logger, storage storage.Interface) *StrangleStrategy {
 	return &StrangleStrategy{
 		broker:     b,
 		config:     config,
 		logger:     logger,
 		chainCache: make(map[string]*optionChainCacheEntry),
+		storage:    storage,
 	}
 }
 
@@ -208,32 +212,69 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 	if atmStrike == 0 {
 		return 0, fmt.Errorf("no options available for ATM calculation")
 	}
+
+	var currentIV float64
+
 	// Try call then put at ATM
 	if opt := broker.GetOptionByStrike(chain, atmStrike, broker.OptionTypeCall); opt != nil &&
 		opt.Greeks != nil && opt.Greeks.MidIV > 0 {
-		return opt.Greeks.MidIV, nil
-	}
-	if opt := broker.GetOptionByStrike(chain, atmStrike, broker.OptionTypePut); opt != nil &&
+		currentIV = opt.Greeks.MidIV
+	} else if opt := broker.GetOptionByStrike(chain, atmStrike, broker.OptionTypePut); opt != nil &&
 		opt.Greeks != nil && opt.Greeks.MidIV > 0 {
-		return opt.Greeks.MidIV, nil
-	}
-	// Nearest strike with a valid IV
-	bestIV := 0.0
-	bestDiff := math.MaxFloat64
-	for _, opt := range chain {
-		if opt.Greeks == nil || opt.Greeks.MidIV <= 0 {
-			continue
+		currentIV = opt.Greeks.MidIV
+	} else {
+		// Nearest strike with a valid IV
+		bestIV := 0.0
+		bestDiff := math.MaxFloat64
+		for _, opt := range chain {
+			if opt.Greeks == nil || opt.Greeks.MidIV <= 0 {
+				continue
+			}
+			d := math.Abs(opt.Strike - quote.Last)
+			if d < bestDiff {
+				bestDiff, bestIV = d, opt.Greeks.MidIV
+			}
 		}
-		d := math.Abs(opt.Strike - quote.Last)
-		if d < bestDiff {
-			bestDiff, bestIV = d, opt.Greeks.MidIV
+		if bestIV > 0 {
+			currentIV = bestIV
+		} else {
+			return 0, fmt.Errorf("no valid IV found for ATM option")
 		}
-	}
-	if bestIV > 0 {
-		return bestIV, nil
 	}
 
-	return 0, fmt.Errorf("no valid IV found for ATM option")
+	// Store the current IV reading for historical analysis
+	s.storeCurrentIVReading(currentIV, targetExp)
+
+	return currentIV, nil
+}
+
+// storeCurrentIVReading stores the current IV reading for future historical analysis
+func (s *StrangleStrategy) storeCurrentIVReading(iv float64, expiration string) {
+	if s.storage == nil {
+		return // No storage available
+	}
+
+	// Parse expiration date to validate format
+	_, err := time.Parse("2006-01-02", expiration)
+	if err != nil {
+		s.logger.Printf("Warning: Could not parse expiration date %s for IV storage: %v", expiration, err)
+		return
+	}
+
+	// Create IV reading for today's date
+	reading := &models.IVReading{
+		Symbol:    s.config.Symbol,
+		Date:      time.Now().UTC().Truncate(24 * time.Hour),
+		IV:        iv,
+		Timestamp: time.Now().UTC(),
+	}
+
+	// Store the reading
+	if err := s.storage.StoreIVReading(reading); err != nil {
+		s.logger.Printf("Warning: Failed to store IV reading: %v", err)
+	} else {
+		s.logger.Printf("Stored IV reading: %s %.2f%% for %s", s.config.Symbol, iv*100, reading.Date.Format("2006-01-02"))
+	}
 }
 
 // getHistoricalImpliedVolatility retrieves historical IV data
@@ -248,18 +289,49 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 //   - Dev/Test behavior (FailOpenOnIVError=true): Returns mock data to allow
 //     testing and development when real historical data is unavailable.
 //
-// For production, implement proper historical IV storage and retrieval.
-// Current MVP implementation uses mock data when UseMockHistoricalIV=true.
+// This implementation uses storage-backed IV readings for production use.
 func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, error) {
 	// Option 1: Use mock historical data for testing
 	if s.shouldUseMockHistoricalData() {
 		return s.generateMockHistoricalIV(days), nil
 	}
 
-	// Option 2: Calculate rolling IV from daily option chain snapshots
-	// This would require storing daily IV readings
-	// For now, return empty to trigger fallback
-	return nil, fmt.Errorf("historical IV data not available - implement storage layer")
+	// Option 2: Retrieve historical IV from storage
+	endDate := time.Now().UTC().Truncate(24 * time.Hour)
+	startDate := endDate.AddDate(0, 0, -days)
+
+	readings, err := s.storage.GetIVReadings(s.config.Symbol, startDate, endDate)
+	if err != nil {
+		if s.config.FailOpenOnIVError {
+			// Fail-open: Use mock data for dev/test when storage fails
+			s.logger.Printf("Warning: Storage query failed, using mock historical IV data (fail-open mode): %v", err)
+			return s.generateMockHistoricalIV(days), nil
+		} else {
+			// Fail-closed: Block entries when storage unavailable (conservative approach)
+			s.logger.Printf("Warning: Storage query failed, using 0.0 IVR (fail-closed mode): %v", err)
+			return nil, fmt.Errorf("historical IV data unavailable from storage: %w", err)
+		}
+	}
+
+	if len(readings) == 0 {
+		if s.config.FailOpenOnIVError {
+			// Fail-open: Use mock data when no historical readings exist
+			s.logger.Printf("Warning: No historical IV readings found, using mock data (fail-open mode)")
+			return s.generateMockHistoricalIV(days), nil
+		} else {
+			// Fail-closed: Block entries when no historical data exists
+			s.logger.Printf("Warning: No historical IV readings found, using 0.0 IVR (fail-closed mode)")
+			return nil, fmt.Errorf("no historical IV readings available for symbol %s", s.config.Symbol)
+		}
+	}
+
+	// Extract IV values from readings, sorted by date
+	ivs := make([]float64, len(readings))
+	for i, reading := range readings {
+		ivs[i] = reading.IV
+	}
+
+	return ivs, nil
 }
 
 // generateMockHistoricalIV creates realistic mock IV data for testing
@@ -387,37 +459,21 @@ func (s *StrangleStrategy) getCachedOptionChainWithContext(ctx context.Context, 
 	}
 	s.cacheMutex.RUnlock()
 
-	// Fetch from broker with context timeout
-	type result struct {
-		chain []broker.Option
-		err   error
+	// Fetch from broker with context timeout - use context-aware broker method
+	chain, err := s.broker.GetOptionChainCtx(ctx, symbol, expiration, withGreeks)
+	if err != nil {
+		return nil, err
 	}
 
-	resultChan := make(chan result, 1)
-
-	go func() {
-		chain, err := s.broker.GetOptionChain(symbol, expiration, withGreeks)
-		resultChan <- result{chain: chain, err: err}
-	}()
-
-	select {
-	case res := <-resultChan:
-		if res.err != nil {
-			return nil, res.err
-		}
-
-		// Cache the result (write lock)
-		s.cacheMutex.Lock()
-		s.chainCache[cacheKey] = &optionChainCacheEntry{
-			chain:     res.chain,
-			timestamp: time.Now(),
-		}
-		s.cacheMutex.Unlock()
-
-		return res.chain, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	// Cache the result (write lock)
+	s.cacheMutex.Lock()
+	s.chainCache[cacheKey] = &optionChainCacheEntry{
+		chain:     chain,
+		timestamp: time.Now(),
 	}
+	s.cacheMutex.Unlock()
+
+	return chain, nil
 }
 
 // CalculatePositionPnL calculates current P&L for a position using live option quotes
@@ -560,8 +616,8 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 
 	for _, option := range options {
 		// Only consider options of the correct type
-		if (isPut && option.OptionType != string(broker.OptionTypePut)) ||
-		   (!isPut && option.OptionType != string(broker.OptionTypeCall)) {
+		if (isPut && !broker.OptionTypeMatches(option.OptionType, broker.OptionTypePut)) ||
+		   (!isPut && !broker.OptionTypeMatches(option.OptionType, broker.OptionTypeCall)) {
 			continue
 		}
 
@@ -614,7 +670,11 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 
 	// Estimate buying power requirement (simplified)
 	// Real calculation would use margin requirements
-	bprPerContract := creditPerShare * 100 * 10 // Rough estimate
+	bprMultiplier := s.config.BPRMultiplier
+	if bprMultiplier <= 0 {
+		bprMultiplier = 10.0 // Default to 10x if not configured
+	}
+	bprPerContract := creditPerShare * 100 * bprMultiplier
 
 	maxContracts := int(allocatedCapital / bprPerContract)
 	if maxContracts < 1 {

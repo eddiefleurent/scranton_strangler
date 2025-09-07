@@ -502,6 +502,10 @@ func (m *mockBroker) GetOptionChain(_, expiration string, _ bool) ([]broker.Opti
 	return options, nil
 }
 
+func (m *mockBroker) GetOptionChainCtx(_ context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return m.GetOptionChain(symbol, expiration, withGreeks)
+}
+
 func (m *mockBroker) PlaceStrangleOrder(
 	_ string,
 	_, _ float64,
@@ -597,6 +601,10 @@ func (m *mockBroker) GetMarketClock(_ bool) (*broker.MarketClockResponse, error)
 
 func (m *mockBroker) IsTradingDay(_ bool) (bool, error) {
 	return true, nil
+}
+
+func (m *mockBroker) GetTickSize(_ string) (float64, error) {
+	return 0.01, nil
 }
 
 func (m *mockBroker) GetOptionBuyingPower() (float64, error) {

@@ -333,6 +333,11 @@ func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
 
 // GetOptionChain retrieves the option chain for a symbol and expiration date.
 func (t *TradierAPI) GetOptionChain(symbol, expiration string, greeks bool) ([]Option, error) {
+	return t.GetOptionChainCtx(context.Background(), symbol, expiration, greeks)
+}
+
+// GetOptionChainCtx retrieves the option chain for a symbol and expiration date with context.
+func (t *TradierAPI) GetOptionChainCtx(ctx context.Context, symbol, expiration string, greeks bool) ([]Option, error) {
 	params := url.Values{}
 	params.Set("symbol", symbol)
 	params.Set("expiration", expiration)
@@ -340,11 +345,11 @@ func (t *TradierAPI) GetOptionChain(symbol, expiration string, greeks bool) ([]O
 	endpoint := t.baseURL + "/markets/options/chains?" + params.Encode()
 
 	var response OptionChainResponse
-	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
 
-	return response.Options.Option, nil
+	return []Option(response.Options.Option), nil
 }
 
 // GetPositions retrieves current positions from the account.
@@ -356,7 +361,7 @@ func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
 		return nil, err
 	}
 
-	return response.Positions.Position, nil
+	return []PositionItem(response.Positions.Position), nil
 }
 
 // GetBalance retrieves account balance information.

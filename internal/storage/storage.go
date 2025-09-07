@@ -29,6 +29,7 @@ type Data struct {
 	DailyPnL        map[string]float64 `json:"daily_pnl"`
 	Statistics      *Statistics        `json:"statistics"`
 	History         []models.Position  `json:"history"`
+	IVReadings      []models.IVReading `json:"iv_readings"` // Historical IV data
 }
 
 // Statistics represents performance metrics and analytics data.
@@ -579,5 +580,73 @@ func clonePosition(pos *models.Position) *models.Position {
 	}
 
 	return cloned
+}
+
+// StoreIVReading stores a new IV reading in the storage
+func (s *JSONStorage) StoreIVReading(reading *models.IVReading) error {
+	if reading == nil {
+		return fmt.Errorf("cannot store nil IV reading")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Initialize IVReadings slice if nil
+	if s.data.IVReadings == nil {
+		s.data.IVReadings = make([]models.IVReading, 0)
+	}
+
+	// Check if reading already exists for this symbol and date
+	for i, existing := range s.data.IVReadings {
+		if existing.Symbol == reading.Symbol && existing.Date.Equal(reading.Date) {
+			// Update existing reading
+			s.data.IVReadings[i] = *reading
+			return s.Save()
+		}
+	}
+
+	// Add new reading
+	s.data.IVReadings = append(s.data.IVReadings, *reading)
+	return s.Save()
+}
+
+// GetIVReadings retrieves IV readings for a symbol within a date range
+func (s *JSONStorage) GetIVReadings(symbol string, startDate, endDate time.Time) ([]models.IVReading, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var readings []models.IVReading
+	for _, reading := range s.data.IVReadings {
+		if reading.Symbol == symbol &&
+		   !reading.Date.Before(startDate) &&
+		   !reading.Date.After(endDate) {
+			readings = append(readings, reading)
+		}
+	}
+
+	return readings, nil
+}
+
+// GetLatestIVReading retrieves the most recent IV reading for a symbol
+func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var latest *models.IVReading
+	var latestTime time.Time
+
+	for _, reading := range s.data.IVReadings {
+		if reading.Symbol == symbol && reading.Timestamp.After(latestTime) {
+			readingCopy := reading // Create a copy
+			latest = &readingCopy
+			latestTime = reading.Timestamp
+		}
+	}
+
+	if latest == nil {
+		return nil, fmt.Errorf("no IV readings found for symbol %s", symbol)
+	}
+
+	return latest, nil
 }
 

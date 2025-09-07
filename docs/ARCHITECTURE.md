@@ -192,16 +192,51 @@ cmd/bot/main.go
 ```go
 // Core interfaces needed for proper abstraction
 type Broker interface {
-    GetQuote(symbol string) (*Quote, error)
-    GetOptionChain(symbol, exp string, withGreeks bool) ([]Option, error)
-    PlaceStrangleOrder(params OrderParams) (*Order, error)
+    // Account operations
     GetAccountBalance() (float64, error)
+    GetOptionBuyingPower() (float64, error)
+    GetPositions() ([]PositionItem, error)
+
+    // Market data
+    GetQuote(symbol string) (*QuoteItem, error)
+    GetExpirations(symbol string) ([]string, error)
+    GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
+    GetMarketClock(delayed bool) (*MarketClockResponse, error)
+    IsTradingDay(delayed bool) (bool, error)
+
+    // Order placement
+    PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
+        quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error)
+    PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
+        quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error)
+
+    // Order status
+    GetOrderStatus(orderID int) (*OrderResponse, error)
+    GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error)
+
+    // Position closing
+    CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
+        quantity int, maxDebit float64, tag string) (*OrderResponse, error)
+    PlaceBuyToCloseOrder(optionSymbol string, quantity int,
+        maxPrice float64) (*OrderResponse, error)
 }
 
 type Storage interface {
+    // Position management
     GetCurrentPosition() *Position
     SetCurrentPosition(pos *Position) error
-    ClosePosition(pnl float64) error
+    ClosePosition(finalPnL float64, reason string) error
+    AddAdjustment(adj Adjustment) error
+
+    // Data persistence
+    Save() error
+    Load() error
+
+    // Historical data and analytics
+    GetHistory() []Position
+    HasInHistory(id string) bool
+    GetStatistics() *Statistics
+    GetDailyPnL(date string) float64
 }
 
 type Strategy interface {

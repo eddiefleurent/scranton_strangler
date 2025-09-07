@@ -1,6 +1,10 @@
 package storage
 
-import "github.com/eddiefleurent/scranton_strangler/internal/models"
+import (
+	"time"
+
+	"github.com/eddiefleurent/scranton_strangler/internal/models"
+)
 
 // Interface defines the contract for position and trade data persistence.
 //
@@ -25,6 +29,11 @@ type Interface interface {
 	HasInHistory(id string) bool
 	GetStatistics() *Statistics
 	GetDailyPnL(date string) float64
+
+	// IV data storage
+	StoreIVReading(reading *models.IVReading) error
+	GetIVReadings(symbol string, startDate, endDate time.Time) ([]models.IVReading, error)
+	GetLatestIVReading(symbol string) (*models.IVReading, error)
 }
 
 // NewStorage creates a new storage implementation (currently JSON-based)

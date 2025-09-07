@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -158,14 +159,14 @@ func main() {
 					// Show details for selected strikes
 					fmt.Printf("\n  Option Details:\n")
 					for _, opt := range options {
-						if opt.Strike == putStrike && opt.OptionType == string(broker.OptionTypePut) {
+						if eq(opt.Strike, putStrike, 1e-3) && opt.OptionType == string(broker.OptionTypePut) {
 							fmt.Printf("  PUT:  Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
 							}
 							fmt.Println()
 						}
-						if opt.Strike == callStrike && opt.OptionType == string(broker.OptionTypeCall) {
+						if eq(opt.Strike, callStrike, 1e-3) && opt.OptionType == string(broker.OptionTypeCall) {
 							fmt.Printf("  CALL: Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
@@ -187,9 +188,13 @@ func main() {
 						fmt.Printf("  - Target Credit: $%.2f\n", credit)
 						fmt.Printf("  - Type: Credit (Short Strangle)\n")
 
-						// Preview the order
-						px := util.RoundToTick(credit*0.95, 0.01)
-						fmt.Printf("  - Limit Price: $%.2f (95%% of mid, rounded)\n", px)
+						// Preview the order - get appropriate tick size
+						tickSize := 0.01 // Default fallback
+						if ts, err := client.GetTickSize("SPY"); err == nil {
+							tickSize = ts
+						}
+						px := util.RoundToTick(credit*0.95, tickSize)
+						fmt.Printf("  - Limit Price: $%.2f (95%% of mid, rounded to %.4f tick)\n", px, tickSize)
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,
 							1, px, // slightly below mid for better fill (rounded)
@@ -324,6 +329,8 @@ func absInt(x int) int {
 	}
 	return x
 }
+
+func eq(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 
 
 // isOptionSymbol performs a robust OPRA-style check: TICKER + YYMMDD + [C|P] + strike

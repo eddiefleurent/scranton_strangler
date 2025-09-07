@@ -170,7 +170,7 @@ func TestGetOptionByStrike(t *testing.T) {
 	}
 }
 
-func TestDaysBetween(t *testing.T) {
+func TestAbsDaysBetween(t *testing.T) {
 	tests := []struct {
 		from     time.Time
 		to       time.Time
@@ -205,9 +205,9 @@ func TestDaysBetween(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := DaysBetween(tt.from, tt.to)
+			result := AbsDaysBetween(tt.from, tt.to)
 			if result != tt.expected {
-				t.Errorf("DaysBetween(%v, %v) = %v, want %v",
+				t.Errorf("AbsDaysBetween(%v, %v) = %v, want %v",
 					tt.from, tt.to, result, tt.expected)
 			}
 		})
@@ -787,6 +787,14 @@ func (m *MockBroker) GetOptionChain(_, _ string, _ bool) ([]Option, error) {
 	return []Option{}, nil
 }
 
+func (m *MockBroker) GetOptionChainCtx(_ context.Context, _, _ string, _ bool) ([]Option, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return []Option{}, nil
+}
+
 func (m *MockBroker) PlaceStrangleOrder(_ string, _, _ float64, _ string,
 	_ int, _ float64, _ bool, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
@@ -881,6 +889,14 @@ func (m *MockBroker) IsTradingDay(_ bool) (bool, error) {
 		return false, errors.New("mock broker error")
 	}
 	return true, nil
+}
+
+func (m *MockBroker) GetTickSize(_ string) (float64, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return 0, errors.New("mock broker error")
+	}
+	return 0.01, nil
 }
 
 func TestNewCircuitBreakerBroker(t *testing.T) {
@@ -1075,50 +1091,6 @@ func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
 	}
 }
 
-func TestIsPermanentAPIError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		// 4xx errors - permanent except 408 and 429
-		{"400 Bad Request - permanent", &APIError{Status: 400}, true},
-		{"401 Unauthorized - permanent", &APIError{Status: 401}, true},
-		{"403 Forbidden - permanent", &APIError{Status: 403}, true},
-		{"404 Not Found - permanent", &APIError{Status: 404}, true},
-		{"408 Request Timeout - retryable", &APIError{Status: 408}, false},
-		{"429 Too Many Requests - retryable", &APIError{Status: 429}, false},
-		{"499 Client Closed Request - permanent", &APIError{Status: 499}, true},
-
-		// 5xx errors - transient except 501 and 505
-		{"500 Internal Server Error - transient", &APIError{Status: 500}, false},
-		{"502 Bad Gateway - transient", &APIError{Status: 502}, false},
-		{"503 Service Unavailable - transient", &APIError{Status: 503}, false},
-		{"504 Gateway Timeout - transient", &APIError{Status: 504}, false},
-		{"501 Not Implemented - permanent", &APIError{Status: 501}, true},
-		{"505 HTTP Version Not Supported - permanent", &APIError{Status: 505}, true},
-		{"599 Network Connect Timeout Error - transient", &APIError{Status: 599}, false},
-
-		// Edge cases
-		{"300 Multiple Choices - not 4xx/5xx", &APIError{Status: 300}, false},
-		{"600 Invalid status - not 4xx/5xx", &APIError{Status: 600}, false},
-		{"negative status", &APIError{Status: -1}, false},
-		{"zero status", &APIError{Status: 0}, false},
-
-		// Non-APIError errors
-		{"generic error", errors.New("some error"), false},
-		{"nil error", nil, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := isPermanentAPIError(tt.err)
-			if result != tt.expected {
-				t.Errorf("isPermanentAPIError(%v) = %v, want %v", tt.err, result, tt.expected)
-			}
-		})
-	}
-}
 
 func TestNormalizeDuration(t *testing.T) {
 	tests := []struct {

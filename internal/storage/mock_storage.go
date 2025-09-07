@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
@@ -172,6 +173,24 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 	if totalDecidedTrades > 0 {
 		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(totalDecidedTrades) * 100
 	}
+}
+
+// StoreIVReading stores a new IV reading (mock implementation)
+func (m *MockStorage) StoreIVReading(reading *models.IVReading) error {
+	// Mock implementation - just return success
+	return nil
+}
+
+// GetIVReadings retrieves IV readings within a date range (mock implementation)
+func (m *MockStorage) GetIVReadings(symbol string, startDate, endDate time.Time) ([]models.IVReading, error) {
+	// Return empty slice for mock
+	return []models.IVReading{}, nil
+}
+
+// GetLatestIVReading retrieves the most recent IV reading (mock implementation)
+func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, error) {
+	// Return nil for mock
+	return nil, nil
 }
 
 // Ensure MockStorage implements Interface

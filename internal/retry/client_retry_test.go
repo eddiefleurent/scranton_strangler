@@ -57,12 +57,20 @@ func (f *fakeBroker) GetOptionChain(symbol, expiration string, withGreeks bool) 
 	return []broker.Option{}, nil
 }
 
+func (f *fakeBroker) GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return f.GetOptionChain(symbol, expiration, withGreeks)
+}
+
 func (f *fakeBroker) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
 	return &broker.MarketClockResponse{}, nil
 }
 
 func (f *fakeBroker) IsTradingDay(delayed bool) (bool, error) {
 	return true, nil
+}
+
+func (f *fakeBroker) GetTickSize(symbol string) (float64, error) {
+	return 0.01, nil
 }
 
 func (f *fakeBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {

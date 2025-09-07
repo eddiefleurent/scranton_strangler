@@ -22,8 +22,10 @@ type Broker interface {
 	GetQuote(symbol string) (*QuoteItem, error)
 	GetExpirations(symbol string) ([]string, error)
 	GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
+	GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]Option, error)
 	GetMarketClock(delayed bool) (*MarketClockResponse, error)
 	IsTradingDay(delayed bool) (bool, error)
+	GetTickSize(symbol string) (float64, error) // Get appropriate tick size for symbol
 
 	// Order placement
 	// PlaceStrangleOrder: limitPrice is the total credit/debit limit for the entire strangle (per spread)
@@ -51,28 +53,6 @@ type TradierClient struct {
 	profitTarget float64 // Configurable profit target for OTOCO orders
 }
 
-// isPermanentAPIError checks if an error is a permanent API error that should trigger fallback.
-// Error classification policy:
-// - 4xx: Permanent (except 408 Request Timeout and 429 Too Many Requests which are retryable)
-// - 5xx: Transient (except 501 Not Implemented and 505 HTTP Version Not Supported which are permanent)
-func isPermanentAPIError(err error) bool {
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		// 4xx errors: permanent except retryable ones
-		if apiErr.Status >= 400 && apiErr.Status < 500 {
-			// 408 Request Timeout is retryable
-			// 429 Too Many Requests is retryable
-			return apiErr.Status != 408 && apiErr.Status != 429
-		}
-		// 5xx errors: transient except permanent ones
-		if apiErr.Status >= 500 && apiErr.Status < 600 {
-			// 501 Not Implemented is permanent (server doesn't support this functionality)
-			// 505 HTTP Version Not Supported is permanent
-			return apiErr.Status == 501 || apiErr.Status == 505
-		}
-	}
-	return false
-}
 
 // isNotImplementedError checks if an error indicates that OTOCO is not implemented (HTTP 501)
 func isNotImplementedError(err error) bool {
@@ -187,6 +167,23 @@ func (t *TradierClient) IsTradingDay(delayed bool) (bool, error) {
 	return t.TradierAPI.IsTradingDay(delayed)
 }
 
+// GetTickSize returns the appropriate tick size for the given symbol
+// Most US stocks and ETFs trade in penny increments (0.01)
+// Some lower-priced stocks may trade in 0.0001 increments
+func (t *TradierClient) GetTickSize(symbol string) (float64, error) {
+	// Get current quote to determine appropriate tick size
+	_, err := t.GetQuote(symbol)
+	if err != nil {
+		// Fallback to penny increment if quote unavailable
+		return 0.01, fmt.Errorf("failed to get quote for tick size determination: %w", err)
+	}
+
+	// Most US equities trade in penny increments
+	// For stocks under $1, some may trade in smaller increments, but penny is most common
+	// Options typically trade in penny increments regardless of underlying
+	return 0.01, nil
+}
+
 // CalculateIVR calculates Implied Volatility Rank from historical data
 func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 	if math.IsNaN(currentIV) {
@@ -250,6 +247,12 @@ func GetOptionByStrike(options []Option, strike float64, optionType OptionType) 
 	return nil
 }
 
+// OptionTypeMatches checks if an option's type matches the expected type
+// This helper avoids brittle string casting and centralizes option type comparisons
+func OptionTypeMatches(optionType string, expectedType OptionType) bool {
+	return optionType == string(expectedType)
+}
+
 // OptionType represents the type of option contract
 type OptionType string
 
@@ -262,8 +265,8 @@ const (
 
 // Use OptionTypePut/OptionTypeCall everywhere to avoid duplication.
 
-// DaysBetween calculates the number of days between two dates
-func DaysBetween(from, to time.Time) int {
+// AbsDaysBetween calculates the absolute number of days between two dates
+func AbsDaysBetween(from, to time.Time) int {
 	f := from.UTC().Truncate(24 * time.Hour)
 	t := to.UTC().Truncate(24 * time.Hour)
 	d := int(t.Sub(f).Hours() / 24)
@@ -318,6 +321,7 @@ type CircuitBreakerSettings struct {
 	Timeout      time.Duration // Open circuit duration
 	MinRequests  uint32        // Min requests before tripping
 	FailureRatio float64       // Failure ratio threshold
+	Logger       *log.Logger   // Optional logger for structured logging (uses log.DefaultLogger if nil)
 }
 
 // NewCircuitBreakerBrokerWithSettings creates a CircuitBreakerBroker with custom settings
@@ -335,7 +339,11 @@ func NewCircuitBreakerBrokerWithSettings(broker Broker, settings CircuitBreakerS
 			return failureRatio >= settings.FailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			log.Printf("Circuit breaker %s state changed from %v to %v", name, from, to)
+			logger := settings.Logger
+			if logger == nil {
+				logger = log.Default()
+			}
+			logger.Printf("Circuit breaker %s state changed from %v to %v", name, from, to)
 		},
 	}
 
@@ -374,6 +382,13 @@ func (c *CircuitBreakerBroker) GetExpirations(symbol string) ([]string, error) {
 func (c *CircuitBreakerBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]Option, error) {
 		return b.GetOptionChain(symbol, expiration, withGreeks)
+	})
+}
+
+// GetOptionChainCtx wraps the underlying broker call with circuit breaker and context
+func (c *CircuitBreakerBroker) GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]Option, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]Option, error) {
+		return b.GetOptionChainCtx(ctx, symbol, expiration, withGreeks)
 	})
 }
 
@@ -434,5 +449,12 @@ func (c *CircuitBreakerBroker) GetMarketClock(delayed bool) (*MarketClockRespons
 func (c *CircuitBreakerBroker) IsTradingDay(delayed bool) (bool, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (bool, error) {
 		return b.IsTradingDay(delayed)
+	})
+}
+
+// GetTickSize wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetTickSize(symbol string) (float64, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) {
+		return b.GetTickSize(symbol)
 	})
 }

@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+// IVReading represents a single implied volatility reading for a symbol on a specific date
+type IVReading struct {
+	Symbol    string    `json:"symbol"`
+	Date      time.Time `json:"date"`
+	IV        float64   `json:"iv"`        // Implied volatility as decimal (0.20 = 20%)
+	Timestamp time.Time `json:"timestamp"` // When this reading was recorded
+}
+
 // Position represents a short strangle trading position with state management.
 type Position struct {
 	StateMachine   *StateMachine `json:"state_machine"`
