@@ -20,7 +20,10 @@ func FloorToTick(x, tick float64) float64 {
 		return x
 	}
 	t := math.Abs(tick)
-	return math.Floor(x/t) * t
+	r := x / t
+	// Avoid dropping a tick when r is just below an integer due to FP representation.
+	r = math.Nextafter(r, math.Inf(1))
+	return math.Floor(r) * t
 }
 
 // CeilToTick rounds up to the nearest tick (use for buy debits).
@@ -29,5 +32,7 @@ func CeilToTick(x, tick float64) float64 {
 		return x
 	}
 	t := math.Abs(tick)
-	return math.Ceil(x/t) * t
+	r := x / t
+	r = math.Nextafter(r, math.Inf(-1))
+	return math.Ceil(r) * t
 }
