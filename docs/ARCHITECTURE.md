@@ -279,7 +279,7 @@ type RiskManager interface {
 **Use Cases**:
 1. **Second Down Rolling**: Close at 70% profit OR roll untested side
 2. **Third Down Management**: Take 25% profit OR continue to Fourth Down  
-3. **Fourth Down Stops**: Profit target OR 200% loss limit
+3. **Fourth Down Stops**: Profit target OR 250% loss limit
 4. **Hard Stops**: 250% loss OR 5 DTE emergency close
 5. **Delta Management**: Close profitable leg OR roll when |delta| > 0.5
 
@@ -301,7 +301,7 @@ type RiskManager interface {
 
 #### Multi-Conditional OCO (MOCO)
 **Advanced Management**: Multiple exit conditions
-- **Example**: Close at 50% profit OR 21 DTE OR 200% loss OR delta > 1.0
+- **Example**: Close at 50% profit OR 21 DTE OR 250% loss OR delta > 1.0
 - **Benefit**: Comprehensive automation without monitoring
 
 ### Regular Orders
@@ -321,7 +321,7 @@ Position Management:
   First Down → Monitor via regular orders (OTOCO unsupported)
   Second Down → OCO (70% profit OR roll untested) ⭐ CURRENT RUNTIME
   Third Down → OCO (25% profit OR continue) [PLANNED/IGNORED]
-  Fourth Down → OCO (any profit OR 200% stop) [PLANNED/IGNORED]
+  Fourth Down → OCO (any profit OR 250% stop) [PLANNED/IGNORED]
   
 Hard Stops (Immediate):
   Loss > 250%? → Market close order
@@ -720,7 +720,7 @@ strategy:
 risk:
   max_contracts: 2
   max_daily_loss: 1000
-  max_position_loss: 2.0  # 200% of credit
+  max_position_loss: 2.0  # 250% of credit
   
 schedule:
   market_check_interval: "15m"
@@ -990,7 +990,7 @@ DTE <= 21?
   Yes → CLOSE
   No ↓
   
-Loss > 200% of credit?
+Loss > 250% of credit?
   Yes → CLOSE (Phase 2)
   No ↓
   

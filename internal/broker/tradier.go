@@ -128,6 +128,14 @@ func NewTradierAPIWithBaseURL(
 	}
 }
 
+// WithHTTPClient allows overriding the HTTP client (tests, custom transport).
+func (t *TradierAPI) WithHTTPClient(c *http.Client) *TradierAPI {
+	if c != nil {
+		t.client = c
+	}
+	return t
+}
+
 // ============ EXACT API Response Structures ============
 
 // Handle single-object vs array responses from Tradier
@@ -391,8 +399,8 @@ func (t *TradierAPI) GetMarketClock(delayed bool) (*MarketClockResponse, error) 
 	return &response, nil
 }
 
-// IsTradingDay checks if the market is currently open for trading.
-// Returns true if state is "open", "premarket", or "postmarket", false otherwise.
+// IsTradingDay returns true on a trading session day (open, premarket, or postmarket).
+// This includes extended hours trading sessions beyond regular market hours.
 func (t *TradierAPI) IsTradingDay(delayed bool) (bool, error) {
 	clock, err := t.GetMarketClock(delayed)
 	if err != nil {
@@ -591,7 +599,7 @@ func (t *TradierAPI) GetOrderStatusCtx(ctx context.Context, orderID int) (*Order
 }
 
 // PlaceBuyToCloseOrder places a buy-to-close order for an option position.
-func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*OrderResponse, error) {
+func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate price for limit orders
 	if maxPrice <= 0 {
 		return nil, fmt.Errorf("invalid price for limit order: %.2f, price must be positive", maxPrice)
@@ -623,6 +631,9 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	params.Add("type", "limit")
 	params.Add("duration", nd)
 	params.Add("price", fmt.Sprintf("%.2f", maxPrice))
+	if len(tag) > 0 && tag[0] != "" {
+		params.Add("tag", tag[0])
+	}
 
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
 
@@ -703,6 +714,9 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return &APIError{Status: resp.StatusCode, Body: "failed to read error body"}
+		}
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s (retry-after: %s)", string(body), ra)}
 		}
 		return &APIError{Status: resp.StatusCode, Body: string(body)}
 	}

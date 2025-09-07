@@ -179,6 +179,9 @@ func (c *Client) isTransientError(err error) bool {
 		"network",
 		"dns",
 		"tcp",
+		"no such host",
+		"deadline exceeded",
+		"tls handshake",
 	}
 
 	for _, pattern := range transientPatterns {

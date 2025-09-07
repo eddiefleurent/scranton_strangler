@@ -166,14 +166,14 @@ func main() {
 					// Show details for selected strikes
 					fmt.Printf("\n  Option Details:\n")
 					for _, opt := range options {
-						if eq(opt.Strike, putStrike, 1e-3) && opt.OptionType == string(broker.OptionTypePut) {
+						if eq(opt.Strike, putStrike, broker.StrikeMatchEpsilon) && opt.OptionType == string(broker.OptionTypePut) {
 							fmt.Printf("  PUT:  Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
 							}
 							fmt.Println()
 						}
-						if eq(opt.Strike, callStrike, 1e-3) && opt.OptionType == string(broker.OptionTypeCall) {
+						if eq(opt.Strike, callStrike, broker.StrikeMatchEpsilon) && opt.OptionType == string(broker.OptionTypeCall) {
 							fmt.Printf("  CALL: Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
@@ -266,8 +266,12 @@ func main() {
 					if isOptionSymbol(pos.Symbol) {
 						unit = "contracts"
 					}
-					fmt.Printf("  %d. %s: %.0f %s (%s), Cost: $%.2f\n",
-						i+1, pos.Symbol, absFloat64(pos.Quantity), unit, posType, pos.CostBasis)
+					q := pos.Quantity
+					if math.Abs(q-math.Round(q)) < 1e-6 {
+						fmt.Printf("  %d. %s: %.0f %s (%s), Cost: $%.2f\n", i+1, pos.Symbol, q, unit, posType, pos.CostBasis)
+					} else {
+						fmt.Printf("  %d. %s: %.2f %s (%s), Cost: $%.2f\n", i+1, pos.Symbol, q, unit, posType, pos.CostBasis)
+					}
 				}
 
 				// Check for strangle
@@ -327,12 +331,6 @@ func maskAPIKey(apiKey string) string {
 	return fmt.Sprintf("%s...%s", apiKey[:showFirst], apiKey[len(apiKey)-showLast:])
 }
 
-func absFloat64(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
 
 func absInt(x int) int {
 	if x < 0 {

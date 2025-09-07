@@ -18,6 +18,7 @@ strategy:
   allocation_pct: 0.35  # 35% of account max
   escalate_loss_pct: 1.5  # Escalate if loss exceeds 150% of credit (must be < exit.stop_loss_pct)
   use_mock_historical_iv: false  # Enable only in tests/dev; real runs require live IV
+  fail_open_on_iv_error: false  # Allow entries when IV data unavailable (dev/test only; keep false for production)
   
   entry:
     min_ivr: 30  # Minimum IV rank to enter

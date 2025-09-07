@@ -157,6 +157,9 @@ func (s *JSONStorage) saveUnsafe() error {
 	}
 	f = nil // Prevent close in defer since we closed successfully
 
+	// Track whether directory has been synced to avoid double fsync
+	dirSynced := false
+
 	// Try atomic rename first
 	if err := os.Rename(tmpFile, s.filepath); err != nil {
 		// Check if it's an EXDEV error (cross-device link)
@@ -165,6 +168,8 @@ func (s *JSONStorage) saveUnsafe() error {
 			if copyErr := s.copyFile(tmpFile, s.filepath); copyErr != nil {
 				return fmt.Errorf("failed to copy temp file: %w", copyErr)
 			}
+			// copyFile already fsyncs destination directory
+			dirSynced = true
 		} else {
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
@@ -173,9 +178,11 @@ func (s *JSONStorage) saveUnsafe() error {
 	// Clear tmpFile so defer doesn't try to remove it
 	tmpFile = ""
 
-	// Sync the parent directory to ensure directory entry is persisted
-	if err := s.syncParentDir(); err != nil {
-		return fmt.Errorf("failed to sync parent directory: %w", err)
+	// Sync the parent directory to ensure directory entry is persisted (only if not already synced)
+	if !dirSynced {
+		if err := s.syncParentDir(); err != nil {
+			return fmt.Errorf("failed to sync parent directory: %w", err)
+		}
 	}
 
 	return nil
@@ -334,12 +341,9 @@ func (s *JSONStorage) validateFilePath(path string) error {
 func (s *JSONStorage) syncParentDir() error {
 	parentDir := filepath.Dir(s.filepath)
 
-	// Validate parent directory path
-	if err := s.validateFilePath(parentDir); err != nil {
-		return fmt.Errorf("invalid parent directory path: %w", err)
-	}
-
-	dir, err := os.Open(parentDir) // #nosec G304 - path is validated above
+	// Skip validation for storage root directory for performance
+	// parentDir is always the storage root, so validation is redundant
+	dir, err := os.Open(parentDir) // #nosec G304 - path is storage root, validated at construction
 	if err != nil {
 		return err
 	}
@@ -552,6 +556,7 @@ func clonePosition(pos *models.Position) *models.Position {
 	cloned := &models.Position{
 		ID:             pos.ID,
 		Symbol:         pos.Symbol,
+		State:          pos.State,
 		PutStrike:      pos.PutStrike,
 		CallStrike:     pos.CallStrike,
 		Expiration:     pos.Expiration,

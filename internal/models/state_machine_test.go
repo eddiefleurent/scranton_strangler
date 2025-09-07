@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -979,6 +980,90 @@ func TestPosition_CreditCalculationConsistency(t *testing.T) {
 					totalCredit, totalCreditForEmergency)
 			}
 		})
+	}
+}
+
+func TestPosition_JSONSerialization_ExcludesStateMachine(t *testing.T) {
+	// Create a new position and transition it to Open state
+	pos := NewPosition("test-pos", "SPY", 400, 410, time.Now().AddDate(0, 0, 45), 1)
+
+	// Transition through valid states: Idle -> Submitted -> Open
+	err := pos.TransitionState(StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to transition to submitted: %v", err)
+	}
+	err = pos.TransitionState(StateOpen, "order_filled")
+	if err != nil {
+		t.Fatalf("Failed to transition to open: %v", err)
+	}
+
+	// Verify initial state
+	if pos.GetCurrentState() != StateOpen {
+		t.Errorf("Expected position state to be %s, got %s", StateOpen, pos.GetCurrentState())
+	}
+	if pos.StateMachine == nil {
+		t.Error("Expected StateMachine to be initialized")
+	}
+
+	// Serialize to JSON
+	jsonData, err := json.Marshal(pos)
+	if err != nil {
+		t.Fatalf("Failed to marshal position to JSON: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+
+	// Verify StateMachine is NOT in the JSON (excluded with json:"-" tag)
+	if strings.Contains(jsonStr, "state_machine") {
+		t.Error("StateMachine should be excluded from JSON serialization, but found 'state_machine' in JSON")
+	}
+
+	// Verify State field IS in the JSON
+	if !strings.Contains(jsonStr, `"state":"open"`) {
+		t.Errorf("State field should be included in JSON serialization. JSON: %s", jsonStr)
+	}
+
+	// Verify other expected fields are present
+	expectedFields := []string{`"id":"test-pos"`, `"symbol":"SPY"`, `"call_strike":410`, `"put_strike":400`, `"quantity":1`}
+	for _, field := range expectedFields {
+		if !strings.Contains(jsonStr, field) {
+			t.Errorf("Expected field %s not found in JSON: %s", field, jsonStr)
+		}
+	}
+
+	// Deserialize from JSON
+	var deserializedPos Position
+	err = json.Unmarshal(jsonData, &deserializedPos)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal position from JSON: %v", err)
+	}
+
+	// Verify StateMachine is nil after deserialization (as expected)
+	if deserializedPos.StateMachine != nil {
+		t.Error("StateMachine should be nil after JSON deserialization")
+	}
+
+	// Verify persisted state is correct
+	if deserializedPos.GetCurrentState() != StateOpen {
+		t.Errorf("Expected deserialized position state to be %s, got %s", StateOpen, deserializedPos.GetCurrentState())
+	}
+
+	// Verify lazy initialization works - calling a method that uses StateMachine
+	// should initialize it from the persisted state
+	managementPhase := deserializedPos.GetManagementPhase()
+	if managementPhase != 0 { // Open state should have management phase 0
+		t.Errorf("Expected management phase 0 for Open state, got %d", managementPhase)
+	}
+
+	// Verify StateMachine is now initialized after lazy initialization
+	if deserializedPos.StateMachine == nil {
+		t.Error("StateMachine should be initialized after lazy initialization")
+	}
+
+	// Verify the StateMachine has the correct state
+	if deserializedPos.StateMachine.GetCurrentState() != StateOpen {
+		t.Errorf("StateMachine should be in %s state after lazy initialization, got %s",
+			StateOpen, deserializedPos.StateMachine.GetCurrentState())
 	}
 }
 

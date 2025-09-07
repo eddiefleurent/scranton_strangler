@@ -113,8 +113,10 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	// Find expiration around 45 DTE
 	targetExp := s.findTargetExpiration(s.config.DTETarget)
 
-	// Get option chain with Greeks (using cache)
-	options, err := s.getCachedOptionChain(s.config.Symbol, targetExp, true)
+	// Get option chain with Greeks (cached, with timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	options, err := s.getCachedOptionChainWithContext(ctx, s.config.Symbol, targetExp, true)
 	if err != nil {
 		return nil, err
 	}
@@ -204,8 +206,8 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 	// Use target expiration (around 45 DTE)
 	targetExp := s.findTargetExpiration(s.config.DTETarget)
 
-	// Get option chain for target expiration with Greeks
-	chain, err := s.broker.GetOptionChain(s.config.Symbol, targetExp, true)
+	// Get option chain for target expiration with Greeks (cached)
+	chain, err := s.getCachedOptionChain(s.config.Symbol, targetExp, true)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get option chain: %w", err)
 	}
@@ -271,11 +273,12 @@ func (s *StrangleStrategy) storeCurrentIVReading(iv float64, expiration string) 
 	}
 
 	// Create IV reading for today's date
+	now := time.Now().UTC()
 	reading := &models.IVReading{
 		Symbol:    s.config.Symbol,
-		Date:      time.Now().UTC().Truncate(24 * time.Hour),
+		Date:      now.Truncate(24 * time.Hour),
 		IV:        iv,
-		Timestamp: time.Now().UTC(),
+		Timestamp: now,
 	}
 
 	// Store the reading
@@ -444,10 +447,11 @@ func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withG
 	}
 
 	// Cache the result (write lock)
+	now := time.Now()
 	s.cacheMutex.Lock()
 	s.chainCache[cacheKey] = &optionChainCacheEntry{
 		chain:     chain,
-		timestamp: time.Now(),
+		timestamp: now,
 	}
 	s.cacheMutex.Unlock()
 
@@ -476,10 +480,11 @@ func (s *StrangleStrategy) getCachedOptionChainWithContext(ctx context.Context, 
 	}
 
 	// Cache the result (write lock)
+	now := time.Now()
 	s.cacheMutex.Lock()
 	s.chainCache[cacheKey] = &optionChainCacheEntry{
 		chain:     chain,
-		timestamp: time.Now(),
+		timestamp: now,
 	}
 	s.cacheMutex.Unlock()
 

@@ -19,20 +19,6 @@ func mustTempDir(t *testing.T) string {
 	return dir
 }
 
-// newJSONStorageWithPathForTest creates a JSONStorage instance with a custom path for testing.
-// This avoids reaching into unexported fields and maintains encapsulation.
-func newJSONStorageWithPathForTest(path string) (*JSONStorage, error) {
-	s := &JSONStorage{
-		data: &Data{
-			DailyPnL:   make(map[string]float64),
-			Statistics: &Statistics{},
-			History:    []models.Position{},
-		},
-		filepath: path,
-	}
-	return s, nil
-}
-
 // helper to read JSON file into Data for assertions
 func readDataFile(t *testing.T, p string) Data {
 	t.Helper()
@@ -88,15 +74,18 @@ func TestNewJSONStorage_FailsOnUnexpectedStatError(t *testing.T) {
 			t.Skip("could not provoke error reliably on Windows; skipping")
 		}
 	} else {
-		// Use a directory we don't have permission to create under (root) in CI-less envs may not fail.
-		// Instead, create a temp dir and remove it, then make parent a file so MkdirAll parent will succeed,
-		// but later Stat of file path can fail in odd ways; this test is best-effort.
+		// Create a directory with no write permissions to reliably force MkdirAll to fail
 		dir := mustTempDir(t)
-		parentFile := filepath.Join(dir, "notadir")
-		if err := os.WriteFile(parentFile, []byte("x"), 0o600); err != nil {
-			t.Fatalf("write parent file: %v", err)
+		noWriteDir := filepath.Join(dir, "nowrite")
+		if err := os.Mkdir(noWriteDir, 0o555); err != nil {
+			t.Fatalf("mkdir: %v", err)
 		}
-		path := filepath.Join(parentFile, "store.json")
+		defer func() {
+			// Cleanup: restore write permissions for directory removal
+			_ = os.Chmod(noWriteDir, 0o755)
+		}()
+
+		path := filepath.Join(noWriteDir, "subdir", "store.json")
 		_, err := NewJSONStorage(path)
 		if err == nil {
 			t.Skip("environment allowed invalid path; skipping")
@@ -620,29 +609,22 @@ func TestCopyFile_InvalidPathsRejected(t *testing.T) {
 
 func TestSyncParentDir_ErrorsOnInvalidParent(t *testing.T) {
 	dir := mustTempDir(t)
-	// Use a storage where parent path validation will fail by pointing storage file to outside parent,
-	// then calling syncParentDir should validate the parent (which is within storage dir) successfully.
-	// To force an error, create a storage instance with an escaping path and call syncParentDir.
 	path := filepath.Join(dir, "store.json")
 	s, err := NewJSONStorage(path)
 	if err != nil {
 		t.Fatalf("NewJSONStorage: %v", err)
 	}
-	// Craft a path outside of dir
-	outside := filepath.Join(filepath.Dir(dir), "x", "y.json")
-	// Create a test instance with the outside path to force validation failure
-	sOutside, err := newJSONStorageWithPathForTest(outside)
-	if err != nil {
-		t.Fatalf("newJSONStorageWithPathForTest: %v", err)
-	}
 
-	err = sOutside.syncParentDir()
-	if err == nil {
-		t.Fatalf("expected error from syncParentDir on invalid parent")
-	}
-	// Now test with valid path should succeed
+	// Test with valid path should succeed
 	if err := s.syncParentDir(); err != nil {
 		t.Fatalf("syncParentDir valid: %v", err)
+	}
+
+	// Test with path outside storage directory should fail
+	outside := filepath.Join(filepath.Dir(dir), "x", "y.json")
+	sOutside := &JSONStorage{filepath: outside}
+	if err := sOutside.syncParentDir(); err == nil {
+		t.Fatalf("expected error from syncParentDir on invalid parent")
 	}
 }
 

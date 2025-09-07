@@ -33,12 +33,18 @@ func (m *MockStorage) GetCurrentPosition() *models.Position {
 		return nil
 	}
 	// Return a deep copy to prevent external mutation of internal state
-	return clonePosition(m.currentPosition)
+	cloned := clonePosition(m.currentPosition)
+	// For mock storage, don't carry over runtime StateMachine
+	cloned.StateMachine = nil
+	return cloned
 }
 
 // SetCurrentPosition updates the mock current position.
 func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
-	m.currentPosition = clonePosition(pos)
+	cloned := clonePosition(pos)
+	// For mock storage, don't carry over runtime StateMachine
+	cloned.StateMachine = nil
+	m.currentPosition = cloned
 	return nil
 }
 
@@ -106,7 +112,11 @@ func (m *MockStorage) HasInHistory(id string) bool {
 
 // GetStatistics returns the mock statistics data.
 func (m *MockStorage) GetStatistics() *Statistics {
-	return m.statistics
+	if m.statistics == nil {
+		return &Statistics{}
+	}
+	s := *m.statistics
+	return &s
 }
 
 // GetDailyPnL returns the mock daily P&L for a date.

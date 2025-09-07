@@ -4,7 +4,8 @@ package util
 import "math"
 
 // RoundToTick rounds x to the nearest tick increment.
-// For example, with tick=0.01, 1.2345 becomes 1.23 or 1.24 depending on rounding.
+// Ties are rounded away from zero (per math.Round). For example, with tick=0.01:
+// 1.2345 -> 1.23, 1.2350 -> 1.24.
 func RoundToTick(x, tick float64) float64 {
 	// Guard non-finite inputs and zero tick
 	if tick == 0 || math.IsNaN(tick) || math.IsInf(tick, 0) || math.IsNaN(x) || math.IsInf(x, 0) {

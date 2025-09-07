@@ -61,6 +61,7 @@ type StrategyConfig struct {
 	AllocationPct       float64          `yaml:"allocation_pct"`
 	EscalateLossPct     float64          `yaml:"escalate_loss_pct"`
 	UseMockHistoricalIV bool             `yaml:"use_mock_historical_iv"`
+	FailOpenOnIVError   bool             `yaml:"fail_open_on_iv_error"` // If true, allow entries when IV data is unavailable (dev/test only)
 }
 
 // EntryConfig defines entry criteria for opening new positions.

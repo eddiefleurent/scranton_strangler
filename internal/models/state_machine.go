@@ -138,6 +138,18 @@ func NewStateMachine() *StateMachine {
 	return NewStateMachineWithLimits(3, 1)
 }
 
+// NewStateMachineFromState creates a new state machine initialized to a specific state
+func NewStateMachineFromState(state PositionState) *StateMachine {
+	sm := NewStateMachine()
+	sm.currentState = state
+	sm.previousState = state // Set previous to same to avoid inconsistency
+	sm.transitionTime = time.Now().UTC()
+	sm.transitionCount = make(map[PositionState]int)
+	// Initialize transition count for the current state to 1 to indicate it's been set
+	sm.transitionCount[state] = 1
+	return sm
+}
+
 // NewStateMachineWithLimits creates a new state machine with configurable limits
 func NewStateMachineWithLimits(maxAdj, maxRolls int) *StateMachine {
 	return &StateMachine{

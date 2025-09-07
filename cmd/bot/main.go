@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"log"
@@ -13,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
@@ -116,7 +116,7 @@ func main() {
 		MaxPositionLoss:     cfg.Risk.MaxPositionLoss,
 		MaxContracts:        cfg.Risk.MaxContracts,
 		UseMockHistoricalIV: cfg.Strategy.UseMockHistoricalIV,
-		FailOpenOnIVError:   false, // Default to fail-closed for safety
+		FailOpenOnIVError:   cfg.Strategy.FailOpenOnIVError, // Configurable fail-open behavior
 	}
 	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger, bot.storage)
 
@@ -248,19 +248,20 @@ func (b *Bot) checkExistingPosition() bool {
 
 	// Check if position is already closed
 	if position.GetCurrentState() == models.StateClosed {
-		// Check if this position was just closed by an exit order and needs completion
-		if position.ExitOrderID != "" && position.ExitReason != "" {
-			// Prevent double-finalization if already recorded in history
-			if b.storage.HasInHistory(position.ID) {
-				b.logger.Printf("Position %s already finalized in history; skipping completion", position.ID)
-				return false
-			}
+		// Position needs completion if it has exit order/reason but not in history
+		needsCompletion := position.ExitOrderID != "" &&
+			position.ExitReason != "" &&
+			!b.storage.HasInHistory(position.ID)
+
+		if needsCompletion {
 			b.logger.Printf("Position %s was closed by exit order, completing position close", position.ID)
 			exitReason := strategy.ExitReason(position.ExitReason)
 			b.completePositionClose(position, exitReason)
-			return false
+		} else if !b.storage.HasInHistory(position.ID) {
+			b.logger.Printf("Position %s is closed but missing completion data", position.ID)
+		} else {
+			b.logger.Printf("Position %s already finalized in history", position.ID)
 		}
-		b.logger.Printf("Position %s is already closed, treating as no active position", position.ID)
 		return false
 	}
 
@@ -590,17 +591,8 @@ func (b *Bot) checkAdjustments() {
 	// TODO: Implement adjustment logic (Phase 2)
 }
 
-// generatePositionID creates a simple unique ID for positions
+// generatePositionID creates a unique ID for positions using UUID for guaranteed uniqueness
 func generatePositionID() string {
-	// Simple ID generation using timestamp and random bytes
-	now := time.Now().Format("20060102-150405")
-
-	// Add 8 random bytes for uniqueness
-	randomBytes := make([]byte, 8)
-	if _, err := rand.Read(randomBytes); err != nil {
-		// Fallback if random fails
-		return fmt.Sprintf("%s-%d", now, time.Now().UnixNano()%10000)
-	}
-
-	return fmt.Sprintf("%s-%x", now, randomBytes)
+	// Use UUID for guaranteed uniqueness
+	return uuid.New().String()
 }

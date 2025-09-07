@@ -111,9 +111,8 @@ func TestTradierNormalizeDuration(t *testing.T) {
 func newTestAPIWithServer(handler http.HandlerFunc) (*TradierAPI, *httptest.Server) {
 	s := httptest.NewServer(handler)
 	api := NewTradierAPIWithBaseURL("test-key", "ACC123", false, s.URL)
-	// Use server client to avoid mismatched transports; copy timeout from ctor (10s)
-	api.client = s.Client()
-	api.baseURL = strings.TrimRight(s.URL, "/")
+	// Use server's client directly to ensure proper transport handling
+	api = api.WithHTTPClient(s.Client())
 	return api, s
 }
 
