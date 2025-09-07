@@ -330,7 +330,7 @@ func TestExtractUnderlyingFromOSI(t *testing.T) {
 			expected: "NVDA",
 		},
 		{
-			name:     "3-char underlying (AAPL)",
+			name:     "4-char underlying (AAPL)",
 			input:    "AAPL241220C00150000",
 			expected: "AAPL",
 		},

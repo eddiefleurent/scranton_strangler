@@ -86,7 +86,7 @@ func (p *Position) GetTotalCredit() float64 {
 
 // ProfitPercent returns the profit/loss as a percentage (0-100), not a ratio
 func (p *Position) ProfitPercent() float64 {
-	totalCredit := p.GetTotalCredit() * float64(p.Quantity) * 100
+	totalCredit := p.GetNetCredit() * float64(p.Quantity) * 100
 	if totalCredit == 0 {
 		return 0
 	}
@@ -262,7 +262,7 @@ func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (boo
 		dte = 0
 	}
 	// Convert total credit to total dollars for consistent units (includes adjustments)
-	totalCredit := p.GetTotalCredit() * float64(p.Quantity) * 100
+	totalCredit := p.GetNetCredit() * float64(p.Quantity) * 100
 	return p.StateMachine.ShouldEmergencyExit(
 		totalCredit, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
 }
