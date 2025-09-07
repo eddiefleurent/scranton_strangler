@@ -157,7 +157,7 @@ func TestGetCurrentPosition_DeepCopyIncludesSlicesAndStateMachineNilSafe(t *test
 	if err != nil {
 		t.Fatalf("NewJSONStorage: %v", err)
 	}
-	adj := models.Adjustment{Note: "roll"} // assuming Adjustment has a Note or similar; if not, zero value still ok
+	adj := models.Adjustment{Description: "roll"} // using Description field from Adjustment struct
 	pos := &models.Position{
 		ID:          "id-1",
 		Symbol:      "IWM",
@@ -176,9 +176,9 @@ func TestGetCurrentPosition_DeepCopyIncludesSlicesAndStateMachineNilSafe(t *test
 		t.Fatalf("expected 1 adjustment in copy, got %d", len(cp.Adjustments))
 	}
 	// Mutate copy and ensure original (inside storage) not affected
-	cp.Adjustments[0].Note = "changed"
+	cp.Adjustments[0].Description = "changed"
 	orig := s.GetCurrentPosition()
-	if orig.Adjustments[0].Note == "changed" {
+	if orig.Adjustments[0].Description == "changed" {
 		t.Fatalf("expected deep copy; original was mutated by copy")
 	}
 }
@@ -188,19 +188,19 @@ func TestClonePosition_NilSafeAndDeepCopy(t *testing.T) {
 		t.Fatalf("expected nil result when cloning nil")
 	}
 	orig := &models.Position{
-		ID:         "x",
-		Symbol:     "TSLA",
+		ID:     "x",
+		Symbol: "TSLA",
 		Adjustments: []models.Adjustment{
-			{Note: "a"},
-			{Note: "b"},
+			{Description: "a"},
+			{Description: "b"},
 		},
 	}
 	cl := clonePosition(orig)
 	if cl == nil || cl.ID != "x" || cl.Symbol != "TSLA" {
 		t.Fatalf("unexpected clone: %#v", cl)
 	}
-	cl.Adjustments[0].Note = "mutated"
-	if orig.Adjustments[0].Note == "mutated" {
+	cl.Adjustments[0].Description = "mutated"
+	if orig.Adjustments[0].Description == "mutated" {
 		t.Fatalf("expected adjustments deep-copied")
 	}
 }
@@ -215,6 +215,9 @@ func TestValidateFilePath_AllowsWithinStorageDirAndRejectsEscape(t *testing.T) {
 
 	// Allowed: same dir file
 	okPath := filepath.Join(dir, "a.json")
+	if err := os.WriteFile(okPath, []byte("test"), 0o600); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
 	if err := s.validateFilePath(okPath); err != nil {
 		t.Fatalf("validateFilePath should allow sibling file, got error: %v", err)
 	}
@@ -371,12 +374,12 @@ func TestAddAdjustment_AppendsAndPersists(t *testing.T) {
 	if err := s.SetCurrentPosition(&models.Position{ID: "p1"}); err != nil {
 		t.Fatalf("SetCurrentPosition: %v", err)
 	}
-	adj := models.Adjustment{Note: "test"}
+	adj := models.Adjustment{Description: "test"}
 	if err := s.AddAdjustment(adj); err != nil {
 		t.Fatalf("AddAdjustment: %v", err)
 	}
 	cp := s.GetCurrentPosition()
-	if len(cp.Adjustments) != 1 || cp.Adjustments[0].Note != "test" {
+	if len(cp.Adjustments) != 1 || cp.Adjustments[0].Description != "test" {
 		t.Fatalf("adjustment not added as expected: %#v", cp.Adjustments)
 	}
 	// Ensure persisted
@@ -406,14 +409,23 @@ func TestClosePosition_UpdatesHistoryStatsDailyPnLAndClearsCurrent(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewJSONStorage: %v", err)
 	}
-	// Create a position with a TransitionState method that may fail if StateMachine not initialized.
-	// We assume Position.TransitionState works when called with StateClosed.
-	s.mu.Lock()
-	s.data.CurrentPosition = &models.Position{
-		ID:        "p1",
-		Symbol:    "SPY",
-		EntryDate: time.Now().Add(-24 * time.Hour).UTC(),
+	// Create a position with proper state initialization
+	pos := models.NewPosition("p1", "SPY", 420, 480, time.Now().Add(30*24*time.Hour).UTC(), 1)
+	pos.CreditReceived = 2.5
+	pos.EntryDate = time.Now().Add(-24 * time.Hour).UTC()
+	pos.EntryIVR = 33.3
+	pos.EntrySpot = 450.12
+
+	// Transition through proper states: idle -> submitted -> open
+	if err := pos.TransitionState(models.StateSubmitted, "order_placed"); err != nil {
+		t.Fatalf("failed to transition to submitted state: %v", err)
 	}
+	if err := pos.TransitionState(models.StateOpen, "order_filled"); err != nil {
+		t.Fatalf("failed to transition to open state: %v", err)
+	}
+
+	s.mu.Lock()
+	s.data.CurrentPosition = pos
 	s.mu.Unlock()
 
 	pnl := 12.34
@@ -458,8 +470,22 @@ func TestUpdateStatistics_LossPathsViaClosePosition(t *testing.T) {
 
 	// Helper to open and close with pnl
 	open := func() {
+		pos := models.NewPosition("p", "SPY", 420, 480, time.Now().Add(30*24*time.Hour).UTC(), 1)
+		pos.CreditReceived = 2.5
+		pos.EntryDate = time.Now().Add(-24 * time.Hour).UTC()
+		pos.EntryIVR = 33.3
+		pos.EntrySpot = 450.12
+
+		// Transition through proper states: idle -> submitted -> open
+		if err := pos.TransitionState(models.StateSubmitted, "order_placed"); err != nil {
+			t.Fatalf("failed to transition to submitted state: %v", err)
+		}
+		if err := pos.TransitionState(models.StateOpen, "order_filled"); err != nil {
+			t.Fatalf("failed to transition to open state: %v", err)
+		}
+
 		s.mu.Lock()
-		s.data.CurrentPosition = &models.Position{ID: "p"}
+		s.data.CurrentPosition = pos
 		s.mu.Unlock()
 	}
 	// Win

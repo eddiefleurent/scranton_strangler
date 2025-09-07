@@ -19,10 +19,10 @@ import (
 // Option type constants - exported for use in comparisons
 const (
 	// OptionTypePutString is the string value for put options
-	OptionTypePutString  = "put"
+	OptionTypePutString = "put"
 	// OptionTypeCallString is the string value for call options
 	OptionTypeCallString = "call"
-	
+
 	// Internal aliases for backward compatibility
 	optionTypePut  = OptionTypePutString
 	optionTypeCall = OptionTypeCallString
@@ -800,7 +800,6 @@ func abs(x float64) float64 {
 	}
 	return x
 }
-
 
 // extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"

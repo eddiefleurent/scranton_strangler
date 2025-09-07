@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"strings"
 	"sync/atomic"
@@ -30,12 +29,61 @@ type fakeBroker struct {
 	resp *broker.OrderResponse
 }
 
-func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, qty int, maxDebit float64) (*broker.OrderResponse, error) {
-	atomic.AddInt32(&f.callCount, 1)
+// Implement the Broker interface methods
+func (f *fakeBroker) GetAccountBalance() (float64, error) {
+	return 10000.0, nil
+}
+
+func (f *fakeBroker) GetPositions() ([]broker.PositionItem, error) {
+	return []broker.PositionItem{}, nil
+}
+
+func (f *fakeBroker) GetQuote(symbol string) (*broker.QuoteItem, error) {
+	return &broker.QuoteItem{}, nil
+}
+
+func (f *fakeBroker) GetExpirations(symbol string) ([]string, error) {
+	return []string{}, nil
+}
+
+func (f *fakeBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return []broker.Option{}, nil
+}
+
+func (f *fakeBroker) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
+	return &broker.MarketClockResponse{}, nil
+}
+
+func (f *fakeBroker) IsTradingDay(delayed bool) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, qty int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
+	callNum := atomic.AddInt32(&f.callCount, 1)
 
 	// If configured to succeed after N attempts, return transient errors until then.
 	if f.successAfterN > 0 {
-		if int(atomic.LoadInt32(&f.callCount)) < f.successAfterN {
+		if int(callNum) < f.successAfterN {
 			if f.errTransient != nil {
 				return nil, f.errTransient
 			}
@@ -49,6 +97,11 @@ func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike 
 		return nil, f.errPermanent
 	}
 
+	// If transient error is set, always return it (for timeout testing)
+	if f.errTransient != nil {
+		return nil, f.errTransient
+	}
+
 	// Otherwise return success
 	return f.successResponse(), nil
 }
@@ -60,8 +113,26 @@ func (f *fakeBroker) successResponse() *broker.OrderResponse {
 	// Construct a minimal plausible OrderResponse.
 	// We only access Order.ID in production code logs; keep structure compatible.
 	return &broker.OrderResponse{
-		Order: broker.Order{
-			ID: 12345,
+		Order: struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		}{
+			ID:     12345,
+			Status: "ok",
 		},
 	}
 }
@@ -69,9 +140,9 @@ func (f *fakeBroker) successResponse() *broker.OrderResponse {
 func newTestPosition() *models.Position {
 	// Fill required fields referenced by production code.
 	return &models.Position{
-		ID:        "pos-abc-123",
-		Symbol:    "ABC",
-		PutStrike: 95.0,
+		ID:         "pos-abc-123",
+		Symbol:     "ABC",
+		PutStrike:  95.0,
 		CallStrike: 105.0,
 		Expiration: time.Date(2025, 10, 17, 0, 0, 0, 0, time.UTC),
 		Quantity:   1,
@@ -132,9 +203,9 @@ func TestNewClient_ConfigSanitizationAndDefaults(t *testing.T) {
 func TestIsTransientError_Patterns(t *testing.T) {
 	c, _ := makeClient(t, &fakeBroker{}, DefaultConfig)
 
-	cases := []struct{
+	cases := []struct {
 		name string
-		err error
+		err  error
 		want bool
 	}{
 		{"nil", nil, false},
@@ -175,15 +246,21 @@ func TestCalculateNextBackoff_GeneralBehavior(t *testing.T) {
 	c, _ := makeClient(t, &fakeBroker{}, cfg)
 
 	// Case 1: multiply by 1.5 within max, with jitter in [0, backoff/4)
-	next := c.calculateNextBackoff(4 * time.Millisecond) // base = 6ms, jitter in [0, 1ms)
-	if next < 6*time.Millisecond || next >= 7*time.Millisecond {
-		t.Fatalf("unexpected next backoff: got %v, expected [6ms,7ms)", next)
+	// Test multiple times to account for randomness
+	for i := 0; i < 10; i++ {
+		next := c.calculateNextBackoff(4 * time.Millisecond) // base = 6ms, jitter in [0, 1.5ms)
+		if next < 6*time.Millisecond || next >= 7500*time.Microsecond {
+			t.Fatalf("unexpected next backoff: got %v, expected [6ms,7.5ms)", next)
+		}
 	}
 
 	// Case 2: cap to MaxBackoff before jitter, then allow jitter up to MaxBackoff/4
-	next2 := c.calculateNextBackoff(8 * time.Millisecond) // base=12ms -> capped at 10ms; jitter in [0, 2ms)
-	if next2 < 10*time.Millisecond || next2 >= 12*time.Millisecond {
-		t.Fatalf("unexpected capped next backoff: got %v, expected [10ms,12ms)", next2)
+	// Test multiple times to account for randomness
+	for i := 0; i < 10; i++ {
+		next2 := c.calculateNextBackoff(8 * time.Millisecond) // base=12ms -> capped at 10ms; jitter in [0, 2.5ms)
+		if next2 < 10*time.Millisecond || next2 >= 12500*time.Microsecond {
+			t.Fatalf("unexpected capped next backoff: got %v, expected [10ms,12.5ms)", next2)
+		}
 	}
 
 	// Case 3: zero input stays zero (no jitter)
@@ -320,8 +397,8 @@ func TestClosePositionWithRetry_ContextCanceled(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected cancellation error")
 	}
-	if !strings.Contains(err.Error(), "operation canceled") {
-		t.Fatalf("expected 'operation canceled' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("expected 'context canceled' in error, got: %v", err)
 	}
 	// No broker calls should have been made if we checked ctx.Err() early
 	if atomic.LoadInt32(&fb.callCount) != 0 {
@@ -330,15 +407,16 @@ func TestClosePositionWithRetry_ContextCanceled(t *testing.T) {
 }
 
 func TestClosePositionWithRetry_TimeoutDuringBackoff(t *testing.T) {
+
 	// Force transient errors and a short timeout so that we hit the "timed out during backoff" branch.
 	fb := &fakeBroker{
 		errTransient: errors.New("connection reset"),
 	}
 	cfg := Config{
-		MaxRetries:     10,
-		InitialBackoff: 5 * time.Millisecond,
-		MaxBackoff:     5 * time.Millisecond,
-		Timeout:        2 * time.Millisecond, // shorter than backoff
+		MaxRetries:     3,
+		InitialBackoff: 100 * time.Millisecond,
+		MaxBackoff:     100 * time.Millisecond,
+		Timeout:        50 * time.Millisecond, // very short timeout to force timeout during backoff
 	}
 	c, _ := makeClient(t, fb, cfg)
 

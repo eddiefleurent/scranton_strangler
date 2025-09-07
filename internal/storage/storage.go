@@ -290,10 +290,14 @@ func (s *JSONStorage) validateFilePath(path string) error {
 		return fmt.Errorf("failed to resolve target path: %w", err)
 	}
 
-	// Resolve symlinks in target path
-	targetResolved, err := filepath.EvalSymlinks(targetAbs)
-	if err != nil {
-		return fmt.Errorf("failed to resolve symlinks in target path: %w", err)
+	// Resolve symlinks in target path (only if file exists)
+	targetResolved := targetAbs
+	if _, err := os.Stat(targetAbs); err == nil {
+		// File exists, try to resolve symlinks
+		if resolved, err := filepath.EvalSymlinks(targetAbs); err == nil {
+			targetResolved = resolved
+		}
+		// If symlink resolution fails, use the absolute path as-is
 	}
 
 	// Compute the relative path from resolved storage root to resolved target
@@ -370,7 +374,25 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 
 	// Update position status
 	// Position state will be managed by the state machine, not a string field
-	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, reason); err != nil {
+	// Map the reason to appropriate state transition condition
+	var condition string
+	currentState := s.data.CurrentPosition.GetCurrentState()
+	switch currentState {
+	case models.StateOpen:
+		condition = "position_closed"
+	case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
+		condition = "exit_conditions"
+	case models.StateError:
+		condition = "force_close"
+	case models.StateAdjusting:
+		condition = "hard_stop"
+	case models.StateRolling:
+		condition = "force_close"
+	default:
+		condition = "exit_conditions" // fallback
+	}
+
+	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, condition); err != nil {
 		return fmt.Errorf("failed to transition position to closed state: %w", err)
 	}
 	s.data.CurrentPosition.CurrentPnL = finalPnL

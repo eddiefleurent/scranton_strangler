@@ -182,8 +182,8 @@ func main() {
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,
 							1, credit*0.95, // slightly below mid for better fill
-							true,  // preview mode
-							"day", // duration
+							true,      // preview mode
+							"day",     // duration
 							"preview", // tag
 						)
 

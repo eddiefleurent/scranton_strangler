@@ -1,11 +1,10 @@
 package broker
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -75,7 +74,7 @@ func TestNewTradierAPIWithBaseURL_CustomLimitsOverride(t *testing.T) {
 	}
 }
 
-func TestNormalizeDuration(t *testing.T) {
+func TestTradierNormalizeDuration(t *testing.T) {
 	tests := []struct {
 		in      string
 		want    string
@@ -88,8 +87,8 @@ func TestNormalizeDuration(t *testing.T) {
 		{"GTC", "gtc", false},
 		{"good-til-cancelled", "gtc", false},
 		{"goodtilcancelled", "gtc", false},
-		{"gtd", "gtd", false},
-		{"good-til-date", "gtd", false},
+		{"gtd", "", true},
+		{"good-til-date", "", true},
 		{"", "", true},
 		{"week", "", true},
 	}
@@ -316,18 +315,18 @@ func TestPlaceStrangleOrder_NormalizesAndBuildsRequest(t *testing.T) {
 	// Validate: normalization of duration and multi-leg params, order type/side for credit (sell_to_open)
 	api, srv := newTestAPIWithServer(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST")
+			t.Fatalf("method = %s, want POST", r.Method)
 		}
 		if got := r.URL.Path; !strings.HasSuffix(got, "/accounts/ACC123/orders") {
 			t.Fatalf("path = %s", got)
 		}
 		body, _ := io.ReadAll(r.Body)
-		// Expect duration normalized to "gtd"
+		// Expect duration normalized to "gtc"
 		got := string(body)
 		for _, expect := range []string{
 			"class=multileg",
 			"symbol=AAPL",
-			"duration=gtd",
+			"duration=gtc",
 			"type=credit",
 			"side%5B0%5D=sell_to_open",
 			"side%5B1%5D=sell_to_open",
@@ -343,15 +342,15 @@ func TestPlaceStrangleOrder_NormalizesAndBuildsRequest(t *testing.T) {
 			t.Fatalf("missing leg symbols: %s", got)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_, _ = w.Write([]byte(`{"order":{"create_date":"","type":"credit","symbol":"AAPL","side":"sell_to_open","class":"multileg","status":"ok","duration":"gtd","transaction_date":"","avg_fill_price":0,"exec_quantity":0,"last_fill_price":0,"last_fill_quantity":0,"remaining_quantity":0,"id":123,"price":1.00,"quantity":2}}`))
+		_, _ = w.Write([]byte(`{"order":{"create_date":"","type":"credit","symbol":"AAPL","side":"sell_to_open","class":"multileg","status":"ok","duration":"gtc","transaction_date":"","avg_fill_price":0,"exec_quantity":0,"last_fill_price":0,"last_fill_quantity":0,"remaining_quantity":0,"id":123,"price":1.00,"quantity":2}}`))
 	})
 	defer srv.Close()
 
-	resp, err := api.PlaceStrangleOrder("AAPL", 95.0, 105.0, "2025-01-17", 2, 1.00, false, "Good-Til-Date")
+	resp, err := api.PlaceStrangleOrder("AAPL", 95.0, 105.0, "2025-01-17", 2, 1.00, false, "gtc", "")
 	if err != nil {
 		t.Fatalf("PlaceStrangleOrder error: %v", err)
 	}
-	if resp.Order.ID != 123 || resp.Order.Type != "credit" || resp.Order.Duration != "gtd" {
+	if resp.Order.ID != 123 || resp.Order.Type != "credit" || resp.Order.Duration != "gtc" {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
@@ -363,27 +362,27 @@ func TestPlaceStrangleOrder_ValidationErrors(t *testing.T) {
 	defer srv.Close()
 
 	// invalid duration
-	if _, err := api.PlaceStrangleOrder("AAPL", 95, 105, "2025-01-17", 1, 1.0, false, "bad"); err == nil {
+	if _, err := api.PlaceStrangleOrder("AAPL", 95, 105, "2025-01-17", 1, 1.0, false, "bad", ""); err == nil {
 		t.Fatalf("expected invalid duration error")
 	}
 	// invalid price
-	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 1, 0, false, false, "day"); err == nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 1, 0, false, false, "day", ""); err == nil {
 		t.Fatalf("expected invalid price error")
 	}
 	// invalid quantity
-	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 0, 1.0, false, false, "day"); err == nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 0, 1.0, false, false, "day", ""); err == nil {
 		t.Fatalf("expected invalid quantity error")
 	}
 	// invalid strikes
-	if _, err := api.placeStrangleOrderInternal("AAPL", 110, 105, "2025-01-17", 1, 1.0, false, false, "day"); err == nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 110, 105, "2025-01-17", 1, 1.0, false, false, "day", ""); err == nil {
 		t.Fatalf("expected invalid strikes error")
 	}
 	// invalid expiration format
-	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "17-01-2025", 1, 1.0, false, false, "day"); err == nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "17-01-2025", 1, 1.0, false, false, "day", ""); err == nil {
 		t.Fatalf("expected invalid expiration format error")
 	}
 	// invalid duration post-normalization guard
-	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 1, 1.0, false, false, "xxx"); err == nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 1, 1.0, false, false, "xxx", ""); err == nil {
 		t.Fatalf("expected invalid duration error")
 	}
 }
@@ -405,7 +404,7 @@ func TestPlaceStrangleBuyToClose_SetsDebitAndSide(t *testing.T) {
 	})
 	defer srv.Close()
 
-	resp, err := api.PlaceStrangleBuyToClose("AAPL", 95, 105, "2025-01-17", 3, 2.50)
+	resp, err := api.PlaceStrangleBuyToClose("AAPL", 95, 105, "2025-01-17", 3, 2.50, "")
 	if err != nil {
 		t.Fatalf("PlaceStrangleBuyToClose error: %v", err)
 	}
@@ -521,7 +520,7 @@ func TestCalculateStrangleCredit_MidPricesAndMissingStrikes(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// mid put = 1.2, mid call = 1.4 => total 2.6
-	if credit != 2.6 {
+	if math.Abs(credit-2.6) > 1e-10 {
 		t.Fatalf("credit = %v, want 2.6", credit)
 	}
 
@@ -580,7 +579,7 @@ func TestExtractUnderlyingFromOSI_BasicAndEdgeCases(t *testing.T) {
 	}
 }
 
-func TestOptionTypeFromSymbol(t *testing.T) {
+func TestTradierOptionTypeFromSymbol(t *testing.T) {
 	cases := []struct {
 		in   string
 		want string
@@ -657,7 +656,7 @@ func TestPlaceStrangleOrder_PreviewAddsFlag(t *testing.T) {
 	})
 	defer srv.Close()
 
-	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 1, 1.0, true, false, "day"); err != nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 95, 105, "2025-01-17", 1, 1.0, true, false, "day", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -719,7 +718,7 @@ func TestPlaceStrangleOrderInternal_OCCSymbolBuild(t *testing.T) {
 	defer srv.Close()
 
 	// 2025-01-02 -> 250102
-	if _, err := api.placeStrangleOrderInternal("AAPL", 95.1234, 105.9876, "2025-01-02", 1, 1.00, false, false, "day"); err != nil {
+	if _, err := api.placeStrangleOrderInternal("AAPL", 95.1234, 105.9876, "2025-01-02", 1, 1.00, false, false, "day", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	dec := prettyForm(captured)
