@@ -1,0 +1,3 @@
+positions*.json
+!positions.example.json
+!.gitkeep

@@ -113,11 +113,7 @@ func NewPosition(id, symbol string, putStrike, callStrike float64, expiration ti
 
 // TransitionState moves the position to a new state
 func (p *Position) TransitionState(to PositionState, condition string) error {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-
-	err := p.StateMachine.Transition(to, condition)
+	err := p.ensureMachine().Transition(to, condition)
 	if err != nil {
 		return fmt.Errorf("position %s state transition failed: %w", p.ID, err)
 	}
@@ -143,46 +139,38 @@ func (p *Position) GetCurrentState() PositionState {
 	return p.State
 }
 
-// IsInManagement returns true if position is in football management states
-func (p *Position) IsInManagement() bool {
+// ensureMachine ensures the StateMachine is initialized from persisted state
+func (p *Position) ensureMachine() *StateMachine {
 	if p.StateMachine == nil {
 		p.StateMachine = NewStateMachineFromState(p.State)
 	}
-	return p.StateMachine.IsManagementState()
+	return p.StateMachine
+}
+
+// IsInManagement returns true if position is in football management states
+func (p *Position) IsInManagement() bool {
+	return p.ensureMachine().IsManagementState()
 }
 
 // GetManagementPhase returns which "down" we're in (1-4)
 func (p *Position) GetManagementPhase() int {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	return p.StateMachine.GetManagementPhase()
+	return p.ensureMachine().GetManagementPhase()
 }
 
 // CanAdjust returns true if more adjustments are allowed
 func (p *Position) CanAdjust() bool {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	return p.StateMachine.CanAdjust()
+	return p.ensureMachine().CanAdjust()
 }
 
 // CanRoll returns true if time rolls are still allowed
 func (p *Position) CanRoll() bool {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	return p.StateMachine.CanRoll()
+	return p.ensureMachine().CanRoll()
 }
 
 // ValidateState ensures the position state is consistent with strong invariants
 func (p *Position) ValidateState() error {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-
 	// Validate state machine consistency
-	if err := p.StateMachine.ValidateStateConsistency(); err != nil {
+	if err := p.ensureMachine().ValidateStateConsistency(); err != nil {
 		return fmt.Errorf("position %s state validation failed: %w", p.ID, err)
 	}
 
@@ -257,57 +245,39 @@ func (p *Position) ValidateState() error {
 
 // GetStateDescription returns a human-readable state description
 func (p *Position) GetStateDescription() string {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	return p.StateMachine.GetStateDescription()
+	return p.ensureMachine().GetStateDescription()
 }
 
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
 func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (bool, string) {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
 	dte := p.CalculateDTE()
 	if dte < 0 {
 		dte = 0
 	}
 	// Convert total credit to total dollars for consistent units (includes adjustments)
 	totalCredit := p.GetNetCredit() * float64(p.Quantity) * 100
-	return p.StateMachine.ShouldEmergencyExit(
+	return p.ensureMachine().ShouldEmergencyExit(
 		totalCredit, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
 }
 
 // SetFourthDownOption sets the Fourth Down strategy option
 func (p *Position) SetFourthDownOption(option FourthDownOption) {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	p.StateMachine.SetFourthDownOption(option)
+	p.ensureMachine().SetFourthDownOption(option)
 }
 
 // GetFourthDownOption returns the selected Fourth Down strategy
 func (p *Position) GetFourthDownOption() FourthDownOption {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	return p.StateMachine.GetFourthDownOption()
+	return p.ensureMachine().GetFourthDownOption()
 }
 
 // CanPunt returns true if punt is still allowed
 func (p *Position) CanPunt() bool {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	return p.StateMachine.CanPunt()
+	return p.ensureMachine().CanPunt()
 }
 
 // ExecutePunt performs punt operation
 func (p *Position) ExecutePunt() error {
-	if p.StateMachine == nil {
-		p.StateMachine = NewStateMachineFromState(p.State)
-	}
-	if err := p.StateMachine.ExecutePunt(); err != nil {
+	if err := p.ensureMachine().ExecutePunt(); err != nil {
 		return fmt.Errorf("position %s punt failed: %w", p.ID, err)
 	}
 	// Update the canonical persisted state to match the StateMachine

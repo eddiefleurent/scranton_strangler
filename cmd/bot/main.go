@@ -285,6 +285,9 @@ func (b *Bot) checkExistingPosition() bool {
 				b.logger.Printf("Warning: Failed to update position P&L: %v", err)
 			} else {
 				b.lastPnLUpdate = now
+				if err := b.storage.Save(); err != nil {
+					b.logger.Printf("Warning: Failed to persist P&L update: %v", err)
+				}
 			}
 		}
 	}
@@ -404,6 +407,9 @@ func (b *Bot) executeEntry() {
 		b.logger.Printf("Failed to save position: %v", err)
 		return
 	}
+	if err := b.storage.Save(); err != nil {
+		b.logger.Printf("Warning: Failed to persist position save: %v", err)
+	}
 
 	b.logger.Printf("Position saved: ID=%s, Credit=$%.2f, DTE=%d",
 		position.ID, position.CreditReceived, position.DTE)
@@ -453,6 +459,9 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 	if err := b.storage.SetCurrentPosition(position); err != nil {
 		b.logger.Printf("Failed to save position with close order ID: %v", err)
 		return
+	}
+	if err := b.storage.Save(); err != nil {
+		b.logger.Printf("Warning: Failed to persist position update: %v", err)
 	}
 
 	b.logger.Printf("Position %s transitioned to adjusting state, monitoring close order %d", position.ID, closeOrder.Order.ID)

@@ -4,15 +4,13 @@ config.yaml
 .env.*
 
 # Binary
-/strangle-bot
+/bin/
+/dist/
 /bot
-/cmd/bot/strangle-bot
-/scripts/test_otoco/test_otoco
-/scripts/test_tradier/test_tradier
-/scripts/test_helper/test_helper
-/scripts/test_otoco/test_otoco.exe
-/scripts/test_tradier/test_tradier.exe
-/scripts/test_helper/test_helper.exe
+/strangle-bot*
+/cmd/bot/strangle-bot*
+/scripts/test_*/test_*
+test_*
 *.exe
 
 # Test files
@@ -45,8 +43,6 @@ logs/
 # Position data
 positions.json
 positions_backup.json
-data/positions.json
-data/positions_backup.json
 
 # Database
 *.db
@@ -59,13 +55,10 @@ temp/
 *.tmp
 
 # Coverage
-coverage.txt
-coverage.out
-coverage.html
+coverage.*
 *.cover
 *.coverprofile
 gosec-results.sarif
-/test_tradier
-/test_tag
-/test_helper
-/test_otoco
+reports/
+/test_*/test_*
+/test_*/test_*.exe

@@ -613,8 +613,8 @@ func (t *TradierAPI) placeStrangleOrderInternalCtx(
 	// Use rounded 1/1000th dollars to build OCC strike field
 	// Note: Rounding to 1/1000 and %08d is standard OCC format, but edge cases like
 	// strikes ending in .995 (e.g., 394.995) may round to unexpected values.
-	putStrikeInt := int(putStrike*1000 + 0.5)
-	callStrikeInt := int(callStrike*1000 + 0.5)
+	putStrikeInt := int(math.Round(putStrike * 1000))
+	callStrikeInt := int(math.Round(callStrike * 1000))
 
 	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, putStrikeInt)
 	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, callStrikeInt)
@@ -633,6 +633,13 @@ func (t *TradierAPI) placeStrangleOrderInternalCtx(
 		side = "sell_to_open"
 	}
 	params.Add("type", orderType)
+
+	// Add price parameter for credit/debit orders (required by Tradier API)
+	if limitPrice <= 0 {
+		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
+			orderType, limitPrice)
+	}
+	params.Add("price", fmt.Sprintf("%.2f", limitPrice))
 
 	if preview {
 		params.Add("preview", "true")
@@ -833,12 +840,12 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return &APIError{Status: resp.StatusCode, Body: "failed to read error body"}
+			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s -> failed to read error body", method, endpoint)}
 		}
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s (retry-after: %s)", string(body), ra)}
+			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s -> %s (retry-after: %s)", method, endpoint, string(body), ra)}
 		}
-		return &APIError{Status: resp.StatusCode, Body: string(body)}
+		return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s -> %s", method, endpoint, string(body))}
 	}
 
 	if resp.StatusCode == http.StatusNoContent {

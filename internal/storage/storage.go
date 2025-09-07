@@ -78,6 +78,10 @@ func (s *JSONStorage) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if err := s.validateFilePath(s.filepath); err != nil {
+		return fmt.Errorf("invalid storage path: %w", err)
+	}
+
 	data, err := os.ReadFile(s.filepath)
 	if err != nil {
 		return err
@@ -112,6 +116,10 @@ func (s *JSONStorage) Save() error {
 // saveUnsafe performs the actual save operation without acquiring locks
 // Must be called with mutex already held
 func (s *JSONStorage) saveUnsafe() error {
+	if err := s.validateFilePath(s.filepath); err != nil {
+		return fmt.Errorf("invalid storage path: %w", err)
+	}
+
 	s.data.LastUpdated = time.Now().UTC()
 
 	// Create temp file in the same directory as the target file to avoid EXDEV

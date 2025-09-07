@@ -65,6 +65,10 @@ func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 
 	m.currentPosition.CurrentPnL = finalPnL
 
+	// Set exit metadata to mirror JSON storage semantics
+	m.currentPosition.ExitReason = reason
+	// Note: ExitDate is already set by TransitionState() call above
+
 	// Add to history
 	m.history = append(m.history, *m.currentPosition)
 
@@ -186,9 +190,10 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 	} else if pnl < 0 {
 		m.statistics.LosingTrades++
 		if m.statistics.LosingTrades == 1 {
-			m.statistics.AverageLoss = pnl
+			m.statistics.AverageLoss = -pnl
 		} else {
-			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + pnl) /
+			loss := -pnl
+			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + loss) /
 				float64(m.statistics.LosingTrades)
 		}
 	}

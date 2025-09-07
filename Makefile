@@ -15,19 +15,22 @@ help:
 	@echo "  test-coverage/security-scan/build-test-helper"
 	@echo "  dev-setup"
 
-# Go binary name
+# Go binary name and paths
 BINARY_NAME=strangle-bot
-BINARY_PATH=./$(BINARY_NAME)
+BIN_DIR=bin
+BINARY_PATH=./$(BIN_DIR)/$(BINARY_NAME)
 
 # Build the application
 build:
 	@echo "Building $(BINARY_NAME)..."
-	go build -o $(BINARY_NAME) cmd/bot/main.go
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/$(BINARY_NAME) cmd/bot/main.go
 
 # Build for production (optimized)
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o $(BINARY_NAME) cmd/bot/main.go
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o $(BIN_DIR)/$(BINARY_NAME) cmd/bot/main.go
 
 # Run tests
 test:
@@ -55,7 +58,7 @@ run: build
 clean:
 	@echo "Cleaning..."
 	go clean -testcache
-	rm -f $(BINARY_NAME) coverage.out coverage.html *.test *.prof
+	rm -rf $(BIN_DIR) coverage.out coverage.html *.test *.prof
 
 # Docker commands
 docker-build:
@@ -101,7 +104,8 @@ test-api:
 # Build test helper
 build-test-helper:
 	@echo "Building test helper..."
-	go build -tags test -o scripts/test_helper/test_helper scripts/test_helper/test_helper.go
+	@mkdir -p $(BIN_DIR)
+	go build -tags test -o $(BIN_DIR)/test_helper scripts/test_helper/test_helper.go
 
 # Security scan
 security-scan:
