@@ -6,7 +6,8 @@ The SPY Short Strangle bot uses a simplified state machine to manage position li
 
 ### Core States
 - **`idle`** - No active position, ready for new opportunities
-- **`open`** - Position opened, ready for management  
+- **`submitted`** - Orders submitted, awaiting fill
+- **`open`** - Position opened, ready for management
 - **`closed`** - Position closed successfully
 - **`error`** - Error state requiring manual intervention
 
@@ -23,9 +24,9 @@ The SPY Short Strangle bot uses a simplified state machine to manage position li
 ## State Transitions
 
 ```
-idle → open → first_down → second_down → third_down → fourth_down
-       ↓         ↑            ↑            ↑            ↓
-     closed ← ─ ─ ┴ ─ ─ ─ ─ ─ ─ ┴ ─ ─ ─ ─ ─ ─ ┴ ─ ─ → rolling
+idle → submitted → open → first_down → second_down → third_down → fourth_down
+       ↓             ↑         ↑            ↑            ↑            ↓
+     closed ← ─ ─ ─ ─ ┴ ─ ─ ─ ┴ ─ ─ ─ ─ ─ ─ ┴ ─ ─ ─ ─ ─ ─ ┴ ─ ─ → rolling
                                                     ↓
                               adjusting ← ─ ─ ─ ─ ─ ┘
                                  ↓

@@ -21,6 +21,9 @@ type optionChainCacheEntry struct {
 	timestamp time.Time
 }
 
+// Cache TTL for option chains
+const optionChainCacheTTL = 1 * time.Minute
+
 // StrangleStrategy implements a short strangle options strategy.
 type StrangleStrategy struct {
 	broker     broker.Broker
@@ -312,6 +315,19 @@ func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, 
 	endDate := time.Now().UTC().Truncate(24 * time.Hour)
 	startDate := endDate.AddDate(0, 0, -days)
 
+	// Check if storage is available
+	if s.storage == nil {
+		if s.config.FailOpenOnIVError {
+			// Fail-open: Use mock data for dev/test when storage is unset
+			s.logger.Printf("Warning: Storage is unset, using mock historical IV data (fail-open mode)")
+			return s.generateMockHistoricalIV(days), nil
+		} else {
+			// Fail-closed: Block entries when storage unavailable (conservative approach)
+			s.logger.Printf("Warning: Storage is unset, using 0.0 IVR (fail-closed mode)")
+			return nil, fmt.Errorf("storage interface is unset")
+		}
+	}
+
 	readings, err := s.storage.GetIVReadings(s.config.Symbol, startDate, endDate)
 	if err != nil {
 		if s.config.FailOpenOnIVError {
@@ -425,23 +441,22 @@ func getMaxIV(historicalIVs []float64) float64 {
 	return maxIV
 }
 
-// getCachedOptionChain retrieves option chain from cache or fetches from broker if not cached or expired
-func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+// getCachedOptionChainWithFetcher is a helper function that handles the common caching logic
+func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration string, withGreeks bool, fetcher func() ([]broker.Option, error)) ([]broker.Option, error) {
 	cacheKey := fmt.Sprintf("%s-%s-%t", symbol, expiration, withGreeks)
-	const cacheDuration = 1 * time.Minute // Cache for 1 minute
 
 	// Check cache first (read lock)
 	s.cacheMutex.RLock()
 	if entry, exists := s.chainCache[cacheKey]; exists {
-		if time.Since(entry.timestamp) < cacheDuration {
+		if time.Since(entry.timestamp) < optionChainCacheTTL {
 			s.cacheMutex.RUnlock()
 			return entry.chain, nil
 		}
 	}
 	s.cacheMutex.RUnlock()
 
-	// Fetch from broker (no lock needed here)
-	chain, err := s.broker.GetOptionChain(symbol, expiration, withGreeks)
+	// Fetch from broker using provided fetcher function
+	chain, err := fetcher()
 	if err != nil {
 		return nil, err
 	}
@@ -458,37 +473,18 @@ func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withG
 	return chain, nil
 }
 
+// getCachedOptionChain retrieves option chain from cache or fetches from broker if not cached or expired
+func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return s.getCachedOptionChainWithFetcher(symbol, expiration, withGreeks, func() ([]broker.Option, error) {
+		return s.broker.GetOptionChain(symbol, expiration, withGreeks)
+	})
+}
+
 // getCachedOptionChainWithContext retrieves option chain from cache or fetches from broker with context timeout
 func (s *StrangleStrategy) getCachedOptionChainWithContext(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
-	cacheKey := fmt.Sprintf("%s-%s-%t", symbol, expiration, withGreeks)
-	const cacheDuration = 1 * time.Minute // Cache for 1 minute
-
-	// Check cache first (read lock)
-	s.cacheMutex.RLock()
-	if entry, exists := s.chainCache[cacheKey]; exists {
-		if time.Since(entry.timestamp) < cacheDuration {
-			s.cacheMutex.RUnlock()
-			return entry.chain, nil
-		}
-	}
-	s.cacheMutex.RUnlock()
-
-	// Fetch from broker with context timeout - use context-aware broker method
-	chain, err := s.broker.GetOptionChainCtx(ctx, symbol, expiration, withGreeks)
-	if err != nil {
-		return nil, err
-	}
-
-	// Cache the result (write lock)
-	now := time.Now()
-	s.cacheMutex.Lock()
-	s.chainCache[cacheKey] = &optionChainCacheEntry{
-		chain:     chain,
-		timestamp: now,
-	}
-	s.cacheMutex.Unlock()
-
-	return chain, nil
+	return s.getCachedOptionChainWithFetcher(symbol, expiration, withGreeks, func() ([]broker.Option, error) {
+		return s.broker.GetOptionChainCtx(ctx, symbol, expiration, withGreeks)
+	})
 }
 
 // CalculatePositionPnL calculates current P&L for a position using live option quotes
@@ -684,7 +680,12 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	allocatedCapital := balance * s.config.AllocationPct
 
 	// Estimate buying power requirement (simplified)
-	// Real calculation would use margin requirements
+	// NOTE: Current implementation assumes BPR scales with credit, but for short strangles,
+	// margin requirements are more complex and depend on:
+	// - Maximum loss potential (span between strikes)
+	// - Underlying price
+	// - Regulatory minimums (typically 10% of underlying + credit received)
+	// TODO: Replace with proper margin calculation based on strike prices and underlying
 	bprMultiplier := s.config.BPRMultiplier
 	if bprMultiplier <= 0 {
 		bprMultiplier = 10.0 // Default to 10x if not configured
@@ -774,6 +775,11 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 
 // validateStrikeSelection performs sanity checks on selected strikes
 func (s *StrangleStrategy) validateStrikeSelection(putStrike, callStrike, spotPrice float64) error {
+	// Validate spot price before any calculations to prevent division by zero or invalid values
+	if spotPrice <= 0 || math.IsNaN(spotPrice) || math.IsInf(spotPrice, 0) {
+		return fmt.Errorf("invalid spot price: %v", spotPrice)
+	}
+
 	// Check for inverted strikes (put should be below call)
 	if putStrike >= callStrike {
 		return fmt.Errorf("inverted strikes detected: put %.0f >= call %.0f", putStrike, callStrike)

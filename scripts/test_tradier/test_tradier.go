@@ -104,11 +104,22 @@ func main() {
 				continue
 			}
 
-			// Parse date at midnight UTC to avoid timezone issues
-			expDateUTC := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, time.UTC)
-			nowUTC := time.Now().UTC()
-			todayUTC := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
-			dte := int(expDateUTC.Sub(todayUTC).Hours() / 24)
+			// Load market timezone (ET) for accurate DTE calculation
+			etLoc, err := time.LoadLocation("America/New_York")
+			if err != nil {
+				fmt.Printf("Error loading ET timezone: %v\n", err)
+				continue
+			}
+
+			// Convert expiration date to ET midnight
+			expDateET := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, etLoc)
+
+			// Get current time in ET and create today at ET midnight
+			nowET := time.Now().In(etLoc)
+			todayET := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, etLoc)
+
+			// Calculate DTE as whole days difference
+			dte := int(expDateET.Sub(todayET).Hours() / 24)
 
 			// Skip past or negative DTE expirations
 			if dte < 0 {
@@ -344,6 +355,5 @@ func eq(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 // Example: SPY240920P00450000
 // Uses regex pattern: ^[A-Z]{1,6}\d{6}[CP]\d{8}$
 func isOptionSymbol(s string) bool {
-	u := strings.ToUpper(strings.TrimSpace(s))
-	return optionSymbolRegex.MatchString(u)
+	return optionSymbolRegex.MatchString(strings.ToUpper(strings.TrimSpace(s)))
 }

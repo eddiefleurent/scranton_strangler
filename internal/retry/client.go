@@ -20,6 +20,7 @@ type Config struct {
 	InitialBackoff time.Duration
 	MaxBackoff     time.Duration
 	Timeout        time.Duration
+	CallTimeout    time.Duration
 }
 
 // DefaultConfig provides sensible defaults for retry operations.
@@ -28,6 +29,7 @@ var DefaultConfig = Config{
 	InitialBackoff: 1 * time.Second,
 	MaxBackoff:     30 * time.Second,
 	Timeout:        2 * time.Minute,
+	CallTimeout:    15 * time.Second,
 }
 
 // Client wraps a broker with retry logic for operations.
@@ -49,6 +51,11 @@ func NewClient(broker broker.Broker, logger *log.Logger, config ...Config) *Clie
 		logger = log.Default()
 	}
 
+	// Validate broker is not nil
+	if broker == nil {
+		logger.Panicf("nil broker passed to NewClient")
+	}
+
 	// Validate and sanitize config fields
 	if cfg.MaxRetries < 0 {
 		cfg.MaxRetries = DefaultConfig.MaxRetries
@@ -61,6 +68,9 @@ func NewClient(broker broker.Broker, logger *log.Logger, config ...Config) *Clie
 	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultConfig.Timeout
+	}
+	if cfg.CallTimeout <= 0 {
+		cfg.CallTimeout = DefaultConfig.CallTimeout
 	}
 	if cfg.MaxBackoff < cfg.InitialBackoff {
 		cfg.MaxBackoff = cfg.InitialBackoff
@@ -111,8 +121,9 @@ func (c *Client) ClosePositionWithRetry(
 
 		c.logger.Printf("Close attempt %d/%d for position %s", attempt+1, c.config.MaxRetries+1, position.ID)
 
+		attemptCtx, attemptCancel := context.WithTimeout(closeCtx, c.config.CallTimeout)
 		closeOrder, err := c.broker.CloseStranglePositionCtx(
-			closeCtx,
+			attemptCtx,
 			position.Symbol,
 			position.PutStrike,
 			position.CallStrike,
@@ -121,6 +132,7 @@ func (c *Client) ClosePositionWithRetry(
 			maxDebit,
 			clientOrderID,
 		)
+		attemptCancel()
 
 		if err == nil {
 			// OrderResponse may contain a zero-value Order; avoid nil comparisons on structs.
@@ -151,10 +163,8 @@ func (c *Client) ClosePositionWithRetry(
 
 func (c *Client) calculateNextBackoff(currentBackoff time.Duration) time.Duration {
 	backoff := time.Duration(float64(currentBackoff) * 1.5)
-	if backoff > c.config.MaxBackoff {
-		backoff = c.config.MaxBackoff
-	}
 
+	// Calculate jitter before capping to prevent overshoot
 	maxJitter := int64(backoff / 4)
 	if maxJitter > 0 {
 		jitterVal, err := rand.Int(rand.Reader, big.NewInt(maxJitter))
@@ -164,6 +174,11 @@ func (c *Client) calculateNextBackoff(currentBackoff time.Duration) time.Duratio
 			jitter := time.Duration(jitterVal.Int64())
 			backoff += jitter
 		}
+	}
+
+	// Cap the final backoff value to MaxBackoff
+	if backoff > c.config.MaxBackoff {
+		backoff = c.config.MaxBackoff
 	}
 
 	return backoff

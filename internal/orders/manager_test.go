@@ -60,10 +60,22 @@ func TestManager_HandleOrderTimeout_EntryOrder(t *testing.T) {
 	// Simulate entry order timeout
 	m.handleOrderTimeout("test-pos")
 
-	// Verify position transitioned to closed with correct reason
+	// Verify position was closed and moved to history (current position should be nil)
 	updatedPosition := mockStorage.GetCurrentPosition()
-	if updatedPosition.GetCurrentState() != models.StateClosed {
-		t.Errorf("Expected position to be closed, got %s", updatedPosition.GetCurrentState())
+	if updatedPosition != nil {
+		t.Errorf("Expected current position to be nil after close, got %v", updatedPosition)
+	}
+
+	// Verify position exists in history and is closed
+	history := mockStorage.GetHistory()
+	if len(history) != 1 {
+		t.Errorf("Expected 1 position in history, got %d", len(history))
+		return
+	}
+
+	closedPosition := history[0]
+	if closedPosition.GetCurrentState() != models.StateClosed {
+		t.Errorf("Expected position in history to be closed, got %s", closedPosition.GetCurrentState())
 	}
 }
 
@@ -111,10 +123,22 @@ func TestManager_HandleOrderTimeout_ExitOrderFromAdjusting(t *testing.T) {
 	// Simulate exit order timeout
 	m.handleOrderTimeout("test-pos")
 
-	// Verify position transitioned to closed with correct reason
+	// Verify position was closed and moved to history (current position should be nil)
 	updatedPosition := mockStorage.GetCurrentPosition()
-	if updatedPosition.GetCurrentState() != models.StateClosed {
-		t.Errorf("Expected position to be closed, got %s", updatedPosition.GetCurrentState())
+	if updatedPosition != nil {
+		t.Errorf("Expected current position to be nil after close, got %v", updatedPosition)
+	}
+
+	// Verify position exists in history and is closed
+	history := mockStorage.GetHistory()
+	if len(history) != 1 {
+		t.Errorf("Expected 1 position in history, got %d", len(history))
+		return
+	}
+
+	closedPosition := history[0]
+	if closedPosition.GetCurrentState() != models.StateClosed {
+		t.Errorf("Expected position in history to be closed, got %s", closedPosition.GetCurrentState())
 	}
 }
 

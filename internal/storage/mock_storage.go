@@ -34,8 +34,10 @@ func (m *MockStorage) GetCurrentPosition() *models.Position {
 	}
 	// Return a deep copy to prevent external mutation of internal state
 	cloned := clonePosition(m.currentPosition)
-	// For mock storage, don't carry over runtime StateMachine
-	cloned.StateMachine = nil
+	// Preserve StateMachine by copying it if it exists (consistent with JSONStorage)
+	if m.currentPosition.StateMachine != nil {
+		cloned.StateMachine = m.currentPosition.StateMachine.Copy()
+	}
 	return cloned
 }
 
@@ -46,8 +48,10 @@ func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
 		return nil
 	}
 	cloned := clonePosition(pos)
-	// For mock storage, don't carry over runtime StateMachine
-	cloned.StateMachine = nil
+	// Preserve StateMachine by copying it if it exists (consistent with JSONStorage)
+	if pos.StateMachine != nil {
+		cloned.StateMachine = pos.StateMachine.Copy()
+	}
 	m.currentPosition = cloned
 	return nil
 }
@@ -58,14 +62,34 @@ func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 		return fmt.Errorf("no position to close")
 	}
 
-	// Transition state to closed
-	if err := m.currentPosition.TransitionState(models.StateClosed, reason); err != nil {
+	// Map the reason to appropriate state transition condition (consistent with JSONStorage)
+	var condition string
+	currentState := m.currentPosition.GetCurrentState()
+	switch currentState {
+	case models.StateOpen:
+		condition = ConditionPositionClosed
+	case models.StateSubmitted:
+		condition = ConditionOrderTimeout
+	case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
+		condition = ConditionExitConditions
+	case models.StateError:
+		condition = ConditionForceClose
+	case models.StateAdjusting:
+		condition = ConditionHardStop
+	case models.StateRolling:
+		condition = ConditionForceClose
+	default:
+		condition = ConditionExitConditions // fallback
+	}
+
+	// Transition state to closed using canonical condition constant
+	if err := m.currentPosition.TransitionState(models.StateClosed, condition); err != nil {
 		return fmt.Errorf("failed to transition position to closed state: %w", err)
 	}
 
 	m.currentPosition.CurrentPnL = finalPnL
 
-	// Set exit metadata to mirror JSON storage semantics
+	// Set human-readable reason separately (consistent with JSONStorage)
 	m.currentPosition.ExitReason = reason
 	// Note: ExitDate is already set by TransitionState() call above
 
@@ -174,7 +198,7 @@ func (m *MockStorage) SetDailyPnL(date string, pnl float64) {
 	m.dailyPnL[date] = pnl
 }
 
-// Helper method to update statistics (simplified version)
+// Helper method to update statistics (consistent with JSONStorage)
 func (m *MockStorage) updateStatistics(pnl float64) {
 	m.statistics.TotalTrades++
 	m.statistics.TotalPnL += pnl
@@ -187,22 +211,32 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 			m.statistics.AverageWin = (m.statistics.AverageWin*float64(m.statistics.WinningTrades-1) + pnl) /
 				float64(m.statistics.WinningTrades)
 		}
-	} else if pnl < 0 {
+	} else {
+		// Treat pnl <= 0 as losses (including breakeven pnl == 0) - consistent with JSONStorage
 		m.statistics.LosingTrades++
 		if m.statistics.LosingTrades == 1 {
-			m.statistics.AverageLoss = -pnl
+			if pnl == 0 {
+				// For breakeven, include zero loss in AverageLoss calculation
+				m.statistics.AverageLoss = 0
+			} else {
+				m.statistics.AverageLoss = -pnl
+			}
 		} else {
-			loss := -pnl
+			var loss float64
+			if pnl == 0 {
+				// For breakeven, use zero loss
+				loss = 0
+			} else {
+				loss = -pnl
+			}
 			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + loss) /
 				float64(m.statistics.LosingTrades)
 		}
 	}
-	// pnl == 0 is treated as breakeven - don't increment wins or losses
 
-	// Calculate win rate based only on wins and losses (exclude breakevens)
-	totalDecidedTrades := m.statistics.WinningTrades + m.statistics.LosingTrades
-	if totalDecidedTrades > 0 {
-		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(totalDecidedTrades) * 100
+	// Calculate win rate as ratio (consistent with JSONStorage, not percentage)
+	if m.statistics.TotalTrades > 0 {
+		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(m.statistics.TotalTrades)
 	}
 }
 
@@ -220,8 +254,8 @@ func (m *MockStorage) GetIVReadings(symbol string, startDate, endDate time.Time)
 
 // GetLatestIVReading retrieves the most recent IV reading (mock implementation)
 func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, error) {
-	// Return nil for mock
-	return nil, nil
+	// Return not-found error consistent with JSONStorage
+	return nil, fmt.Errorf("no IV readings found for symbol %s", symbol)
 }
 
 // Ensure MockStorage implements Interface

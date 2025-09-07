@@ -22,6 +22,7 @@ const (
 	ConditionExitConditions = "exit_conditions"
 	ConditionForceClose     = "force_close"
 	ConditionHardStop       = "hard_stop"
+	ConditionOrderTimeout   = "order_timeout"
 )
 
 // JSONStorage implements Interface using JSON file persistence
@@ -416,6 +417,8 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	switch currentState {
 	case models.StateOpen:
 		condition = ConditionPositionClosed
+	case models.StateSubmitted:
+		condition = ConditionOrderTimeout
 	case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
 		condition = ConditionExitConditions
 	case models.StateError:

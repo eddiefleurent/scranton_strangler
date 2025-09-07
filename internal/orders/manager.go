@@ -26,12 +26,14 @@ const (
 type Config struct {
 	PollInterval time.Duration
 	Timeout      time.Duration
+	CallTimeout  time.Duration
 }
 
 // DefaultConfig is the default configuration for the order manager.
 var DefaultConfig = Config{
 	PollInterval: 5 * time.Second,
 	Timeout:      5 * time.Minute,
+	CallTimeout:  5 * time.Second,
 }
 
 // Manager handles order execution and status polling.
@@ -68,6 +70,17 @@ func NewManager(
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultConfig.Timeout
 	}
+	if cfg.CallTimeout <= 0 {
+		cfg.CallTimeout = DefaultConfig.CallTimeout
+	}
+
+	// Validate required dependencies
+	if broker == nil {
+		logger.Printf("Warning: broker is nil - this may cause panics during order operations")
+	}
+	if storage == nil {
+		logger.Printf("Warning: storage is nil - this may cause panics during order operations")
+	}
 
 	return &Manager{
 		broker:  broker,
@@ -99,7 +112,7 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 			return
 		case <-ticker.C:
 			// Create a child context with short timeout for the GetOrderStatus call
-			statusCtx, statusCancel := context.WithTimeout(ctx, 5*time.Second)
+			statusCtx, statusCancel := context.WithTimeout(ctx, m.config.CallTimeout)
 			orderStatus, err := m.broker.GetOrderStatusCtx(statusCtx, orderID)
 			statusCancel() // Explicitly cancel the context after the call
 
@@ -161,9 +174,20 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 	if isEntryOrder {
 		targetState = models.StateOpen
 		transitionReason = "order_filled"
+
+		if err := position.TransitionState(targetState, transitionReason); err != nil {
+			m.logger.Printf("Failed to transition position %s to %s: %v", positionID, targetState, err)
+			return
+		}
+
+		if err := m.storage.SetCurrentPosition(position); err != nil {
+			m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
+			return
+		}
+
+		m.logger.Printf("Position %s successfully transitioned to %s state", positionID, targetState)
 	} else {
-		// For exit orders, transition to closed state with proper reason mapping
-		targetState = models.StateClosed
+		// For exit orders, use ClosePosition API for atomic state transition and persistence
 		transitionReason = m.exitConditionFromReason(position.ExitReason)
 
 		// Parse exit reason from stored value
@@ -173,27 +197,20 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 		// Calculate final P&L (simplified version)
 		// Note: This is a simplified calculation. The full P&L calculation
 		// should be done by the bot with access to strategy methods
-		totalCredit := position.CreditReceived * float64(position.Quantity) * 100
-		if position.CurrentPnL != 0 {
-			// Use current P&L if available
-			m.logger.Printf("Position %s exit order filled. Final P&L: $%.2f", positionID, position.CurrentPnL)
-		} else {
-			// Fallback to credit received
-			m.logger.Printf("Position %s exit order filled. Estimated P&L: $%.2f", positionID, totalCredit)
+		finalPnL := position.CurrentPnL
+		if finalPnL == 0 {
+			// Fallback to credit received if CurrentPnL is zero
+			finalPnL = position.CreditReceived * float64(position.Quantity) * 100
 		}
-	}
 
-	if err := position.TransitionState(targetState, transitionReason); err != nil {
-		m.logger.Printf("Failed to transition position %s to %s: %v", positionID, targetState, err)
-		return
-	}
+		// Use ClosePosition API to atomically set state to closed, persist P&L and reason
+		if err := m.storage.ClosePosition(finalPnL, transitionReason); err != nil {
+			m.logger.Printf("Failed to close position %s: %v", positionID, err)
+			return
+		}
 
-	if err := m.storage.SetCurrentPosition(position); err != nil {
-		m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
-		return
+		m.logger.Printf("Position %s successfully closed. Final P&L: $%.2f", positionID, finalPnL)
 	}
-
-	m.logger.Printf("Position %s successfully transitioned to %s state", positionID, targetState)
 }
 
 func (m *Manager) handleOrderFailed(positionID string, orderID int, reason string) {
@@ -212,7 +229,7 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		// For exit order failures, mark position as error and clear the exit order ID
 		position.ExitOrderID = ""
 		position.ExitReason = ""
-		if err := position.TransitionState(models.StateError, "adjustment_failed"); err != nil {
+		if err := position.TransitionState(models.StateError, "exit_order_failed"); err != nil {
 			m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
 		}
 	} else {
@@ -256,11 +273,22 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 	// For entry timeouts (from StateSubmitted), transition to StateClosed with "order_timeout"
 	// For other states, check if the transition is valid
 	currentState := position.GetCurrentState()
+
+	var finalPnL float64
+	var closeReason string
+
 	if currentState == models.StateSubmitted && !isExitOrder {
-		if err := position.TransitionState(models.StateClosed, "order_timeout"); err != nil {
+		// Entry order timeout - position never opened, so P&L is 0
+		finalPnL = 0
+		closeReason = "order_timeout"
+
+		// Use ClosePosition to finalize the trade with zero P&L
+		if err := m.storage.ClosePosition(finalPnL, closeReason); err != nil {
 			m.logger.Printf("Failed to close position %s on entry timeout: %v", positionID, err)
 			return
 		}
+
+		m.logger.Printf("Position %s closed due to entry order timeout. Final P&L: $%.2f", positionID, finalPnL)
 	} else {
 		// For exit timeouts, use the state-specific transition reason
 		if err := position.TransitionState(models.StateClosed, transitionReason); err != nil {
@@ -271,15 +299,32 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 				m.logger.Printf("Failed to transition position %s to error: %v", positionID, errFallback)
 				return
 			}
+
+			// Save the error state position
+			if err := m.storage.SetCurrentPosition(position); err != nil {
+				m.logger.Printf("Failed to save position %s after timeout error: %v", positionID, err)
+				return
+			}
+
+			m.logger.Printf("Position %s marked as error due to order timeout", positionID)
+			return
 		}
-	}
 
-	if err := m.storage.SetCurrentPosition(position); err != nil {
-		m.logger.Printf("Failed to save position %s after timeout: %v", positionID, err)
-		return
-	}
+		// Exit timeout successful - use current P&L or fallback to credit received
+		finalPnL = position.CurrentPnL
+		if finalPnL == 0 {
+			finalPnL = position.CreditReceived * float64(position.Quantity) * 100
+		}
+		closeReason = transitionReason
 
-	m.logger.Printf("Position %s closed due to order timeout", positionID)
+		// Use ClosePosition to finalize the trade
+		if err := m.storage.ClosePosition(finalPnL, closeReason); err != nil {
+			m.logger.Printf("Failed to close position %s on exit timeout: %v", positionID, err)
+			return
+		}
+
+		m.logger.Printf("Position %s closed due to exit order timeout. Final P&L: $%.2f", positionID, finalPnL)
+	}
 }
 
 // exitConditionFromReason maps stored exit reasons to canonical transition reasons

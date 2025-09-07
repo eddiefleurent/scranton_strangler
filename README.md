@@ -17,7 +17,7 @@ Automated options trading bot implementing the SPY short strangle strategy with 
 export TRADIER_API_KEY='your_sandbox_token_here'
 
 # Run the test script
-go run ./scripts/test_tradier
+go run ./scripts/test_tradier/test_tradier.go
 ```
 
 You should see:
@@ -66,6 +66,22 @@ scranton_strangler/
 │   └── SPY_SHORT_STRANGLE_MASTER_STRATEGY.md
 └── config.yaml       # Your configuration (git ignored)
 ```
+
+## Data Formats
+
+### Timestamp Format
+All timestamps in position data (`data/positions.json`) use **UTC with Z suffix**:
+- Format: `YYYY-MM-DDTHH:MM:SSZ` (ISO 8601 UTC)
+- Example: `2024-12-20T21:00:00Z` (December 20, 2024 at 9:00 PM UTC)
+- **Not accepted**: Local time with Z suffix (e.g., `2024-12-20T16:00:00Z` for 4:00 PM ET)
+- **Not accepted**: Explicit offsets (e.g., `2024-12-20T16:00:00-05:00`)
+
+### IV Rank Format
+IV Rank (IVR) values are stored as **integers from 0-100**:
+- Format: Whole numbers (0-100)
+- Example: `18` (not `0.18`)
+- This matches the strategy thresholds and documentation
+- Values represent percentage points (18 = 18% IV rank)
 
 ## Strategy Overview
 

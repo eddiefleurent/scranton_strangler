@@ -471,94 +471,20 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	duration string,
 	tag string,
 ) (*OrderResponse, error) {
-	// Validate duration (should be normalized by caller)
-	switch duration {
-	case "day", "gtc":
-		// Valid duration
-	default:
-		return nil, fmt.Errorf("invalid duration '%s': must be one of 'day' or 'gtc'", duration)
-	}
-
-	// Validate price for credit/debit orders
-	if limitPrice <= 0 {
-		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
-			map[bool]string{true: "debit", false: "credit"}[buyToClose], limitPrice)
-	}
-
-	// Validate quantity for orders
-	if quantity <= 0 {
-		return nil, fmt.Errorf("invalid quantity for %s order: %d, quantity must be greater than zero",
-			map[bool]string{true: "debit", false: "credit"}[buyToClose], quantity)
-	}
-
-	// Validate strikes - put strike must be less than call strike
-	if putStrike >= callStrike {
-		return nil, fmt.Errorf(
-			"invalid strikes for strangle: put strike (%.2f) must be less than call strike (%.2f)",
-			putStrike, callStrike,
-		)
-	}
-
-	// Convert expiration from YYYY-MM-DD to YYMMDD for option symbol
-	expDate, err := time.Parse("2006-01-02", expiration)
-	if err != nil {
-		return nil, fmt.Errorf("invalid expiration format: %w", err)
-	}
-	expFormatted := expDate.Format("060102")
-
-	// Build option symbols: SYMBOL + YYMMDD + P/C + 8-digit strike
-	// Use rounded 1/1000th dollars to build OCC strike field
-	// Note: Rounding to 1/1000 and %08d is standard OCC format, but edge cases like
-	// strikes ending in .995 (e.g., 394.995) may round to unexpected values.
-	// Consider unit tests covering .05 boundaries for validation.
-	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(math.Round(putStrike*1000)))
-	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(math.Round(callStrike*1000)))
-
-	// Build form data
-	params := url.Values{}
-	params.Add("class", "multileg")
-	params.Add("symbol", symbol)
-	params.Add("duration", duration)
-	params.Add("price", fmt.Sprintf("%.2f", limitPrice))
-
-	// Determine order type and side based on buyToClose flag
-	var orderType, side string
-	if buyToClose {
-		orderType = "debit"
-		side = "buy_to_close"
-	} else {
-		orderType = "credit"
-		side = "sell_to_open"
-	}
-	params.Add("type", orderType)
-
-	if preview {
-		params.Add("preview", "true")
-	}
-
-	// Add idempotency tag if provided
-	if tag != "" {
-		params.Add("tag", tag)
-	}
-
-	// Leg 0: Put option
-	params.Add("option_symbol[0]", putSymbol)
-	params.Add("side[0]", side)
-	params.Add("quantity[0]", fmt.Sprintf("%d", quantity))
-
-	// Leg 1: Call option
-	params.Add("option_symbol[1]", callSymbol)
-	params.Add("side[1]", side)
-	params.Add("quantity[1]", fmt.Sprintf("%d", quantity))
-
-	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
-
-	var response OrderResponse
-	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
-		return nil, err
-	}
-
-	return &response, nil
+	// Delegate to the context-aware version with background context
+	return t.placeStrangleOrderInternalCtx(
+		context.Background(),
+		symbol,
+		putStrike,
+		callStrike,
+		expiration,
+		quantity,
+		limitPrice,
+		preview,
+		buyToClose,
+		duration,
+		tag,
+	)
 }
 
 // placeStrangleOrderInternalCtx is the context-aware version of placeStrangleOrderInternal
@@ -635,10 +561,6 @@ func (t *TradierAPI) placeStrangleOrderInternalCtx(
 	params.Add("type", orderType)
 
 	// Add price parameter for credit/debit orders (required by Tradier API)
-	if limitPrice <= 0 {
-		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
-			orderType, limitPrice)
-	}
 	params.Add("price", fmt.Sprintf("%.2f", limitPrice))
 
 	if preview {

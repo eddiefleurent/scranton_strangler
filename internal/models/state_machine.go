@@ -91,7 +91,7 @@ var ValidTransitions = []StateTransition{
 	// Adjustment transitions
 	{StateSecondDown, StateAdjusting, "roll_untested", "Rolling untested side"},
 	{StateThirdDown, StateAdjusting, "execute_adjustment", "Executing adjustment strategy"},
-	{StateFourthDown, StateRolling, "punt_decision", "Rolling to new expiration (punt)"},
+	{StateFourthDown, StateRolling, "roll_as_punt", "Rolling to new expiration as punt strategy"},
 
 	// Return from adjustments
 	{StateAdjusting, StateFirstDown, "adjustment_complete", "Adjustment completed successfully"},
@@ -189,8 +189,8 @@ func (sm *StateMachine) isTransitionDefined(to PositionState, condition string) 
 	if fromMap, exists := transitionLookup[sm.currentState]; exists {
 		if toMap, exists := fromMap[to]; exists {
 			// Check if condition exists in the map
-			_, exists := toMap[condition]
-			return exists
+			_, ok := toMap[condition]
+			return ok
 		}
 	}
 	return false
@@ -214,15 +214,18 @@ func (sm *StateMachine) Transition(to PositionState, condition string) error {
 		return err
 	}
 
+	// Capture current time once for consistency
+	now := time.Now().UTC()
+
 	// Perform transition
 	sm.previousState = sm.currentState
 	sm.currentState = to
-	sm.transitionTime = time.Now().UTC()
+	sm.transitionTime = now
 	sm.transitionCount[to]++
 
 	// Set Fourth Down start time
 	if to == StateFourthDown {
-		sm.fourthDownStartTime = time.Now().UTC()
+		sm.fourthDownStartTime = now
 	}
 
 	return nil
@@ -233,7 +236,9 @@ func (sm *StateMachine) GetTransitionCount(state PositionState) int {
 	return sm.transitionCount[state]
 }
 
-// Reset resets the state machine for a new state machine
+// Reset resets the state machine for a new state machine.
+// Note: This clears runtime state (transitions, times, counts) but preserves
+// configuration limits (maxAdjustments, maxTimeRolls) for reuse.
 func (sm *StateMachine) Reset() {
 	sm.currentState = StateIdle
 	sm.previousState = StateIdle
@@ -318,7 +323,7 @@ func (sm *StateMachine) GetStateDescription() string {
 	case StateAdjusting:
 		return "Executing position adjustment"
 	case StateRolling:
-		return "Punting: Rolling position to new expiration"
+		return "Rolling: Extending position to new expiration (may be part of punt strategy)"
 	case StateClosed:
 		return "Position closed, ready for next opportunity"
 	case StateError:
@@ -388,11 +393,11 @@ func (sm *StateMachine) ShouldEmergencyExit(
 
 		switch sm.fourthDownOption {
 		case OptionA:
-			if elapsedDays > 5 {
+			if elapsedDays >= 5 {
 				return true, "emergency exit: Option A exceeded 5-day limit"
 			}
 		case OptionB:
-			if elapsedDays > 3 {
+			if elapsedDays >= 3 {
 				return true, "emergency exit: Option B exceeded 3-day limit"
 			}
 		case OptionC:

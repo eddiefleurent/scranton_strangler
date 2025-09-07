@@ -408,6 +408,7 @@ func (b *Bot) executeEntry() {
 
 	// Set entry details
 	position.CreditReceived = order.Credit
+	position.EntryLimitPrice = px
 	position.EntrySpot = order.SpotPrice
 	position.DTE = position.CalculateDTE()
 
@@ -432,8 +433,8 @@ func (b *Bot) executeEntry() {
 		b.logger.Printf("Warning: Failed to persist position save: %v", err)
 	}
 
-	b.logger.Printf("Position saved: ID=%s, Credit=$%.2f, DTE=%d",
-		position.ID, position.CreditReceived, position.DTE)
+	b.logger.Printf("Position saved: ID=%s, LimitPrice=$%.2f, DTE=%d",
+		position.ID, position.EntryLimitPrice, position.DTE)
 
 	// Start order status polling in background
 	go b.orderManager.PollOrderStatus(position.ID, placedOrder.Order.ID, true)
@@ -550,6 +551,10 @@ func (b *Bot) logPositionClose(position *models.Position) {
 func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitReason) float64 {
 	currentVal, cvErr := b.strategy.GetCurrentPositionValue(position)
 
+	// Get net credit including adjustments (can be negative for debit-heavy positions)
+	netCredit := position.GetNetCredit()
+	absNetCredit := math.Abs(netCredit)
+
 	// Guardrails for config - prevent invalid calculations that could block exits
 	pt := b.config.Strategy.Exit.ProfitTarget
 	if pt < 0 || pt > 1 {
@@ -566,13 +571,13 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 	switch reason {
 	case strategy.ExitReasonProfitTarget:
 		// Close at max debit that locks in the configured profit fraction:
-		// debit = credit * (1 - pt). Example: credit=$2, pt=0.5 → debit=$1.
-		result := position.CreditReceived * (1.0 - pt)
+		// debit = |netCredit| * (1 - pt). Example: netCredit=$2, pt=0.5 → debit=$1.
+		result := absNetCredit * (1.0 - pt)
 		if result <= 0 {
-			b.logger.Printf("ERROR: Calculated profit target debit (%.2f) is invalid. Credit: %.2f, PT: %.2f",
-				result, position.CreditReceived, pt)
+			b.logger.Printf("ERROR: Calculated profit target debit (%.2f) is invalid. NetCredit: %.2f, AbsNetCredit: %.2f, PT: %.2f",
+				result, netCredit, absNetCredit, pt)
 			// Emergency fallback: allow any debit > 0 to prevent position lock-in
-			result = position.CreditReceived * 0.01
+			result = absNetCredit * 0.01
 		}
 		return result
 	case strategy.ExitReasonTime:
@@ -580,27 +585,27 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 			return currentVal / (float64(position.Quantity) * 100)
 		}
 		// Fallback: use profit target when quantity is zero or value lookup failed
-		result := position.CreditReceived * (1.0 - pt)
+		result := absNetCredit * (1.0 - pt)
 		if result <= 0 {
 			b.logger.Printf("ERROR: Fallback profit target debit (%.2f) is invalid. Using emergency value", result)
-			result = position.CreditReceived * 0.01
+			result = absNetCredit * 0.01
 		}
 		return result
 	case strategy.ExitReasonStopLoss:
 		if cvErr == nil && position.Quantity != 0 {
 			return currentVal / (float64(position.Quantity) * 100)
 		}
-		// Fallback: treat StopLossPct as a debit multiple of credit (e.g., 2.5x)
-		result := position.CreditReceived * sl
+		// Fallback: treat StopLossPct as a debit multiple of |netCredit| (e.g., 2.5x)
+		result := absNetCredit * sl
 		if result <= 0 {
-			b.logger.Printf("ERROR: Calculated stop loss debit (%.2f) is invalid. Credit: %.2f, SL: %.2f",
-				result, position.CreditReceived, sl)
+			b.logger.Printf("ERROR: Calculated stop loss debit (%.2f) is invalid. NetCredit: %.2f, AbsNetCredit: %.2f, SL: %.2f",
+				result, netCredit, absNetCredit, sl)
 			// Emergency fallback: allow reasonable stop loss
-			result = position.CreditReceived * 2.0
+			result = absNetCredit * 2.0
 		}
 		return result
 	default:
-		return position.CreditReceived * 1.0
+		return absNetCredit * 1.0
 	}
 }
 
@@ -632,25 +637,28 @@ func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.Exit
 			if pt < 0 || pt > 1 {
 				pt = 0.50
 			}
-			return position.CreditReceived * float64(position.Quantity) * 100 * pt
+			netCredit := position.GetNetCredit()
+			return math.Abs(netCredit) * float64(position.Quantity) * 100 * pt
 		}
 		multiple := b.config.Strategy.Exit.StopLossPct
 		if multiple <= 1.0 {
 			multiple = 2.5
 		}
-		return -1 * position.CreditReceived * multiple * float64(position.Quantity) * 100
+		netCredit := position.GetNetCredit()
+		return -1 * math.Abs(netCredit) * multiple * float64(position.Quantity) * 100
 	}
 	return actualPnL
 }
 
 func (b *Bot) logPnL(position *models.Position, actualPnL float64) {
-	denom := position.CreditReceived * float64(position.Quantity) * 100
+	netCredit := position.GetNetCredit()
+	denom := math.Abs(netCredit) * float64(position.Quantity) * 100
 	if denom <= 0 {
-		b.logger.Printf("Position P&L: $%.2f (credit unknown)", actualPnL)
+		b.logger.Printf("Position P&L: $%.2f (net credit unknown)", actualPnL)
 		return
 	}
 	percent := (actualPnL / denom) * 100
-	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total credit received)", actualPnL, percent)
+	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total net credit)", actualPnL, percent)
 }
 
 func (b *Bot) checkAdjustments() {

@@ -385,7 +385,7 @@ func TestValidate_StoragePath(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error when storage path is empty")
 		}
-		expectedMsg := "storage.path is required when persistence is enabled"
+		expectedMsg := "storage.path is required"
 		if !strings.Contains(err.Error(), expectedMsg) {
 			t.Errorf("Expected error message to contain '%s', got: %v", expectedMsg, err)
 		}
@@ -399,7 +399,7 @@ func TestValidate_StoragePath(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error when storage path is whitespace-only")
 		}
-		expectedMsg := "storage.path is required when persistence is enabled"
+		expectedMsg := "storage.path is required"
 		if !strings.Contains(err.Error(), expectedMsg) {
 			t.Errorf("Expected error message to contain '%s', got: %v", expectedMsg, err)
 		}
@@ -429,7 +429,7 @@ func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
 			},
 		}
 
-		config.normalizeExitConfig()
+		config.Normalize()
 
 		if config.Strategy.Exit.StopLossPct != 2.0 {
 			t.Errorf("Expected StopLossPct to be clamped to 2.0, got %.2f", config.Strategy.Exit.StopLossPct)
@@ -448,7 +448,7 @@ func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
 			},
 		}
 
-		config.normalizeExitConfig()
+		config.Normalize()
 
 		if config.Strategy.Exit.StopLossPct != 2.5 {
 			t.Errorf("Expected StopLossPct to be 2.5, got %.2f", config.Strategy.Exit.StopLossPct)
@@ -467,7 +467,7 @@ func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
 			},
 		}
 
-		config.normalizeExitConfig()
+		config.Normalize()
 
 		if config.Strategy.Exit.StopLossPct != 1.5 {
 			t.Errorf("Expected StopLossPct to remain 1.5, got %.2f", config.Strategy.Exit.StopLossPct)
@@ -481,7 +481,7 @@ func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
 			},
 		}
 
-		config.normalizeExitConfig()
+		config.Normalize()
 
 		if config.Risk.MaxPositionLoss != 3.0 {
 			t.Errorf("Expected MaxPositionLoss to be defaulted to 3.0, got %.2f", config.Risk.MaxPositionLoss)

@@ -128,6 +128,9 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
+	// Normalize config defaults
+	config.Normalize()
+
 	// Validate config
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -193,9 +196,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("strategy.entry.min_credit must be > 0")
 	}
 
-	// Normalize exit configuration
-	c.normalizeExitConfig()
-
 	// Exit configuration validation
 	if c.Strategy.Exit.ProfitTarget <= 0 || c.Strategy.Exit.ProfitTarget >= 1 {
 		return fmt.Errorf("strategy.exit.profit_target must be in (0,1)")
@@ -228,7 +228,9 @@ func (c *Config) Validate() error {
 	}
 
 	// Schedule validation
-	if _, err := time.ParseDuration(c.Schedule.MarketCheckInterval); err != nil {
+	if c.Schedule.MarketCheckInterval == "" {
+		c.Schedule.MarketCheckInterval = "15m"
+	} else if _, err := time.ParseDuration(c.Schedule.MarketCheckInterval); err != nil {
 		return fmt.Errorf("schedule.market_check_interval invalid: %w", err)
 	}
 	tz := c.Schedule.Timezone
@@ -237,18 +239,22 @@ func (c *Config) Validate() error {
 	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		// Fallback for minimal containers
-		loc = time.FixedZone("ET", -5*60*60)
+		// Try NY TZ first; final fallback to fixed ET (no DST) for minimal images.
+		if fallbackLoc, err2 := time.LoadLocation("America/New_York"); err2 == nil {
+			loc = fallbackLoc
+		} else {
+			loc = time.FixedZone("ET", -5*60*60)
+		}
 	}
 	s, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
 	e, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
-	if err1 != nil || err2 != nil || (s.Hour() > e.Hour() || (s.Hour() == e.Hour() && s.Minute() >= e.Minute())) {
+	if err1 != nil || err2 != nil || !s.Before(e) {
 		return fmt.Errorf("schedule trading window invalid (start/end parse/order)")
 	}
 
 	// Storage validation
 	if strings.TrimSpace(c.Storage.Path) == "" {
-		return fmt.Errorf("storage.path is required when persistence is enabled")
+		return fmt.Errorf("storage.path is required")
 	}
 
 	return nil
@@ -307,8 +313,8 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	return !today.Before(start) && today.Before(end)
 }
 
-// normalizeExitConfig sets default values for exit configuration
-func (c *Config) normalizeExitConfig() {
+// Normalize sets default values for configuration fields
+func (c *Config) Normalize() {
 	if c.Strategy.Exit.MaxDTE == 0 {
 		c.Strategy.Exit.MaxDTE = defaultMaxDTE
 	}

@@ -10,7 +10,6 @@ config.yaml
 /strangle-bot*
 /cmd/bot/strangle-bot*
 /scripts/test_*/test_*
-test_*
 *.exe
 
 # Test files

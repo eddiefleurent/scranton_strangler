@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ func driveToFourthDown(t *testing.T, sm *StateMachine) {
 // Test constants for repeated strings
 
 func TestStateMachine_BasicTransitions(t *testing.T) {
+	t.Parallel()
 	sm := NewStateMachine()
 
 	// Test initial state
@@ -218,7 +220,7 @@ func TestStateMachine_TimeRollLimits(t *testing.T) {
 	}
 
 	// First time roll should succeed
-	err := sm.Transition(StateRolling, "punt_decision")
+	err := sm.Transition(StateRolling, "roll_as_punt")
 	if err != nil {
 		t.Fatalf("First time roll failed: %v", err)
 	}
@@ -247,7 +249,7 @@ func TestStateMachine_TimeRollLimits(t *testing.T) {
 	}
 
 	// Second time roll should fail (max 1 allowed)
-	err = sm.Transition(StateRolling, "punt_decision")
+	err = sm.Transition(StateRolling, "roll_as_punt")
 	if err == nil {
 		t.Error("Second time roll should be rejected")
 	}
@@ -538,7 +540,7 @@ func TestPosition_NewStateValidation(t *testing.T) {
 		if err := pos.TransitionState(StateFourthDown, "adjustment_failed"); err != nil {
 			t.Fatalf("Failed to transition to StateFourthDown: %v", err)
 		}
-		if err := pos.TransitionState(StateRolling, "punt_decision"); err != nil {
+		if err := pos.TransitionState(StateRolling, "roll_as_punt"); err != nil {
 			t.Fatalf("Failed to transition to StateRolling: %v", err)
 		}
 
@@ -672,9 +674,9 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
 	}
-	expectedMsg := "loss 200.0%"
-	if !contains(reason, expectedMsg) {
-		t.Errorf("Expected message containing %q, got: %s", expectedMsg, reason)
+	re := regexp.MustCompile(`loss\s+200(\.0+)?%`)
+	if !re.MatchString(reason) {
+		t.Errorf("Expected message like 'loss 200%%...', got: %s", reason)
 	}
 
 	// Test above 200% loss - should trigger
@@ -692,19 +694,22 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm.SetFourthDownOption(OptionA)
 
 	// Test within 5-day limit - no emergency exit (4 days ago)
-			// Using total $ basis: 3.50 credit * 100 = $350, positive P&L ≈ $349.9
-			sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
-			shouldExit, reason := sm.ShouldEmergencyExit(350.0, 349.9, 30, 21, 2.0) // negligible loss, 4 days
+	// Using total $ basis: 3.50 credit * 100 = $350, positive P&L ≈ $349.9
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
+	shouldExit, reason := sm.ShouldEmergencyExit(350.0, 349.9, 30, 21, 2.0) // negligible loss, 4 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
-	// Test exactly at 5-day limit - no exit yet (>5 days required)
-			// Using total $ basis: 3.50 credit * 100 = $350, positive P&L ≈ $349.9
-			sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -5)
+	// Test at exactly 5-day limit - should exit (>=5 days triggers exit)
+	// Using total $ basis: 3.50 credit * 100 = $350, positive P&L ≈ $349.9
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -5)
 	shouldExit, reason = sm.ShouldEmergencyExit(350.0, 349.9, 30, 21, 2.0) // negligible loss, 5 days
-	if shouldExit {
-		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
+	if !shouldExit {
+		t.Errorf("Should emergency exit at exactly 5 days for Option A")
+	}
+	if !contains(reason, "Option A exceeded 5-day limit") {
+		t.Errorf("Expected Option A time limit message, got: %s", reason)
 	}
 
 	// Test beyond 5-day limit - should trigger
@@ -733,6 +738,17 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
 
+	// Test at exactly 3-day limit - should exit (>=3 days triggers exit)
+	// Using total $ basis: 3.50 credit * 100 = $350, -0.10 * 100 = -$10 = 2.9% loss, 3 days
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -3)
+	shouldExit, reason = sm.ShouldEmergencyExit(350.0, -10.0, 30, 21, 2.0) // 2.9% loss, 3 days
+	if !shouldExit {
+		t.Errorf("Should emergency exit at exactly 3 days for Option B")
+	}
+	if !contains(reason, "Option B exceeded 3-day limit") {
+		t.Errorf("Expected Option B time limit message, got: %s", reason)
+	}
+
 	// Test beyond 3-day limit - should trigger
 	// Using total $ basis: 3.50 credit * 100 = $350, -0.10 * 100 = -$10 = 2.9% loss, 4 days
 	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
@@ -750,7 +766,7 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm := NewStateMachine()
 	forceStateForTesting(sm, StateFourthDown)
 	sm.SetFourthDownOption(OptionC)
-	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
+	sm.fourthDownStartTime = time.Now().UTC().Add(-24 * time.Hour) // 1 day ago
 
 	// Test above MaxDTE - no emergency exit
 	// Using total $ basis: 3.50 credit * 100 = $350, -0.10 * 100 = -$10 = 2.9% loss, above MaxDTE

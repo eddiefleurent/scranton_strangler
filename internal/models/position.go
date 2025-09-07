@@ -30,9 +30,10 @@ type Position struct {
 	Expiration     time.Time     `json:"expiration"`
 	EntryDate      time.Time     `json:"entry_date,omitempty"`
 	ExitDate       time.Time     `json:"exit_date,omitempty"`
-	CreditReceived float64       `json:"credit_received"`
-	EntryIVR       float64       `json:"entry_ivr"`
-	EntrySpot      float64       `json:"entry_spot"`
+	CreditReceived   float64       `json:"credit_received"`
+	EntryLimitPrice float64       `json:"entry_limit_price"`
+	EntryIVR        float64       `json:"entry_ivr"`
+	EntrySpot       float64       `json:"entry_spot"`
 	CurrentPnL     float64       `json:"current_pnl"`
 	CallStrike     float64       `json:"call_strike"`
 	PutStrike      float64       `json:"put_strike"`
@@ -137,25 +138,27 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 
 	// Clear fields when transitioning to submitted state (pre-entry state)
 	if to == StateSubmitted {
-		p.EntryDate = time.Time{}
-		p.ExitDate = time.Time{}
-		p.ExitReason = ""
-		p.CreditReceived = 0
-		p.Quantity = 0
-		p.Adjustments = make([]Adjustment, 0)
+		p.clearNonActiveFields()
+		p.EntryLimitPrice = 0 // Additional reset specific to submitted state
 	}
 
 	// Clear fields when transitioning to error state (like idle/invalid)
 	if to == StateError {
-		p.EntryDate = time.Time{}
-		p.ExitDate = time.Time{}
-		p.ExitReason = ""
-		p.CreditReceived = 0
-		p.Quantity = 0
-		p.Adjustments = make([]Adjustment, 0)
+		p.clearNonActiveFields()
+		p.EntryLimitPrice = 0 // Additional reset specific to error state
 	}
 
 	return nil
+}
+
+// clearNonActiveFields resets fields that should be cleared when transitioning to non-active states
+func (p *Position) clearNonActiveFields() {
+	p.EntryDate = time.Time{}
+	p.ExitDate = time.Time{}
+	p.ExitReason = ""
+	p.CreditReceived = 0
+	p.Quantity = 0
+	p.Adjustments = make([]Adjustment, 0)
 }
 
 // GetCurrentState returns the canonical persisted state
@@ -398,9 +401,6 @@ func (p *Position) GetStateDescription() string {
 // ShouldEmergencyExit checks if the position meets emergency exit conditions
 func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (bool, string) {
 	dte := p.CalculateDTE()
-	if dte < 0 {
-		dte = 0
-	}
 	// Convert total credit to total dollars for consistent units (includes adjustments)
 	totalCredit := p.GetNetCredit() * float64(p.Quantity) * sharesPerContract
 	return p.ensureMachine().ShouldEmergencyExit(
