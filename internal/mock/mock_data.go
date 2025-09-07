@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"math/rand/v2"
+	"math/rand"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 )
 
 // DataProvider provides mock market data for testing.
+//
+// Note: DataProvider isn't goroutine-safe.
+// If tests or callers access it concurrently, guard mutable fields with a mutex or document single-threaded use.
 type DataProvider struct {
 	currentPrice  float64
 	ivr           float64    // IV rank (percentile)
@@ -59,7 +62,8 @@ func (m *DataProvider) randomInt63n(n int64) int64 {
 		if n <= 0 {
 			return 0
 		}
-		return int64(m.rng.IntN(int(n)))
+		// Use Int64N to avoid narrowing when n > math.MaxInt
+		return m.rng.Int63n(n)
 	}
 	return secureInt63n(n)
 }
@@ -75,7 +79,7 @@ func NewDataProvider() *DataProvider {
 
 // NewDeterministicDataProvider creates a new mock data provider with deterministic RNG for testing.
 func NewDeterministicDataProvider(seed int64) *DataProvider {
-	rng := rand.New(rand.NewPCG(uint64(seed), 0)) // #nosec G404,G115 -- deterministic random for test data generation
+	rng := rand.New(rand.NewSource(seed)) // #nosec G404,G115 -- deterministic random for test data generation
 	return &DataProvider{
 		currentPrice:  450.0 + rng.Float64()*10, // SPY around 450-460
 		ivr:           35.0 + rng.Float64()*20,  // IVR between 35-55 (rank)
@@ -148,12 +152,12 @@ func (m *DataProvider) GetOptionChain(symbol, expiration string, withGreeks bool
 		callPrice := math.Max(0.5, vol*math.Sqrt(timeValue)*m.currentPrice*0.01*math.Abs(callDelta))
 
 		// Create put option
-		putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expDate.Format("060102"), int(strike*1000))
+		putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expDate.Format("060102"), int(math.Round(strike*1000)))
 		putOption := broker.Option{
 			Symbol:         putSymbol,
 			Description:    fmt.Sprintf("%s %s $%.2f Put", symbol, expDate.Format("Jan 02 2006"), strike),
 			Strike:         strike,
-			OptionType:     broker.OptionTypePutString,
+			OptionType:     string(broker.OptionTypePut),
 			ExpirationDate: expiration,
 			Bid:            putPrice - 0.05,
 			Ask:            putPrice + 0.05,
@@ -164,12 +168,12 @@ func (m *DataProvider) GetOptionChain(symbol, expiration string, withGreeks bool
 		}
 
 		// Create call option
-		callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expDate.Format("060102"), int(strike*1000))
+		callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expDate.Format("060102"), int(math.Round(strike*1000)))
 		callOption := broker.Option{
 			Symbol:         callSymbol,
 			Description:    fmt.Sprintf("%s %s $%.2f Call", symbol, expDate.Format("Jan 02 2006"), strike),
 			Strike:         strike,
-			OptionType:     broker.OptionTypeCallString,
+			OptionType:     string(broker.OptionTypeCall),
 			ExpirationDate: expiration,
 			Bid:            callPrice - 0.05,
 			Ask:            callPrice + 0.05,
@@ -219,13 +223,13 @@ func (m *DataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, c
 		}
 
 		switch option.OptionType {
-		case "put":
+		case string(broker.OptionTypePut):
 			putDiff := math.Abs(math.Abs(option.Greeks.Delta) - targetDelta)
 			if putDiff < bestPutDiff {
 				bestPutDiff = putDiff
 				bestPutStrike = option.Strike
 			}
-		case "call":
+		case string(broker.OptionTypeCall):
 			callDiff := math.Abs(option.Greeks.Delta - targetDelta)
 			if callDiff < bestCallDiff {
 				bestCallDiff = callDiff
@@ -258,11 +262,11 @@ func (m *DataProvider) CalculateStrangleCredit(
 	foundPut, foundCall := false, false
 
 	for _, option := range options {
-		if option.Strike == putStrike && option.OptionType == broker.OptionTypePutString {
+		if math.Abs(option.Strike-putStrike) <= 1e-4 && option.OptionType == string(broker.OptionTypePut) {
 			putCredit = (option.Bid + option.Ask) / 2
 			foundPut = true
 		}
-		if option.Strike == callStrike && option.OptionType == broker.OptionTypeCallString {
+		if math.Abs(option.Strike-callStrike) <= 1e-4 && option.OptionType == string(broker.OptionTypeCall) {
 			callCredit = (option.Bid + option.Ask) / 2
 			foundCall = true
 		}

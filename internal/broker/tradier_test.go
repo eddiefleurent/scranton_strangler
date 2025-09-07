@@ -164,7 +164,7 @@ func TestMakeRequestCtx_SuccessPOST_FormEncoded(t *testing.T) {
 	defer srv.Close()
 
 	var out map[string]any
-	if err := api.makeRequest("POST", api.baseURL+"/create", url.Values{"a": {"1"}, "b": {"two"}}, &out); err != nil {
+	if err := api.makeRequest("POST", api.baseURL+"/create", url.Values{"a": []string{"1"}, "b": []string{"two"}}, &out); err != nil {
 		t.Fatalf("makeRequest POST error: %v", err)
 	}
 	if ok, _ := out["ok"].(bool); !ok {
@@ -566,10 +566,10 @@ func TestCalculateStrangleCredit_EpsilonComparisonEdgeCases(t *testing.T) {
 			expectError:  false,
 		},
 		{
-			name: "at epsilon boundary 1e-4",
+			name: "at epsilon boundary StrikeMatchEpsilon",
 			opts: []Option{
-				{OptionType: "put", Strike: 95.000099, Bid: 1.0, Ask: 1.4},
-				{OptionType: "call", Strike: 104.999901, Bid: 1.2, Ask: 1.6},
+				{OptionType: "put", Strike: 95.0001, Bid: 1.0, Ask: 1.4},
+				{OptionType: "call", Strike: 104.9999, Bid: 1.2, Ask: 1.6},
 			},
 			targetPut:    95.0,
 			targetCall:   105.0,
@@ -577,9 +577,9 @@ func TestCalculateStrangleCredit_EpsilonComparisonEdgeCases(t *testing.T) {
 			expectError:  false,
 		},
 		{
-			name: "beyond epsilon 1.1e-4",
+			name: "beyond epsilon StrikeMatchEpsilon + 0.00001",
 			opts: []Option{
-				{OptionType: "put", Strike: 95.00011, Bid: 1.0, Ask: 1.4},
+				{OptionType: "put", Strike: 95.0 + StrikeMatchEpsilon + 0.00001, Bid: 1.0, Ask: 1.4},
 				{OptionType: "call", Strike: 105.0, Bid: 1.2, Ask: 1.6},
 			},
 			targetPut:    95.0,
@@ -632,11 +632,6 @@ func TestCheckStranglePosition_FindsShortPutAndCallForUnderlying(t *testing.T) {
 	}
 }
 
-func TestMathAbs(t *testing.T) {
-	if math.Abs(-2.5) != 2.5 || math.Abs(2.5) != 2.5 || math.Abs(0) != 0 {
-		t.Fatalf("math.Abs failed")
-	}
-}
 
 func TestExtractUnderlyingFromOSI_BasicAndEdgeCases(t *testing.T) {
 	cases := []struct {
@@ -733,7 +728,7 @@ func TestMakeRequest_PostBodyContainsAllFields(t *testing.T) {
 	})
 	defer srv.Close()
 
-	form := url.Values{"x": {"1"}, "y": {"2"}, "z": {"hello world"}}
+	form := url.Values{"x": []string{"1"}, "y": []string{"2"}, "z": []string{"hello world"}}
 	var out map[string]any
 	if err := api.makeRequest("POST", api.baseURL+"/post", form, &out); err != nil {
 		t.Fatalf("makeRequest POST error: %v", err)

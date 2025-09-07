@@ -20,6 +20,7 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/retry"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
+	"github.com/eddiefleurent/scranton_strangler/internal/util"
 )
 
 // Bot represents the main trading bot instance.
@@ -33,6 +34,7 @@ type Bot struct {
 	ctx          context.Context // Main bot context for operations
 	orderManager *orders.Manager
 	retryClient  *retry.Client
+	nyLocation   *time.Location // Cached NY timezone location
 }
 
 func main() {
@@ -65,14 +67,24 @@ func main() {
 		stop:   make(chan struct{}),
 	}
 
+	// Cache NY timezone location
+	if loc, err := time.LoadLocation("America/New_York"); err != nil {
+		log.Fatalf("Failed to load NY timezone: %v", err)
+	} else {
+		bot.nyLocation = loc
+	}
+
 	// Initialize broker client
-	tradierClient := broker.NewTradierClient(
+	tradierClient, err := broker.NewTradierClient(
 		cfg.Broker.APIKey,
 		cfg.Broker.AccountID,
 		cfg.IsPaperTrading(),
 		cfg.Broker.UseOTOCO,
 		cfg.Strategy.Exit.ProfitTarget,
 	)
+	if err != nil {
+		log.Fatalf("Failed to create Tradier client: %v", err)
+	}
 
 	// Wrap with circuit breaker for resilience
 	bot.broker = broker.NewCircuitBreakerBroker(tradierClient)
@@ -166,10 +178,10 @@ func (b *Bot) Run(ctx context.Context) error {
 
 func (b *Bot) runTradingCycle() {
 	now := time.Now()
-	if loc, err := time.LoadLocation("America/New_York"); err == nil {
-		now = now.In(loc)
+	if b.nyLocation != nil {
+		now = now.In(b.nyLocation)
 	} else {
-		b.logger.Printf("Warning: failed to load NY timezone: %v", err)
+		b.logger.Printf("Warning: NY timezone not cached, using system time")
 	}
 
 	// Check if within trading hours
@@ -305,13 +317,14 @@ func (b *Bot) executeEntry() {
 
 	// Place order
 	b.logger.Printf("Placing strangle order for %d contracts...", order.Quantity)
+	px := util.RoundToTick(order.Credit, 0.01)
 	placedOrder, err := b.broker.PlaceStrangleOrder(
 		order.Symbol,
 		order.PutStrike,
 		order.CallStrike,
 		order.Expiration,
 		order.Quantity,
-		order.Credit, // limit price
+		px,           // limit price (rounded to tick)
 		false,        // not preview
 		"day",        // duration
 		"entry",      // tag
@@ -503,11 +516,11 @@ func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.Exit
 		if reason == strategy.ExitReasonProfitTarget {
 			return position.CreditReceived * float64(position.Quantity) * 100 * b.config.Strategy.Exit.ProfitTarget
 		}
-		sl := b.config.Strategy.Exit.StopLossPct
-		if sl <= 0 {
-			sl = 2.5
+		multiple := b.config.Strategy.Exit.StopLossPct
+		if multiple <= 0 {
+			multiple = 2.5
 		}
-		return position.CreditReceived * float64(position.Quantity) * 100 * sl
+		return -1 * position.CreditReceived * multiple * float64(position.Quantity) * 100
 	}
 	return actualPnL
 }
@@ -541,3 +554,4 @@ func generatePositionID() string {
 
 	return fmt.Sprintf("%s-%x", now, randomBytes)
 }
+

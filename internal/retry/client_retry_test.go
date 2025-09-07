@@ -149,6 +149,7 @@ func makeClient(t *testing.T, br broker.Broker, cfg Config) (*Client, *bytes.Buf
 // --- Tests ---
 
 func TestNewClient_ConfigSanitizationAndDefaults(t *testing.T) {
+	t.Parallel()
 	br := &fakeBroker{}
 	var buf bytes.Buffer
 
@@ -192,6 +193,7 @@ func TestNewClient_ConfigSanitizationAndDefaults(t *testing.T) {
 }
 
 func TestIsTransientError_Patterns(t *testing.T) {
+	t.Parallel()
 	c, _ := makeClient(t, &fakeBroker{}, DefaultConfig)
 
 	cases := []struct {
@@ -230,6 +232,7 @@ func TestIsTransientError_Patterns(t *testing.T) {
 }
 
 func TestCalculateNextBackoff_GeneralBehavior(t *testing.T) {
+	t.Parallel()
 	cfg := Config{
 		MaxRetries:     2,
 		InitialBackoff: 4 * time.Millisecond,

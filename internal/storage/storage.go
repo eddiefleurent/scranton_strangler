@@ -253,9 +253,15 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 	}
 
 	// Sync the destination directory to persist the new entry
+	if err := s.validateFilePath(dstDir); err != nil {
+		return fmt.Errorf("invalid destination directory path: %w", err)
+	}
+	// #nosec G304 - path is validated above
 	if dir, err := os.Open(dstDir); err == nil {
 		defer func() { _ = dir.Close() }()
-		_ = dir.Sync()
+		if syncErr := dir.Sync(); syncErr != nil {
+			return fmt.Errorf("failed to fsync destination directory: %w", syncErr)
+		}
 	}
 
 	// Clear temp file name since rename succeeded
@@ -574,3 +580,4 @@ func clonePosition(pos *models.Position) *models.Position {
 
 	return cloned
 }
+

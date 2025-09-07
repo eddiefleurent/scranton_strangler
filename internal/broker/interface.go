@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 	"time"
@@ -73,25 +74,30 @@ func isPermanentAPIError(err error) bool {
 	return false
 }
 
+// isNotImplementedError checks if an error indicates that OTOCO is not implemented (HTTP 501)
+func isNotImplementedError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Status == 501
+	}
+	return false
+}
+
 // Ensure TradierClient implements Broker at compile time.
 var _ Broker = (*TradierClient)(nil)
 
 // NewTradierClient creates a new Tradier broker client
 // profitTarget should be a ratio between 0.0 and 1.0 (e.g., 0.5 for 50% profit target)
 func NewTradierClient(apiKey, accountID string, sandbox bool,
-	useOTOCO bool, profitTarget float64) *TradierClient {
-	if profitTarget < 0 {
-		log.Printf("warning: profitTarget %.3f is below valid range [0,1]; clamping to 0.0", profitTarget)
-		profitTarget = 0.0
-	} else if profitTarget > 1 {
-		log.Printf("warning: profitTarget %.3f is above valid range [0,1]; clamping to 1.0", profitTarget)
-		profitTarget = 1.0
+	useOTOCO bool, profitTarget float64) (*TradierClient, error) {
+	if profitTarget < 0 || profitTarget > 1 {
+		return nil, fmt.Errorf("profitTarget %.3f is outside valid range [0.0, 1.0]", profitTarget)
 	}
 	return &TradierClient{
 		TradierAPI:   NewTradierAPI(apiKey, accountID, sandbox),
 		useOTOCO:     useOTOCO,
 		profitTarget: profitTarget,
-	}
+	}, nil
 }
 
 // GetAccountBalance returns the total account equity
@@ -120,15 +126,15 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 		orderResp, err := t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
 			expiration, quantity, limitPrice, t.profitTarget, preview)
 		if err != nil {
-			// Check if error indicates OTOCO unsupported or other permanent API errors - fall back to regular order
-			if errors.Is(err, ErrOTOCOUnsupported) || isPermanentAPIError(err) {
-				// Log OTOCO-specific error and fall back to regular order
-				log.Printf("warning: OTOCO unavailable or permanent API error, falling back to regular multileg: %v", err)
+			// Only fall back to regular strangle order for explicit OTOCO unsupported signals
+			if errors.Is(err, ErrOTOCOUnsupported) || isNotImplementedError(err) {
+				// Log when OTOCO is explicitly unsupported and fall back to regular order
+				log.Printf("warning: OTOCO unsupported (explicit signal), falling back to regular multileg: %v", err)
 				// Use regular strangle order as fallback
 				return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike,
 					expiration, quantity, limitPrice, preview, duration, tag)
 			}
-			// Return the original error if it's not permanent
+			// Return the original error for all other cases without attempting fallback
 			return nil, err
 		}
 		return orderResp, nil
@@ -141,12 +147,8 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders
 func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error) {
-	if profitTarget < 0 {
-		log.Printf("warning: profitTarget %.3f is below valid range [0,1]; clamping to 0.0", profitTarget)
-		profitTarget = 0
-	} else if profitTarget > 1 {
-		log.Printf("warning: profitTarget %.3f is above valid range [0,1]; clamping to 1.0", profitTarget)
-		profitTarget = 1
+	if profitTarget < 0 || profitTarget > 1 {
+		return nil, fmt.Errorf("profitTarget %.3f is outside valid range [0.0, 1.0]", profitTarget)
 	}
 	return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
 		expiration, quantity, credit, profitTarget, preview)
@@ -237,6 +239,8 @@ func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 }
 
 // GetOptionByStrike finds an option with a specific strike price
+// Note: Option.OptionType is defined as string for JSON compatibility,
+// so we convert optionType (OptionType) to string for comparison
 func GetOptionByStrike(options []Option, strike float64, optionType OptionType) *Option {
 	for i := range options {
 		if math.Abs(options[i].Strike-strike) <= 1e-4 && options[i].OptionType == string(optionType) {
@@ -256,13 +260,7 @@ const (
 	OptionTypeCall OptionType = "call"
 )
 
-// String constants for option types to prevent drift and maintain consistency
-const (
-	// OptionTypePutString represents the string value for a put option
-	OptionTypePutString = "put"
-	// OptionTypeCallString represents the string value for a call option
-	OptionTypeCallString = "call"
-)
+// Use OptionTypePut/OptionTypeCall everywhere to avoid duplication.
 
 // DaysBetween calculates the number of days between two dates
 func DaysBetween(from, to time.Time) int {
@@ -337,7 +335,7 @@ func NewCircuitBreakerBrokerWithSettings(broker Broker, settings CircuitBreakerS
 			return failureRatio >= settings.FailureRatio
 		},
 		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
-			log.Printf("Circuit breaker %s state changed from %s to %s", name, from, to)
+			log.Printf("Circuit breaker %s state changed from %v to %v", name, from, to)
 		},
 	}
 

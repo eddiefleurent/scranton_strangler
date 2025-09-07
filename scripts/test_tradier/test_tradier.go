@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
+	"log"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
+	"github.com/eddiefleurent/scranton_strangler/internal/util"
 )
 
 var optionSymbolRegex = regexp.MustCompile(`^[A-Z]{1,6}\d{6}[CP]\d{8}$`)
@@ -46,7 +47,10 @@ func main() {
 	}
 
 	// Initialize client
-	client := broker.NewTradierClient(apiKey, accountID, sandbox, true /* useOTOCO */, 0.5 /* profitTarget */)
+	client, err := broker.NewTradierClient(apiKey, accountID, sandbox, true /* useOTOCO */, 0.5 /* profitTarget */)
+	if err != nil {
+		log.Fatalf("Failed to create Tradier client: %v", err)
+	}
 	if sandbox {
 		fmt.Printf("✓ Initialized Tradier client (Sandbox mode)\n")
 	} else {
@@ -98,8 +102,9 @@ func main() {
 
 			// Parse date at midnight UTC to avoid timezone issues
 			expDateUTC := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, time.UTC)
-			nowUTC := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.UTC)
-			dte := int(expDateUTC.Sub(nowUTC).Hours() / 24)
+			nowUTC := time.Now().UTC()
+			todayUTC := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+			dte := int(expDateUTC.Sub(todayUTC).Hours() / 24)
 
 			// Skip past or negative DTE expirations
 			if dte < 0 {
@@ -112,7 +117,7 @@ func main() {
 			}
 
 			// Select closest to 45 DTE (only consider non-negative futures)
-			if selectedExp == "" || abs(dte-targetDTE) < abs(selectedDTE-targetDTE) {
+			if selectedExp == "" || absInt(dte-targetDTE) < absInt(selectedDTE-targetDTE) {
 				selectedExp = expirations[i]
 				selectedDTE = dte
 			}
@@ -153,14 +158,14 @@ func main() {
 					// Show details for selected strikes
 					fmt.Printf("\n  Option Details:\n")
 					for _, opt := range options {
-						if opt.Strike == putStrike && opt.OptionType == broker.OptionTypePutString {
+						if opt.Strike == putStrike && opt.OptionType == string(broker.OptionTypePut) {
 							fmt.Printf("  PUT:  Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
 							}
 							fmt.Println()
 						}
-						if opt.Strike == callStrike && opt.OptionType == broker.OptionTypeCallString {
+						if opt.Strike == callStrike && opt.OptionType == string(broker.OptionTypeCall) {
 							fmt.Printf("  CALL: Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
@@ -183,7 +188,8 @@ func main() {
 						fmt.Printf("  - Type: Credit (Short Strangle)\n")
 
 						// Preview the order
-						px := roundToTick(credit*0.95, 0.01)
+						px := util.RoundToTick(credit*0.95, 0.01)
+						fmt.Printf("  - Limit Price: $%.2f (95%% of mid, rounded)\n", px)
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,
 							1, px, // slightly below mid for better fill (rounded)
@@ -245,7 +251,7 @@ func main() {
 						unit = "contracts"
 					}
 					fmt.Printf("  %d. %s: %.0f %s (%s), Cost: $%.2f\n",
-						i+1, pos.Symbol, abs(pos.Quantity), unit, posType, pos.CostBasis)
+						i+1, pos.Symbol, absFloat64(pos.Quantity), unit, posType, pos.CostBasis)
 				}
 
 				// Check for strangle
@@ -305,20 +311,20 @@ func maskAPIKey(apiKey string) string {
 	return fmt.Sprintf("%s...%s", apiKey[:showFirst], apiKey[len(apiKey)-showLast:])
 }
 
-func abs[T float64 | int](x T) T {
+func absFloat64(x float64) float64 {
 	if x < 0 {
 		return -x
 	}
 	return x
 }
 
-// roundToTick rounds x to the nearest tick increment.
-func roundToTick(x, tick float64) float64 {
-	if tick <= 0 {
-		return x
+func absInt(x int) int {
+	if x < 0 {
+		return -x
 	}
-	return math.Round(x/tick) * tick
+	return x
 }
+
 
 // isOptionSymbol performs a robust OPRA-style check: TICKER + YYMMDD + [C|P] + strike
 // Example: SPY240920P00450000

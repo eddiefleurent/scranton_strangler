@@ -560,7 +560,8 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 
 	for _, option := range options {
 		// Only consider options of the correct type
-		if (isPut && option.OptionType != string(broker.OptionTypePut)) || (!isPut && option.OptionType != string(broker.OptionTypeCall)) {
+		if (isPut && option.OptionType != string(broker.OptionTypePut)) ||
+		   (!isPut && option.OptionType != string(broker.OptionTypeCall)) {
 			continue
 		}
 

@@ -216,7 +216,10 @@ func TestDaysBetween(t *testing.T) {
 
 func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 	// Verify that TradierClient is created with profitTarget parameter
-	client := NewTradierClient("test", "test", true, true, 0.5)
+	client, err := NewTradierClient("test", "test", true, true, 0.5)
+	if err != nil {
+		t.Fatalf("NewTradierClient failed: %v", err)
+	}
 
 	// Verify the client is not nil and has expected configuration
 	if client == nil {
@@ -227,59 +230,78 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 	// This would require refactoring TradierClient to accept an http.Client interface
 }
 
-func TestNewTradierClient_ProfitTargetClamping(t *testing.T) {
+func TestNewTradierClient_ProfitTargetValidation(t *testing.T) {
 	tests := []struct {
 		name              string
 		inputProfitTarget float64
+		expectError       bool
 		expected          float64
 	}{
 		{
 			name:              "valid profitTarget",
 			inputProfitTarget: 0.5,
+			expectError:       false,
 			expected:          0.5,
 		},
 		{
-			name:              "clamp negative to 0.0",
+			name:              "negative profitTarget - error",
 			inputProfitTarget: -0.1,
+			expectError:       true,
 			expected:          0.0,
 		},
 		{
-			name:              "clamp positive above 1.0 to 1.0",
+			name:              "profitTarget above 1.0 - error",
 			inputProfitTarget: 1.5,
-			expected:          1.0,
+			expectError:       true,
+			expected:          0.0,
 		},
 		{
-			name:              "clamp large negative to 0.0",
+			name:              "large negative profitTarget - error",
 			inputProfitTarget: -10.0,
+			expectError:       true,
 			expected:          0.0,
 		},
 		{
-			name:              "clamp large positive to 1.0",
+			name:              "large positive profitTarget - error",
 			inputProfitTarget: 100.0,
-			expected:          1.0,
-		},
-		{
-			name:              "zero value",
-			inputProfitTarget: 0.0,
+			expectError:       true,
 			expected:          0.0,
 		},
 		{
-			name:              "one value",
+			name:              "zero value - valid",
+			inputProfitTarget: 0.0,
+			expectError:       false,
+			expected:          0.0,
+		},
+		{
+			name:              "one value - valid",
 			inputProfitTarget: 1.0,
+			expectError:       false,
 			expected:          1.0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := NewTradierClient("test", "test", true, true, tt.inputProfitTarget)
+			client, err := NewTradierClient("test", "test", true, true, tt.inputProfitTarget)
 
-			if client == nil {
-				t.Fatal("NewTradierClient returned nil")
-			}
-
-			if client.profitTarget != tt.expected {
-				t.Errorf("profitTarget = %v, want %v", client.profitTarget, tt.expected)
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error for profitTarget %v, but got none", tt.inputProfitTarget)
+				}
+				if client != nil {
+					t.Errorf("expected nil client for invalid profitTarget, but got %v", client)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for valid profitTarget %v: %v", tt.inputProfitTarget, err)
+				}
+				if client == nil {
+					t.Fatal("NewTradierClient returned nil for valid input")
+				}
+				if client.profitTarget != tt.expected {
+					t.Errorf("profitTarget = %v, want %v", client.profitTarget, tt.expected)
+				}
 			}
 		})
 	}
@@ -1050,6 +1072,51 @@ func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
 	_, err := cb.GetAccountBalance()
 	if !errors.Is(err, gobreaker.ErrOpenState) {
 		t.Errorf("Expected gobreaker.ErrOpenState but got: %v", err)
+	}
+}
+
+func TestIsPermanentAPIError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		// 4xx errors - permanent except 408 and 429
+		{"400 Bad Request - permanent", &APIError{Status: 400}, true},
+		{"401 Unauthorized - permanent", &APIError{Status: 401}, true},
+		{"403 Forbidden - permanent", &APIError{Status: 403}, true},
+		{"404 Not Found - permanent", &APIError{Status: 404}, true},
+		{"408 Request Timeout - retryable", &APIError{Status: 408}, false},
+		{"429 Too Many Requests - retryable", &APIError{Status: 429}, false},
+		{"499 Client Closed Request - permanent", &APIError{Status: 499}, true},
+
+		// 5xx errors - transient except 501 and 505
+		{"500 Internal Server Error - transient", &APIError{Status: 500}, false},
+		{"502 Bad Gateway - transient", &APIError{Status: 502}, false},
+		{"503 Service Unavailable - transient", &APIError{Status: 503}, false},
+		{"504 Gateway Timeout - transient", &APIError{Status: 504}, false},
+		{"501 Not Implemented - permanent", &APIError{Status: 501}, true},
+		{"505 HTTP Version Not Supported - permanent", &APIError{Status: 505}, true},
+		{"599 Network Connect Timeout Error - transient", &APIError{Status: 599}, false},
+
+		// Edge cases
+		{"300 Multiple Choices - not 4xx/5xx", &APIError{Status: 300}, false},
+		{"600 Invalid status - not 4xx/5xx", &APIError{Status: 600}, false},
+		{"negative status", &APIError{Status: -1}, false},
+		{"zero status", &APIError{Status: 0}, false},
+
+		// Non-APIError errors
+		{"generic error", errors.New("some error"), false},
+		{"nil error", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isPermanentAPIError(tt.err)
+			if result != tt.expected {
+				t.Errorf("isPermanentAPIError(%v) = %v, want %v", tt.err, result, tt.expected)
+			}
+		})
 	}
 }
 

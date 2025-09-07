@@ -148,7 +148,7 @@ Position {
     EntryDate       time.Time
     CreditReceived  float64
     CurrentPnL      float64
-    Status          string
+    State           PositionState
     Adjustments     []Adjustment
 }
 
@@ -224,7 +224,7 @@ type RiskManager interface {
 | ~~No interface-based design~~ | ~~Testing impossible~~ | ~~Critical~~ → **Resolved in PR #2** |
 | ~~Zero test coverage~~ | ~~No confidence in calculations~~ | ~~Critical~~ → **Resolved in PR #2** |
 | File-based state without ACID | Data corruption risk | Critical |
-| No retry/circuit breaker | API failures cascade | High |
+| ~~No retry/circuit breaker~~ | ~~API failures cascade~~ | ~~High~~ → Resolved in PR #2 (tune thresholds/alerts) |
 | Plain text credentials | Security vulnerability | High |
 | No structured logging | Debugging difficult | Medium |
 
@@ -723,7 +723,7 @@ The bot supports optional after-hours position monitoring via the `after_hours_c
 ```go
 type RateLimitedClient struct {
     client     *http.Client
-    limiter    *rate.Limiter  // Market Data: 60/min sandbox, 120/min prod
+    limiter    *rate.Limiter  // Market Data: 120/min sandbox, 500/min prod (defaults; overridable)
     lastRequest time.Time
     cache      *cache.Cache    // 1-minute TTL
 }
@@ -783,26 +783,11 @@ func (c *RateLimitedClient) GetQuote(symbol string) (*Quote, error) {
 
 ## Critical Improvements Required
 
-### Immediate (MVP Blockers)
-1. **Interface-Based Design** ⚠️
-   - Define core interfaces (Broker, Storage, Strategy)
-   - Implement dependency injection
-   - Enable mock implementations
-
-2. **Testing Infrastructure** ⚠️
-   - Unit tests for all financial calculations
-   - Integration tests for broker API
-   - Mock data providers
-
-3. **State Management** ⚠️
-   - Implement position state machine
-   - Add transaction support
-   - Ensure consistency between memory and storage
-
-4. **Error Resilience** ⚠️
-   - Add retry logic with exponential backoff
-   - Implement circuit breaker pattern
-   - Categorize errors (transient vs permanent)
+### Immediate (MVP Verification)
+1. Interface-Based Design — Completed in PR #2 (verify DI wiring in cmd/bot)
+2. Testing Infrastructure — 95%+ coverage (expand E2E sandbox runs)
+3. State Management — Position state machine done (add invariants/guards)
+4. Error Resilience — Retry + circuit breaker done (tune thresholds/alerts)
 
 ### Short-term (Production Requirements)
 1. **Database Migration**
@@ -856,8 +841,9 @@ WorkingDirectory=/opt/strangle-bot
 ExecStart=/opt/strangle-bot/strangle-bot
 Restart=on-failure
 RestartSec=10
-StandardOutput=append:/var/log/strangle-bot/output.log
-StandardError=append:/var/log/strangle-bot/error.log
+StandardOutput=journal
+StandardError=journal
+# Alternative (newer systemd): append:/var/log/strangle-bot/{output,error}.log
 
 [Install]
 WantedBy=multi-user.target

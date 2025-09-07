@@ -23,6 +23,14 @@ const (
 	marketStatePostMarket = "postmarket"
 )
 
+// StrikeMatchEpsilon defines the precision tolerance for matching strike prices
+// This ensures consistency between implementation and tests
+const StrikeMatchEpsilon = 1e-3
+
+// QuantityEpsilon defines the precision tolerance for quantity comparisons
+// Used to handle floating point precision issues with position quantities
+const QuantityEpsilon = 1e-6
+
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
 var ErrOTOCOUnsupported = errors.New("otoco unsupported for multi-leg strangle")
 
@@ -713,7 +721,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 		}
 
 		switch opt.OptionType {
-		case string(OptionTypePut):
+		case "put":
 			// Put deltas are negative, so we use absolute value
 			delta := opt.Greeks.Delta
 			if delta < 0 {
@@ -725,7 +733,7 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 				bestPutDiff = diff
 				bestPut = opt
 			}
-		case string(OptionTypeCall):
+		case "call":
 			// Call deltas are positive
 			diff := math.Abs(opt.Greeks.Delta - targetDelta)
 			if diff < bestCallDiff {
@@ -752,11 +760,13 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (f
 	var putCredit, callCredit float64
 
 	for _, opt := range options {
-		if math.Abs(opt.Strike-putStrike) <= 1e-4 && opt.OptionType == string(OptionTypePut) {
+		putDiff := math.Abs(opt.Strike-putStrike)
+		callDiff := math.Abs(opt.Strike-callStrike)
+		if putDiff <= StrikeMatchEpsilon && opt.OptionType == "put" {
 			// Use mid price between bid and ask
 			putCredit = (opt.Bid + opt.Ask) / 2
 		}
-		if math.Abs(opt.Strike-callStrike) <= 1e-4 && opt.OptionType == string(OptionTypeCall) {
+		if callDiff <= StrikeMatchEpsilon && opt.OptionType == "call" {
 			// Use mid price between bid and ask
 			callCredit = (opt.Bid + opt.Ask) / 2
 		}
@@ -781,7 +791,7 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 		}
 
 		// Short positions have negative quantity
-		if pos.Quantity >= -1e-6 { // treat tiny negatives as zero
+		if pos.Quantity >= -QuantityEpsilon { // treat tiny negatives as zero
 			continue
 		}
 
