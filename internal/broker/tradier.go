@@ -16,10 +16,16 @@ import (
 	"time"
 )
 
-// Option type constants
+// Option type constants - exported for use in comparisons
 const (
-	optionTypePut  = "put"
-	optionTypeCall = "call"
+	// OptionTypePutString is the string value for put options
+	OptionTypePutString  = "put"
+	// OptionTypeCallString is the string value for call options
+	OptionTypeCallString = "call"
+	
+	// Internal aliases for backward compatibility
+	optionTypePut  = OptionTypePutString
+	optionTypeCall = OptionTypeCallString
 )
 
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
@@ -421,6 +427,7 @@ func (t *TradierAPI) PlaceStrangleOrder(
 	limitPrice float64,
 	preview bool,
 	duration string,
+	tag string,
 ) (*OrderResponse, error) {
 	// Validate and normalize duration
 	normalizedDuration, err := normalizeDuration(duration)
@@ -430,7 +437,7 @@ func (t *TradierAPI) PlaceStrangleOrder(
 
 	return t.placeStrangleOrderInternal(
 		symbol, putStrike, callStrike, expiration,
-		quantity, limitPrice, preview, false, normalizedDuration,
+		quantity, limitPrice, preview, false, normalizedDuration, tag,
 	)
 }
 
@@ -443,6 +450,7 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 	preview bool,
 	buyToClose bool,
 	duration string,
+	tag string,
 ) (*OrderResponse, error) {
 	// Validate duration (should be normalized by caller)
 	switch duration {
@@ -506,6 +514,11 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 		params.Add("preview", "true")
 	}
 
+	// Add idempotency tag if provided
+	if tag != "" {
+		params.Add("tag", tag)
+	}
+
 	// Leg 0: Put option
 	params.Add("option_symbol[0]", putSymbol)
 	params.Add("side[0]", side)
@@ -533,8 +546,9 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 	expiration string,
 	quantity int,
 	maxDebit float64,
+	tag string,
 ) (*OrderResponse, error) {
-	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, "day")
+	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, "day", tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order by ID
@@ -733,7 +747,6 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 // CalculateStrangleCredit calculates expected credit from put and call
 func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (float64, error) {
 	var putCredit, callCredit float64
-	const eps = 1e-6 // Small epsilon for floating-point comparison
 
 	for _, opt := range options {
 		if math.Abs(opt.Strike-putStrike) <= 1e-4 && opt.OptionType == optionTypePut {
@@ -788,10 +801,6 @@ func abs(x float64) float64 {
 	return x
 }
 
-// almostEqual compares two floats with epsilon tolerance for floating-point precision issues
-func almostEqual(a, b, eps float64) bool {
-	return math.Abs(a-b) <= eps
-}
 
 // extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"

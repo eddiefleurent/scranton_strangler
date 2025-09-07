@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -210,7 +209,7 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 
 	// Create temporary file in destination directory for atomic operation
 	dstDir := filepath.Dir(dst)
-	tmpFile, err := ioutil.TempFile(dstDir, ".tmp_*")
+	tmpFile, err := os.CreateTemp(dstDir, ".tmp_*")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
@@ -248,9 +247,12 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 	}
 	tempFileClosed = true
 
+	// #nosec G304
 	// Sync the destination directory
 	if dir, err := os.Open(dstDir); err == nil {
-		defer dir.Close()
+		defer func() {
+			_ = dir.Close() // Ignore close error to avoid failing the sync operation
+		}()
 		_ = dir.Sync()
 	}
 

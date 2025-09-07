@@ -66,3 +66,4 @@ coverage.html
 *.coverprofile
 gosec-results.sarif
 /test_tradier
+/test_tag

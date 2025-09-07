@@ -149,14 +149,14 @@ func main() {
 					// Show details for selected strikes
 					fmt.Printf("\n  Option Details:\n")
 					for _, opt := range options {
-						if opt.Strike == putStrike && opt.OptionType == "put" {
+						if opt.Strike == putStrike && opt.OptionType == broker.OptionTypePutString {
 							fmt.Printf("  PUT:  Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
 							}
 							fmt.Println()
 						}
-						if opt.Strike == callStrike && opt.OptionType == "call" {
+						if opt.Strike == callStrike && opt.OptionType == broker.OptionTypeCallString {
 							fmt.Printf("  CALL: Bid: $%.2f, Ask: $%.2f", opt.Bid, opt.Ask)
 							if opt.Greeks != nil {
 								fmt.Printf(", Delta: %.3f, IV: %.2f%%", opt.Greeks.Delta, opt.Greeks.MidIV*100)
@@ -184,6 +184,7 @@ func main() {
 							1, credit*0.95, // slightly below mid for better fill
 							true,  // preview mode
 							"day", // duration
+							"preview", // tag
 						)
 
 						if err != nil {

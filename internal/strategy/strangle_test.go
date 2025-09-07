@@ -510,6 +510,7 @@ func (m *mockBroker) PlaceStrangleOrder(
 	_ float64,
 	_ bool,
 	_ string,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -531,6 +532,7 @@ func (m *mockBroker) CloseStranglePosition(
 	_ string,
 	_ int,
 	_ float64,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }

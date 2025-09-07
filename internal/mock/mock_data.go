@@ -258,11 +258,11 @@ func (m *DataProvider) CalculateStrangleCredit(
 	foundPut, foundCall := false, false
 
 	for _, option := range options {
-		if option.Strike == putStrike && option.OptionType == "put" {
+		if option.Strike == putStrike && option.OptionType == broker.OptionTypePutString {
 			putCredit = (option.Bid + option.Ask) / 2
 			foundPut = true
 		}
-		if option.Strike == callStrike && option.OptionType == "call" {
+		if option.Strike == callStrike && option.OptionType == broker.OptionTypeCallString {
 			callCredit = (option.Bid + option.Ask) / 2
 			foundCall = true
 		}

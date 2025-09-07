@@ -358,14 +358,15 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 	return nil
 }
 
-// ShouldEmergencyExit checks if the position meets emergency exit conditions
+// ShouldEmergencyExit checks emergency exit conditions.
+// creditBasis MUST use the same unit basis as currentPnL (e.g., total $ P&L incl. qty×100).
+// escalateLossPct is a decimal (e.g., 2.5 = 250%).
 func (sm *StateMachine) ShouldEmergencyExit(
-	creditReceived, currentPnL, dte float64, maxDTE int, escalateLossPct float64) (bool, string) {
-	// Calculate loss percentage
-	if creditReceived == 0 {
+	creditBasis, currentPnL, dte float64, maxDTE int, escalateLossPct float64) (bool, string) {
+	if creditBasis == 0 {
 		return false, ""
 	}
-	lossPercent := (currentPnL / creditReceived) * -100 // Negative because P&L is negative for losses
+	lossPercent := (currentPnL / creditBasis) * -100 // Negative because P&L is negative for losses
 
 	// Emergency exit at configured escalate loss percentage (always applies)
 	if lossPercent >= escalateLossPct*100 {

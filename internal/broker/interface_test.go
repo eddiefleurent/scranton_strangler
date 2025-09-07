@@ -703,7 +703,7 @@ func (m *MockBroker) GetOptionChain(_, _ string, _ bool) ([]Option, error) {
 }
 
 func (m *MockBroker) PlaceStrangleOrder(_ string, _, _ float64, _ string,
-	_ int, _ float64, _ bool, _ string) (*OrderResponse, error) {
+	_ int, _ float64, _ bool, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -745,7 +745,7 @@ func (m *MockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*OrderRe
 }
 
 func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
-	_ int, _ float64) (*OrderResponse, error) {
+	_ int, _ float64, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -930,7 +930,7 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		{"GetExpirations", func() error { _, err := cb.GetExpirations("SPY"); return err }},
 		{"GetOptionChain", func() error { _, err := cb.GetOptionChain("SPY", "2024-12-20", false); return err }},
 		{"PlaceStrangleOrder", func() error {
-			_, err := cb.PlaceStrangleOrder("SPY", 400, 420, "2024-12-20", 1, 2.0, false, "day")
+			_, err := cb.PlaceStrangleOrder("SPY", 400, 420, "2024-12-20", 1, 2.0, false, "day", "")
 			return err
 		}},
 		{"PlaceStrangleOTOCO", func() error {
@@ -940,7 +940,7 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		{"GetOrderStatus", func() error { _, err := cb.GetOrderStatus(123); return err }},
 		{"GetOrderStatusCtx", func() error { _, err := cb.GetOrderStatusCtx(context.Background(), 123); return err }},
 		{"CloseStranglePosition", func() error {
-			_, err := cb.CloseStranglePosition("SPY", 400, 420, "2024-12-20", 1, 5.0)
+			_, err := cb.CloseStranglePosition("SPY", 400, 420, "2024-12-20", 1, 5.0, "")
 			return err
 		}},
 		{"PlaceBuyToCloseOrder", func() error {

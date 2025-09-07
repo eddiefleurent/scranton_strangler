@@ -27,7 +27,7 @@ type Broker interface {
 	// PlaceStrangleOrder: limitPrice is the total credit/debit limit for the entire strangle (per spread)
 	// PlaceStrangleOTOCO: credit is the target credit amount, profitTarget is the profit ratio (0.0-1.0)
 	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
-		quantity int, limitPrice float64, preview bool, duration string) (*OrderResponse, error)
+		quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error)
 	PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
 		quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error)
 
@@ -37,7 +37,7 @@ type Broker interface {
 
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
-		quantity int, maxDebit float64) (*OrderResponse, error)
+		quantity int, maxDebit float64, tag string) (*OrderResponse, error)
 	PlaceBuyToCloseOrder(optionSymbol string, quantity int,
 		maxPrice float64) (*OrderResponse, error)
 }
@@ -91,7 +91,7 @@ func (t *TradierClient) GetAccountBalance() (float64, error) {
 
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
 func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike float64,
-	expiration string, quantity int, limitPrice float64, preview bool, duration string) (*OrderResponse, error) {
+	expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error) {
 	if t.useOTOCO {
 		// Try OTOCO order with configurable profit target
 		orderResp, err := t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
@@ -103,7 +103,7 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 				log.Printf("warning: OTOCO unavailable or permanent API error, falling back to regular multileg: %v", err)
 				// Use regular strangle order as fallback
 				return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike,
-					expiration, quantity, limitPrice, preview, duration)
+					expiration, quantity, limitPrice, preview, duration, tag)
 			}
 			// Return the original error if it's not permanent
 			return nil, err
@@ -112,7 +112,7 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 	}
 	// Use regular strangle order
 	return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike,
-		expiration, quantity, limitPrice, preview, duration)
+		expiration, quantity, limitPrice, preview, duration, tag)
 }
 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders
@@ -131,9 +131,9 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 
 // CloseStranglePosition closes an existing strangle position with a buy-to-close order
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64,
-	expiration string, quantity int, maxDebit float64) (*OrderResponse, error) {
+	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
-		expiration, quantity, maxDebit)
+		expiration, quantity, maxDebit, tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order
@@ -339,9 +339,9 @@ func (c *CircuitBreakerBroker) GetOptionChain(symbol, expiration string, withGre
 
 // PlaceStrangleOrder wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
-	quantity int, limitPrice float64, preview bool, duration string) (*OrderResponse, error) {
+	quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview, duration)
+		return b.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration, quantity, limitPrice, preview, duration, tag)
 	})
 }
 
@@ -369,9 +369,9 @@ func (c *CircuitBreakerBroker) GetOrderStatusCtx(ctx context.Context, orderID in
 
 // CloseStranglePosition wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
-	quantity int, maxDebit float64) (*OrderResponse, error) {
+	quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.CloseStranglePosition(symbol, putStrike, callStrike, expiration, quantity, maxDebit)
+		return b.CloseStranglePosition(symbol, putStrike, callStrike, expiration, quantity, maxDebit, tag)
 	})
 }
 

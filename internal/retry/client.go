@@ -108,14 +108,12 @@ func (c *Client) ClosePositionWithRetry(
 			position.Expiration.Format("2006-01-02"),
 			position.Quantity,
 			maxDebit,
+			"close",
 		)
 
 		if err == nil {
-			if closeOrder != nil && closeOrder.Order != nil {
-				c.logger.Printf("Close order placed successfully on attempt %d: %d", attempt+1, closeOrder.Order.ID)
-			} else {
-				c.logger.Printf("Close order placed successfully on attempt %d", attempt+1)
-			}
+			// OrderResponse may contain a zero-value Order; avoid nil comparisons on structs.
+			c.logger.Printf("Close order placed successfully on attempt %d", attempt+1)
 			return closeOrder, nil
 		}
 

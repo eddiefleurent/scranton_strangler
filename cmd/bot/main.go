@@ -311,6 +311,7 @@ func (b *Bot) executeEntry() {
 		order.Credit, // limit price
 		false,        // not preview
 		"day",        // duration
+		"entry",      // tag
 	)
 
 	if err != nil {
@@ -406,7 +407,7 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 		return
 	}
 
-	b.logger.Printf("Position %s set to closing state, monitoring close order %d", position.ID, closeOrder.Order.ID)
+	b.logger.Printf("Position %s transitioned to adjusting state, monitoring close order %d", position.ID, closeOrder.Order.ID)
 
 	// Start order status polling for close order in background
 	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)

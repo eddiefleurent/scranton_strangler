@@ -113,7 +113,7 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 
 #### 4. Order Executor
 - Translates signals to Tradier API calls
-- **OTOCO Orders**: Planned feature - currently unsupported for multi-leg orders (see `internal/broker/tradier.go`)
+- **OTOCO Orders**: Unsupported at runtime - planned feature for multi-leg orders (see `internal/broker/tradier.go`)
 - **OCO Orders**: Emergency exits and rolling scenarios
 - Handles multi-leg orders (strangles)
 - Manages partial fills and order status
@@ -232,10 +232,10 @@ type RiskManager interface {
 
 ## Order Types & Automation Strategy
 
-### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Planned Feature**
-**Status**: Currently unsupported for multi-leg strangle orders
+### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Unsupported at Runtime**
+**Status**: Not supported for live trading - paper-only flags tolerated, live trading disallowed
 - **Limitation**: Tradier API does not support OTOCO for multi-leg orders
-- **Current Behavior**: `use_otoco: true` in config has no runtime effect
+- **Current Behavior**: `use_otoco: true` in config is tolerated but ignored at runtime
 - **Fallback**: System automatically uses regular multi-leg orders with monitoring
 - **Implementation**: See `internal/broker/tradier.go` - returns `ErrOTOCOUnsupported`
 - **Future**: Planned implementation may use separate entry + linked exit orders
@@ -278,12 +278,12 @@ type RiskManager interface {
 ### Automated Order Flow Decision Tree
 ```
 Position Entry:
-  use_otoco=true? → OTOCO (entry + 50% exit) ⭐ CURRENT RUNTIME
+  use_otoco=true? → OTOCO (entry + 50% exit) [UNSUPPORTED/IGNORED]
   use_bracket=true? → Bracket (entry + profit + stop) [PLANNED/IGNORED]
-  Default → Regular strangle + monitoring [PLANNED/IGNORED]
+  Default → Regular strangle + monitoring [CURRENT RUNTIME]
 
 Position Management:
-  First Down → Monitor via OTOCO exit order ⭐ CURRENT RUNTIME
+  First Down → Monitor via regular orders (OTOCO unsupported)
   Second Down → OCO (70% profit OR roll untested) ⭐ CURRENT RUNTIME
   Third Down → OCO (25% profit OR continue) [PLANNED/IGNORED]
   Fourth Down → OCO (any profit OR 200% stop) [PLANNED/IGNORED]
@@ -648,7 +648,7 @@ broker:
   api_key: "${TRADIER_API_KEY}"  # From environment
   api_endpoint: "https://sandbox.tradier.com/v1/"
   account_id: "${TRADIER_ACCOUNT}"
-  use_otoco: false  # OTOCO orders are currently ignored/not implemented
+  use_otoco: false  # OTOCO orders are unsupported at runtime (paper-only flags tolerated)
   
 strategy:
   symbol: "SPY"
