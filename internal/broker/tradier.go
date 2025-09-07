@@ -3,6 +3,7 @@
 package broker
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -133,7 +134,8 @@ func NewTradierAPIWithBaseURL(
 type singleOrArray[T any] []T
 
 func (s *singleOrArray[T]) UnmarshalJSON(b []byte) error {
-	if len(b) == 0 || string(b) == "null" {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || bytes.Equal(b, []byte("null")) {
 		return nil
 	}
 	if b[0] == '[' {
@@ -889,9 +891,9 @@ func optionTypeFromSymbol(s string) string {
 	}
 	// The char at i should be 'P' or 'C'
 	switch s[i] {
-	case 'P':
+	case 'P', 'p':
 		return "put"
-	case 'C':
+	case 'C', 'c':
 		return "call"
 	default:
 		return ""

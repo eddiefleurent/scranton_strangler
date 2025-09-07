@@ -546,9 +546,14 @@ func TestOptionTypeFromSymbol(t *testing.T) {
 			expected: "",
 		},
 		{
-			name:     "mixed case type char",
+			name:     "mixed case type char lowercase p",
 			input:    "SPY241220p00450000",
-			expected: "",
+			expected: "put",
+		},
+		{
+			name:     "mixed case type char lowercase c",
+			input:    "SPY241220c00450000",
+			expected: "call",
 		},
 		{
 			name:     "very short string",
