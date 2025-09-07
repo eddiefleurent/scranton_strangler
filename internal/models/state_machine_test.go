@@ -376,9 +376,6 @@ func TestPosition_StateValidation(t *testing.T) {
 		t.Errorf("New position should be valid: %v", err)
 	}
 
-	// Set up position with credit
-	pos.CreditReceived = 3.50
-
 	// Transition to management state (simplified)
 	if transErr := pos.TransitionState(StateSubmitted, "order_placed"); transErr != nil {
 		t.Errorf("Unexpected error: %v", transErr)
@@ -386,6 +383,11 @@ func TestPosition_StateValidation(t *testing.T) {
 	if transErr := pos.TransitionState(StateOpen, "order_filled"); transErr != nil {
 		t.Errorf("Unexpected error: %v", transErr)
 	}
+
+	// Set up position with credit after transitioning to open (StateSubmitted clears credit)
+	pos.CreditReceived = 3.50
+	pos.Quantity = 1
+
 	if transErr := pos.TransitionState(StateFirstDown, "start_management"); transErr != nil {
 		t.Errorf("Unexpected error: %v", transErr)
 	}
@@ -401,6 +403,196 @@ func TestPosition_StateValidation(t *testing.T) {
 	if err == nil {
 		t.Error("Position in management state without credit should be invalid")
 	}
+}
+
+func TestPosition_NewStateValidation(t *testing.T) {
+	expiration := time.Now().AddDate(0, 0, 45)
+
+	// Test StateSubmitted validation
+	t.Run("StateSubmitted_Validation", func(t *testing.T) {
+		pos := NewPosition("TEST-SUBMITTED", "SPY", 400.0, 420.0, expiration, 1)
+
+		// Transition to submitted state
+		if err := pos.TransitionState(StateSubmitted, "order_placed"); err != nil {
+			t.Fatalf("Failed to transition to StateSubmitted: %v", err)
+		}
+
+		// Should be valid - EntryDate zero, no credit, no quantity, no adjustments
+		if err := pos.ValidateState(); err != nil {
+			t.Errorf("StateSubmitted should be valid: %v", err)
+		}
+
+		// Test invalid scenarios for submitted state
+		pos.EntryDate = time.Now() // Should be zero
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateSubmitted with EntryDate set should be invalid")
+		}
+		pos.EntryDate = time.Time{} // Reset
+
+		pos.CreditReceived = 1.0 // Should be zero
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateSubmitted with CreditReceived set should be invalid")
+		}
+		pos.CreditReceived = 0 // Reset
+
+		pos.Quantity = 1 // Should be zero
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateSubmitted with Quantity set should be invalid")
+		}
+		pos.Quantity = 0 // Reset
+
+		pos.Adjustments = append(pos.Adjustments, Adjustment{}) // Should be empty
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateSubmitted with Adjustments should be invalid")
+		}
+	})
+
+	// Test StateAdjusting validation
+	t.Run("StateAdjusting_Validation", func(t *testing.T) {
+		pos := NewPosition("TEST-ADJUSTING", "SPY", 400.0, 420.0, expiration, 1)
+
+		// Transition through states to get to adjusting (this will set proper fields)
+		if err := pos.TransitionState(StateSubmitted, "order_placed"); err != nil {
+			t.Fatalf("Failed to transition to StateSubmitted: %v", err)
+		}
+		if err := pos.TransitionState(StateOpen, "order_filled"); err != nil {
+			t.Fatalf("Failed to transition to StateOpen: %v", err)
+		}
+		if err := pos.TransitionState(StateFirstDown, "start_management"); err != nil {
+			t.Fatalf("Failed to transition to StateFirstDown: %v", err)
+		}
+		if err := pos.TransitionState(StateSecondDown, "strike_challenged"); err != nil {
+			t.Fatalf("Failed to transition to StateSecondDown: %v", err)
+		}
+		if err := pos.TransitionState(StateAdjusting, "roll_untested"); err != nil {
+			t.Fatalf("Failed to transition to StateAdjusting: %v", err)
+		}
+
+		// Add an adjustment to satisfy validation requirements
+		pos.Adjustments = append(pos.Adjustments, Adjustment{
+			Date:        time.Now(),
+			Type:        AdjustmentRoll,
+			Description: "Test adjustment",
+			OldStrike:   395.0,
+			NewStrike:   390.0,
+			Credit:      0.25,
+		})
+
+		// Should be valid with EntryDate set and adjustments non-empty
+		if err := pos.ValidateState(); err != nil {
+			t.Errorf("StateAdjusting should be valid: %v", err)
+		}
+
+		// Test invalid scenarios for adjusting state
+		pos.EntryDate = time.Time{} // Should be set
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateAdjusting without EntryDate should be invalid")
+		}
+		pos.EntryDate = time.Now() // Reset
+
+		pos.Adjustments = []Adjustment{} // Should be non-empty
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateAdjusting with empty Adjustments should be invalid")
+		}
+		pos.Adjustments = []Adjustment{{}} // Reset
+	})
+
+	// Test StateRolling validation
+	t.Run("StateRolling_Validation", func(t *testing.T) {
+		pos := NewPosition("TEST-ROLLING", "SPY", 400.0, 420.0, expiration, 1)
+
+		// Transition through states to get to rolling (this will set proper fields)
+		if err := pos.TransitionState(StateSubmitted, "order_placed"); err != nil {
+			t.Fatalf("Failed to transition to StateSubmitted: %v", err)
+		}
+		if err := pos.TransitionState(StateOpen, "order_filled"); err != nil {
+			t.Fatalf("Failed to transition to StateOpen: %v", err)
+		}
+		if err := pos.TransitionState(StateFirstDown, "start_management"); err != nil {
+			t.Fatalf("Failed to transition to StateFirstDown: %v", err)
+		}
+		if err := pos.TransitionState(StateSecondDown, "strike_challenged"); err != nil {
+			t.Fatalf("Failed to transition to StateSecondDown: %v", err)
+		}
+		if err := pos.TransitionState(StateThirdDown, "strike_breached"); err != nil {
+			t.Fatalf("Failed to transition to StateThirdDown: %v", err)
+		}
+		if err := pos.TransitionState(StateFourthDown, "adjustment_failed"); err != nil {
+			t.Fatalf("Failed to transition to StateFourthDown: %v", err)
+		}
+		if err := pos.TransitionState(StateRolling, "punt_decision"); err != nil {
+			t.Fatalf("Failed to transition to StateRolling: %v", err)
+		}
+
+		// Set credit and quantity for rolling state validation (StateSubmitted cleared them)
+		pos.CreditReceived = 3.50
+		pos.Quantity = 1
+
+		// Should be valid with EntryDate set and positive credit/quantity
+		if err := pos.ValidateState(); err != nil {
+			t.Errorf("StateRolling should be valid: %v", err)
+		}
+
+		// Test invalid scenarios for rolling state
+		pos.EntryDate = time.Time{} // Should be set
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateRolling without EntryDate should be invalid")
+		}
+		pos.EntryDate = time.Now() // Reset
+
+		pos.CreditReceived = 0 // Should be positive
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateRolling with zero CreditReceived should be invalid")
+		}
+		pos.CreditReceived = 3.50 // Reset
+
+		pos.Quantity = 0 // Should be positive
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateRolling with zero Quantity should be invalid")
+		}
+	})
+
+	// Test StateError validation
+	t.Run("StateError_Validation", func(t *testing.T) {
+		pos := NewPosition("TEST-ERROR", "SPY", 400.0, 420.0, expiration, 1)
+
+		// Transition to error state
+		if err := pos.TransitionState(StateSubmitted, "order_placed"); err != nil {
+			t.Fatalf("Failed to transition to StateSubmitted: %v", err)
+		}
+		if err := pos.TransitionState(StateError, "order_failed"); err != nil {
+			t.Fatalf("Failed to transition to StateError: %v", err)
+		}
+
+		// Should be valid - EntryDate zero, no credit, no quantity, no adjustments
+		if err := pos.ValidateState(); err != nil {
+			t.Errorf("StateError should be valid: %v", err)
+		}
+
+		// Test invalid scenarios for error state
+		pos.EntryDate = time.Now() // Should be zero
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateError with EntryDate set should be invalid")
+		}
+		pos.EntryDate = time.Time{} // Reset
+
+		pos.CreditReceived = 1.0 // Should be zero
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateError with CreditReceived set should be invalid")
+		}
+		pos.CreditReceived = 0 // Reset
+
+		pos.Quantity = 1 // Should be zero
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateError with Quantity set should be invalid")
+		}
+		pos.Quantity = 0 // Reset
+
+		pos.Adjustments = append(pos.Adjustments, Adjustment{}) // Should be empty
+		if err := pos.ValidateState(); err == nil {
+			t.Error("StateError with Adjustments should be invalid")
+		}
+	})
 }
 
 func TestPosition_ManagementMethods(t *testing.T) {
@@ -482,16 +674,16 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm.SetFourthDownOption(OptionA)
 
 	// Test within 5-day limit - no emergency exit (4 days ago)
-	// Using total $ basis: 3.50 credit * 100 = $350, negligible P&L = $349.9
-	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
-	shouldExit, reason := sm.ShouldEmergencyExit(350.0, 349.9, 30, 21, 2.0) // negligible loss, 4 days
+			// Using total $ basis: 3.50 credit * 100 = $350, positive P&L ≈ $349.9
+			sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
+			shouldExit, reason := sm.ShouldEmergencyExit(350.0, 349.9, 30, 21, 2.0) // negligible loss, 4 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
-	// Using total $ basis: 3.50 credit * 100 = $350, negligible P&L = $349.9
-	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -5)
+			// Using total $ basis: 3.50 credit * 100 = $350, positive P&L ≈ $349.9
+			sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -5)
 	shouldExit, reason = sm.ShouldEmergencyExit(350.0, 349.9, 30, 21, 2.0) // negligible loss, 5 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
@@ -848,7 +1040,7 @@ func TestPosition_EmergencyExit_MultiQuantity_WithAdjustments(t *testing.T) {
 				{Credit: 1.00, Type: AdjustmentRoll},
 				{Credit: 0.50, Type: AdjustmentDelta},
 			},
-			currentPnL:      -975.0, // 75% loss (total credit: (2.50 + 1.00 + 0.50) * 3 * 100 = 1300)
+			currentPnL:      -975.0, // 75% loss (total credit: (2.50 + 1.00 + 0.50) * 3 * 100 = 1200)
 			escalateLossPct: 1.5,
 			shouldExit:      false,
 			expectedMsg:     "",
@@ -970,17 +1162,19 @@ func TestPosition_CreditCalculationConsistency(t *testing.T) {
 			profitPercent := pos.ProfitPercent()
 
 			// Calculate expected percentage manually using the same logic
-			totalCredit := pos.GetTotalCredit() * float64(pos.Quantity) * 100
+			totalCredit := pos.GetNetCredit() * float64(pos.Quantity) * 100
 			expectedPercent := (pos.CurrentPnL / totalCredit) * 100
 
-			if profitPercent != expectedPercent {
+			epsilon := 1e-9
+			diff := profitPercent - expectedPercent
+			if diff < -epsilon || diff > epsilon {
 				t.Errorf("ProfitPercent (%f) doesn't match expected calculation (%f)", profitPercent, expectedPercent)
 			}
 
 			// Test that emergency exit uses the same credit basis
-			// This is implicitly tested by the fact that both use GetTotalCredit()
+			// This is implicitly tested by the fact that both use GetNetCredit()
 			// We can verify this by checking the credit calculation in ShouldEmergencyExit
-			totalCreditForEmergency := pos.GetTotalCredit() * float64(pos.Quantity) * 100
+			totalCreditForEmergency := pos.GetNetCredit() * float64(pos.Quantity) * 100
 
 			if totalCredit != totalCreditForEmergency {
 				t.Errorf("Credit calculation mismatch between ProfitPercent (%f) and ShouldEmergencyExit (%f)",
@@ -1003,6 +1197,10 @@ func TestPosition_JSONSerialization_ExcludesStateMachine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to transition to open: %v", err)
 	}
+
+	// Set credit and quantity after transitioning to open (StateSubmitted cleared them)
+	pos.CreditReceived = 3.50
+	pos.Quantity = 1
 
 	// Verify initial state
 	if pos.GetCurrentState() != StateOpen {

@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const sharesPerContract = 100.0
+
 // IVReading represents a single implied volatility reading for a symbol on a specific date
 type IVReading struct {
 	Symbol    string    `json:"symbol"`
@@ -90,7 +92,7 @@ func (p *Position) GetTotalCredit() float64 {
 // ProfitPercent returns P/L as a percentage of initial credit.
 // May be negative (loss) and can exceed 100% with adjustments.
 func (p *Position) ProfitPercent() float64 {
-	denom := math.Abs(p.GetNetCredit() * float64(p.Quantity) * 100)
+	denom := math.Abs(p.GetNetCredit() * float64(p.Quantity) * sharesPerContract)
 	if denom == 0 {
 		return 0
 	}
@@ -131,6 +133,26 @@ func (p *Position) TransitionState(to PositionState, condition string) error {
 	// Set ExitDate when transitioning to closed state (only if not already set)
 	if to == StateClosed && p.ExitDate.IsZero() {
 		p.ExitDate = time.Now().UTC()
+	}
+
+	// Clear fields when transitioning to submitted state (pre-entry state)
+	if to == StateSubmitted {
+		p.EntryDate = time.Time{}
+		p.ExitDate = time.Time{}
+		p.ExitReason = ""
+		p.CreditReceived = 0
+		p.Quantity = 0
+		p.Adjustments = make([]Adjustment, 0)
+	}
+
+	// Clear fields when transitioning to error state (like idle/invalid)
+	if to == StateError {
+		p.EntryDate = time.Time{}
+		p.ExitDate = time.Time{}
+		p.ExitReason = ""
+		p.CreditReceived = 0
+		p.Quantity = 0
+		p.Adjustments = make([]Adjustment, 0)
 	}
 
 	return nil
@@ -257,6 +279,106 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s in state %s: EntryDate (%v) must be before ExitDate (%v)",
 				p.ID, currentState, p.EntryDate, p.ExitDate)
 		}
+	case StateSubmitted:
+		// Submitted state invariants: order submitted but not yet filled
+		if !p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be zero for submitted positions (current: %v)",
+				p.ID, currentState, p.EntryDate)
+		}
+		if !p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
+				p.ID, currentState, p.ExitDate)
+		}
+		if strings.TrimSpace(p.ExitReason) != "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be empty for non-closed positions (current: %s)",
+				p.ID, currentState, p.ExitReason)
+		}
+		if p.CreditReceived != 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be zero for submitted positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
+		}
+		if p.Quantity != 0 {
+			return fmt.Errorf("position %s in state %s: Quantity must be zero for submitted positions (current: %d)",
+				p.ID, currentState, p.Quantity)
+		}
+		if len(p.Adjustments) > 0 {
+			return fmt.Errorf("position %s in state %s: Adjustments must be empty for submitted positions (current: %d)",
+				p.ID, currentState, len(p.Adjustments))
+		}
+	case StateAdjusting:
+		// Adjusting state invariants: position active but undergoing adjustment
+		if p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be set for adjusting positions",
+				p.ID, currentState)
+		}
+		if !p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
+				p.ID, currentState, p.ExitDate)
+		}
+		if strings.TrimSpace(p.ExitReason) != "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be empty for non-closed positions (current: %s)",
+				p.ID, currentState, p.ExitReason)
+		}
+		if p.CreditReceived < 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be >= 0 for adjusting positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
+		}
+		if p.Quantity < 0 {
+			return fmt.Errorf("position %s in state %s: Quantity must be >= 0 for adjusting positions (current: %d)",
+				p.ID, currentState, p.Quantity)
+		}
+		if len(p.Adjustments) == 0 {
+			return fmt.Errorf("position %s in state %s: Adjustments must be non-empty for adjusting positions",
+				p.ID, currentState)
+		}
+	case StateRolling:
+		// Rolling state invariants: treat like active state with entry data and positive credit
+		if p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be set for rolling positions",
+				p.ID, currentState)
+		}
+		if !p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
+				p.ID, currentState, p.ExitDate)
+		}
+		if strings.TrimSpace(p.ExitReason) != "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be empty for non-closed positions (current: %s)",
+				p.ID, currentState, p.ExitReason)
+		}
+		if p.CreditReceived <= 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be positive for rolling positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
+		}
+		if p.Quantity <= 0 {
+			return fmt.Errorf("position %s in state %s: Quantity must be > 0 for rolling positions (current: %d)",
+				p.ID, currentState, p.Quantity)
+		}
+	case StateError:
+		// Error state invariants: clear most fields like idle/invalid state
+		if !p.EntryDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: EntryDate must be zero for error positions (current: %v)",
+				p.ID, currentState, p.EntryDate)
+		}
+		if !p.ExitDate.IsZero() {
+			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
+				p.ID, currentState, p.ExitDate)
+		}
+		if strings.TrimSpace(p.ExitReason) != "" {
+			return fmt.Errorf("position %s in state %s: ExitReason must be empty for non-closed positions (current: %s)",
+				p.ID, currentState, p.ExitReason)
+		}
+		if p.CreditReceived != 0 {
+			return fmt.Errorf("position %s in state %s: CreditReceived must be zero for error positions (current: %.2f)",
+				p.ID, currentState, p.CreditReceived)
+		}
+		if p.Quantity != 0 {
+			return fmt.Errorf("position %s in state %s: Quantity must be zero for error positions (current: %d)",
+				p.ID, currentState, p.Quantity)
+		}
+		if len(p.Adjustments) > 0 {
+			return fmt.Errorf("position %s in state %s: Adjustments must be empty for error positions (current: %d)",
+				p.ID, currentState, len(p.Adjustments))
+		}
 	}
 
 	// Additional temporal validation for any position with ExitDate set
@@ -280,7 +402,7 @@ func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (boo
 		dte = 0
 	}
 	// Convert total credit to total dollars for consistent units (includes adjustments)
-	totalCredit := p.GetNetCredit() * float64(p.Quantity) * 100
+	totalCredit := p.GetNetCredit() * float64(p.Quantity) * sharesPerContract
 	return p.ensureMachine().ShouldEmergencyExit(
 		totalCredit, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
 }
