@@ -53,7 +53,6 @@ type TradierClient struct {
 	profitTarget float64 // Configurable profit target for OTOCO orders
 }
 
-
 // isNotImplementedError checks if an error indicates that OTOCO is not implemented (HTTP 501)
 func isNotImplementedError(err error) bool {
 	var apiErr *APIError
@@ -171,16 +170,7 @@ func (t *TradierClient) IsTradingDay(delayed bool) (bool, error) {
 // Most US stocks and ETFs trade in penny increments (0.01)
 // Some lower-priced stocks may trade in 0.0001 increments
 func (t *TradierClient) GetTickSize(symbol string) (float64, error) {
-	// Get current quote to determine appropriate tick size
-	_, err := t.GetQuote(symbol)
-	if err != nil {
-		// Fallback to penny increment if quote unavailable
-		return 0.01, fmt.Errorf("failed to get quote for tick size determination: %w", err)
-	}
-
-	// Most US equities trade in penny increments
-	// For stocks under $1, some may trade in smaller increments, but penny is most common
-	// Options typically trade in penny increments regardless of underlying
+	// Most US equities/options trade in $0.01 increments; callers can override if needed.
 	return 0.01, nil
 }
 

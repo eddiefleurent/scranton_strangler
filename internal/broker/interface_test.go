@@ -998,7 +998,7 @@ func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
 	}
 
 	// Poll for state transition instead of fixed sleep - more reliable in CI
-	timeout := time.After(50 * time.Millisecond) // Total timeout for polling
+	timeout := time.After(50 * time.Millisecond)   // Total timeout for polling
 	ticker := time.NewTicker(1 * time.Millisecond) // Poll every 1ms
 
 	for {
@@ -1123,7 +1123,6 @@ func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
 		t.Errorf("Expected gobreaker.ErrOpenState but got: %v", err)
 	}
 }
-
 
 func TestNormalizeDuration(t *testing.T) {
 	tests := []struct {

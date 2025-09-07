@@ -680,4 +680,3 @@ func TestSaveUnsafe_WritesIndentedJSON(t *testing.T) {
 		t.Fatalf("LastUpdated not refreshed")
 	}
 }
-

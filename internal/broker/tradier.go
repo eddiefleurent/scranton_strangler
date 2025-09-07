@@ -774,8 +774,8 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (f
 	var putCredit, callCredit float64
 
 	for _, opt := range options {
-		putDiff := math.Abs(opt.Strike-putStrike)
-		callDiff := math.Abs(opt.Strike-callStrike)
+		putDiff := math.Abs(opt.Strike - putStrike)
+		callDiff := math.Abs(opt.Strike - callStrike)
 		if putDiff <= StrikeMatchEpsilon && opt.OptionType == "put" {
 			// Use mid price between bid and ask
 			putCredit = (opt.Bid + opt.Ask) / 2

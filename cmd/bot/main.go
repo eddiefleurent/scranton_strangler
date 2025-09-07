@@ -25,18 +25,18 @@ import (
 
 // Bot represents the main trading bot instance.
 type Bot struct {
-	config           *config.Config
-	broker           broker.Broker
-	strategy         *strategy.StrangleStrategy
-	storage          storage.Interface
-	logger           *log.Logger
-	stop             chan struct{}
-	ctx              context.Context // Main bot context for operations
-	orderManager     *orders.Manager
-	retryClient      *retry.Client
-	nyLocation       *time.Location // Cached NY timezone location
-	lastPnLUpdate    time.Time     // Last time P&L was persisted to reduce write amplification
-	pnlThrottle      time.Duration // Minimum interval between P&L updates
+	config        *config.Config
+	broker        broker.Broker
+	strategy      *strategy.StrangleStrategy
+	storage       storage.Interface
+	logger        *log.Logger
+	stop          chan struct{}
+	ctx           context.Context // Main bot context for operations
+	orderManager  *orders.Manager
+	retryClient   *retry.Client
+	nyLocation    *time.Location // Cached NY timezone location
+	lastPnLUpdate time.Time      // Last time P&L was persisted to reduce write amplification
+	pnlThrottle   time.Duration  // Minimum interval between P&L updates
 }
 
 func main() {
@@ -67,7 +67,7 @@ func main() {
 		config:        cfg,
 		logger:        logger,
 		stop:          make(chan struct{}),
-		pnlThrottle:   30 * time.Second, // Throttle P&L updates to every 30 seconds minimum
+		pnlThrottle:   30 * time.Second,           // Throttle P&L updates to every 30 seconds minimum
 		lastPnLUpdate: time.Now().Add(-time.Hour), // Initialize to past time to allow immediate first update
 	}
 
@@ -346,10 +346,10 @@ func (b *Bot) executeEntry() {
 		order.CallStrike,
 		order.Expiration,
 		order.Quantity,
-		px,           // limit price (rounded to tick)
-		false,        // not preview
-		"day",        // duration
-		"entry",      // tag
+		px,      // limit price (rounded to tick)
+		false,   // not preview
+		"day",   // duration
+		"entry", // tag
 	)
 
 	if err != nil {
@@ -488,8 +488,8 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 
 	// Guardrails for config - prevent invalid calculations that could block exits
 	pt := b.config.Strategy.Exit.ProfitTarget
-	if pt <= 0 || pt >= 1 {
-		b.logger.Printf("ERROR: Invalid ProfitTarget %.3f, must be in (0,1). Using default 0.50", pt)
+	if pt < 0 || pt > 1 {
+		b.logger.Printf("ERROR: Invalid ProfitTarget %.3f, must be in [0,1]. Using default 0.50", pt)
 		pt = 0.50
 	}
 
@@ -546,10 +546,6 @@ func (b *Bot) completePositionClose(
 ) {
 	actualPnL := b.calculateActualPnL(position, reason)
 	b.logPnL(position, actualPnL)
-
-	if err := position.TransitionState(models.StateClosed, "position_closed"); err != nil {
-		b.logger.Printf("Warning: failed to transition to Closed: %v", err)
-	}
 
 	if err := b.storage.ClosePosition(actualPnL, string(reason)); err != nil {
 		b.logger.Printf("Failed to close position in storage: %v", err)
@@ -608,4 +604,3 @@ func generatePositionID() string {
 
 	return fmt.Sprintf("%s-%x", now, randomBytes)
 }
-

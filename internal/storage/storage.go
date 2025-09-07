@@ -618,8 +618,8 @@ func (s *JSONStorage) GetIVReadings(symbol string, startDate, endDate time.Time)
 	var readings []models.IVReading
 	for _, reading := range s.data.IVReadings {
 		if reading.Symbol == symbol &&
-		   !reading.Date.Before(startDate) &&
-		   !reading.Date.After(endDate) {
+			!reading.Date.Before(startDate) &&
+			!reading.Date.After(endDate) {
 			readings = append(readings, reading)
 		}
 	}
@@ -649,4 +649,3 @@ func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 
 	return latest, nil
 }
-

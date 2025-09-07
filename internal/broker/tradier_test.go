@@ -632,7 +632,6 @@ func TestCheckStranglePosition_FindsShortPutAndCallForUnderlying(t *testing.T) {
 	}
 }
 
-
 func TestExtractUnderlyingFromOSI_BasicAndEdgeCases(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -786,7 +785,6 @@ func prettyForm(raw string) string {
 	dec, _ := url.QueryUnescape(raw)
 	return dec
 }
-
 
 // Sanity: ensure placeStrangleOrderInternal builds OCC symbols correctly (YYMMDD and 1/1000 rounding)
 func TestPlaceStrangleOrderInternal_OCCSymbolBuild(t *testing.T) {

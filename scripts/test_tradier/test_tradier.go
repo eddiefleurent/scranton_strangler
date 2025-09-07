@@ -343,7 +343,6 @@ func absInt(x int) int {
 
 func eq(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 
-
 // isOptionSymbol performs a robust OPRA-style check: TICKER + YYMMDD + [C|P] + strike
 // Example: SPY240920P00450000
 // Uses regex pattern: ^[A-Z]{1,6}\d{6}[CP]\d{8}$
