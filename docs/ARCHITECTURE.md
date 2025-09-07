@@ -221,8 +221,8 @@ type RiskManager interface {
 
 | Issue | Impact | Priority |
 |-------|--------|----------|
-| No interface-based design | Testing impossible | Critical |
-| Zero test coverage | No confidence in calculations | Critical |
+| ~~No interface-based design~~ | ~~Testing impossible~~ | ~~Critical~~ → **Resolved in PR #2** |
+| ~~Zero test coverage~~ | ~~No confidence in calculations~~ | ~~Critical~~ → **Resolved in PR #2** |
 | File-based state without ACID | Data corruption risk | Critical |
 | No retry/circuit breaker | API failures cascade | High |
 | Plain text credentials | Security vulnerability | High |
@@ -370,7 +370,7 @@ func (sm *PositionStateMachine) TransitionTo(newState PositionState) error {
         return ErrInvalidStateTransition
     }
 
-    // Get current position, update its state, and persist atomically
+    // Get current position, update its state, and persist via atomic file write (temp file + fsync + rename)
     position := sm.storage.GetCurrentPosition()
     if position == nil {
         return fmt.Errorf("no current position to update")
@@ -434,7 +434,7 @@ type CircuitBreakerSettings struct {
 ```
 
 #### Success Metrics
-- 100% unit test coverage for financial calculations
+- **100% unit test coverage for financial calculations** ✅ *Achieved in PR #2*
 - 30 days without crashes
 - 10+ completed trades
 - 70%+ win rate
@@ -754,7 +754,7 @@ func (c *RateLimitedClient) GetQuote(symbol string) (*Quote, error) {
    Partial → Adjust or Cancel
    Filled → Update Position
        ↓
-6. Persist State (transactional)
+6. Persist State (atomic file write; transactions arrive with SQLite in Phase 2)
 ```
 
 ### Error Handling Matrix

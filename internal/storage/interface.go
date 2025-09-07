@@ -2,7 +2,13 @@ package storage
 
 import "github.com/eddiefleurent/scranton_strangler/internal/models"
 
-// Interface defines the contract for position and trade data persistence
+// Interface defines the contract for position and trade data persistence.
+//
+// Implementations must be safe for concurrent use - callers can assume all methods
+// are goroutine-safe and can safely call these methods from multiple goroutines.
+//
+// The provided JSONStorage implementation uses sync.RWMutex to serialize access,
+// ensuring all Interface methods are protected for concurrent readers and writers.
 type Interface interface {
 	// Position management
 	GetCurrentPosition() *models.Position

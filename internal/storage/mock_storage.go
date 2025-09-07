@@ -37,7 +37,7 @@ func (m *MockStorage) GetCurrentPosition() *models.Position {
 
 // SetCurrentPosition updates the mock current position.
 func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
-	m.currentPosition = pos
+	m.currentPosition = clonePosition(pos)
 	return nil
 }
 

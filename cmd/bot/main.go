@@ -98,9 +98,11 @@ func main() {
 		EscalateLossPct:     cfg.Strategy.EscalateLossPct,
 		StopLossPct:         cfg.Strategy.Exit.StopLossPct,
 		MaxPositionLoss:     cfg.Risk.MaxPositionLoss,
+		MaxContracts:        cfg.Risk.MaxContracts,
 		UseMockHistoricalIV: cfg.Strategy.UseMockHistoricalIV,
+		FailOpenOnIVError:   false, // Default to fail-closed for safety
 	}
-	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig)
+	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger)
 
 	// Initialize order manager
 	bot.orderManager = orders.NewManager(bot.broker, bot.storage, logger, bot.stop)
@@ -392,11 +394,11 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 
 	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
 
-	// Store close order metadata and set position to closing state
+	// Store close order metadata and set position to adjusting state
 	position.ExitOrderID = fmt.Sprintf("%d", closeOrder.Order.ID)
 	position.ExitReason = string(reason)
 	if err := position.TransitionState(models.StateAdjusting, "close_order_placed"); err != nil {
-		b.logger.Printf("Warning: failed to transition to closing state: %v", err)
+		b.logger.Printf("Warning: failed to transition to adjusting state: %v", err)
 	}
 
 	if err := b.storage.SetCurrentPosition(position); err != nil {
@@ -449,14 +451,16 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 	case strategy.ExitReasonProfitTarget:
 		return position.CreditReceived * (1.0 - b.config.Strategy.Exit.ProfitTarget)
 	case strategy.ExitReasonTime:
-		if cvErr == nil {
+		if cvErr == nil && position.Quantity != 0 {
 			return currentVal / (float64(position.Quantity) * 100)
 		}
-		return position.CreditReceived
+		// Fallback: use configured profit target when quantity is zero or GetCurrentPositionValue failed
+		return position.CreditReceived * (1.0 - b.config.Strategy.Exit.ProfitTarget)
 	case strategy.ExitReasonStopLoss:
-		if cvErr == nil {
+		if cvErr == nil && position.Quantity != 0 {
 			return currentVal / (float64(position.Quantity) * 100)
 		}
+		// Fallback: use configured stop loss percentage when quantity is zero or GetCurrentPositionValue failed
 		return position.CreditReceived * b.config.Strategy.Exit.StopLossPct
 	default:
 		return position.CreditReceived * 1.0

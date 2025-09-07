@@ -51,8 +51,9 @@ func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 			}
 
 			strategy := &StrangleStrategy{
-				broker: mockClient,
-				config: cfg,
+				broker:     mockClient,
+				config:     cfg,
+				chainCache: make(map[string]*optionChainCacheEntry),
 			}
 
 			result := strategy.calculatePositionSize(tt.creditPerContract)
@@ -101,7 +102,9 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 		},
 	}
 
-	strategy := &StrangleStrategy{}
+	strategy := &StrangleStrategy{
+		chainCache: make(map[string]*optionChainCacheEntry),
+	}
 
 	tests := []struct {
 		name       string
@@ -241,8 +244,9 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mockClient := newMockBroker(100000.0)
 			strategy := &StrangleStrategy{
-				broker: mockClient,
-				config: cfg,
+				broker:     mockClient,
+				config:     cfg,
+				chainCache: make(map[string]*optionChainCacheEntry),
 			}
 
 			// Set up mock option prices based on test case
@@ -329,7 +333,9 @@ func TestStrangleStrategy_findStrikeByDelta(t *testing.T) {
 		},
 	}
 
-	strategy := &StrangleStrategy{}
+	strategy := &StrangleStrategy{
+		chainCache: make(map[string]*optionChainCacheEntry),
+	}
 
 	tests := []struct {
 		name        string
@@ -374,7 +380,18 @@ func TestStrangleStrategy_findStrikeByDelta(t *testing.T) {
 }
 
 func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
-	strategy := &StrangleStrategy{}
+	// Create mock broker
+	mockClient := newMockBroker(100000.0)
+
+	cfg := &Config{
+		Symbol: "SPY",
+	}
+
+	strategy := &StrangleStrategy{
+		broker:     mockClient,
+		config:     cfg,
+		chainCache: make(map[string]*optionChainCacheEntry),
+	}
 
 	// Test finding expiration 45 days out
 	result := strategy.findTargetExpiration(45)
@@ -554,4 +571,28 @@ func (m *mockBroker) PlaceBuyToCloseOrder(
 	_ float64,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
+}
+
+func (m *mockBroker) GetMarketClock(_ bool) (*broker.MarketClockResponse, error) {
+	return &broker.MarketClockResponse{
+		Clock: struct {
+			Date        string `json:"date"`
+			Description string `json:"description"`
+			State       string `json:"state"`
+			Timestamp   int64  `json:"timestamp"`
+			NextChange  string `json:"next_change"`
+			NextState   string `json:"next_state"`
+		}{
+			Date:        "2024-01-01",
+			Description: "Market is open",
+			State:       "open",
+			Timestamp:   1704067200,
+			NextChange:  "16:00",
+			NextState:   "postmarket",
+		},
+	}, nil
+}
+
+func (m *mockBroker) IsTradingDay(_ bool) (bool, error) {
+	return true, nil
 }

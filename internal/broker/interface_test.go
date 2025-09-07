@@ -766,6 +766,38 @@ func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
 	return resp, nil
 }
 
+func (m *MockBroker) GetMarketClock(_ bool) (*MarketClockResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return &MarketClockResponse{
+		Clock: struct {
+			Date        string `json:"date"`
+			Description string `json:"description"`
+			State       string `json:"state"`
+			Timestamp   int64  `json:"timestamp"`
+			NextChange  string `json:"next_change"`
+			NextState   string `json:"next_state"`
+		}{
+			Date:        "2024-01-01",
+			Description: "Market is open",
+			State:       "open",
+			Timestamp:   1704067200,
+			NextChange:  "16:00",
+			NextState:   "postmarket",
+		},
+	}, nil
+}
+
+func (m *MockBroker) IsTradingDay(_ bool) (bool, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return false, errors.New("mock broker error")
+	}
+	return true, nil
+}
+
 func TestNewCircuitBreakerBroker(t *testing.T) {
 	mockBroker := &MockBroker{}
 	cb := NewCircuitBreakerBroker(mockBroker)
@@ -929,7 +961,15 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 
 func TestCircuitBreakerBroker_CircuitBreakerError(t *testing.T) {
 	mockBroker := &MockBroker{shouldFail: true, failAfter: 0}
-	cb := NewCircuitBreakerBroker(mockBroker)
+	// Use deterministic settings for reliable test behavior
+	testSettings := CircuitBreakerSettings{
+		MaxRequests:  3,
+		Interval:     10 * time.Millisecond,
+		Timeout:      50 * time.Millisecond,
+		MinRequests:  1,
+		FailureRatio: 0.5,
+	}
+	cb := NewCircuitBreakerBrokerWithSettings(mockBroker, testSettings)
 
 	// Trip the breaker immediately
 	for i := 0; i < 8; i++ {
@@ -953,12 +993,10 @@ func TestNormalizeDuration(t *testing.T) {
 		// Valid standard values
 		{"valid day", "day", "day", false},
 		{"valid gtc", "gtc", "gtc", false},
-		{"valid gtd", "gtd", "gtd", false},
 
 		// Case normalization
 		{"uppercase day", "DAY", "day", false},
 		{"mixed case gtc", "Gtc", "gtc", false},
-		{"mixed case gtd", "GtD", "gtd", false},
 
 		// Whitespace trimming
 		{"leading spaces", " day", "day", false},
@@ -969,9 +1007,13 @@ func TestNormalizeDuration(t *testing.T) {
 		{"good-til-cancelled", "good-til-cancelled", "gtc", false},
 		{"goodtilcancelled", "goodtilcancelled", "gtc", false},
 		{"GOOD-TIL-CANCELLED", "GOOD-TIL-CANCELLED", "gtc", false},
-		{"good-til-date", "good-til-date", "gtd", false},
-		{"goodtildate", "goodtildate", "gtd", false},
-		{"GOOD-TIL-DATE", "GOOD-TIL-DATE", "gtd", false},
+
+		// Invalid gtd variants (Tradier API doesn't support gtd)
+		{"valid gtd", "gtd", "", true},
+		{"mixed case gtd", "GtD", "", true},
+		{"good-til-date", "good-til-date", "", true},
+		{"goodtildate", "goodtildate", "", true},
+		{"GOOD-TIL-DATE", "GOOD-TIL-DATE", "", true},
 
 		// Invalid values
 		{"empty string", "", "", true},

@@ -18,7 +18,7 @@ const (
 	// defaultStopLossPct is used when strategy.exit.stop_loss_pct is unset
 	defaultStopLossPct = 2.5
 	// defaultRiskMaxPositionLoss is used when risk.max_position_loss is unset
-	defaultRiskMaxPositionLoss = 2.0
+	defaultRiskMaxPositionLoss = 3.0
 	// defaultMaxDTE represents the default maximum days to expiration before forced exit (21 days)
 	defaultMaxDTE = 21
 )
@@ -140,6 +140,11 @@ func (c *Config) Validate() error {
 	// Environment validation
 	if c.Environment.Mode != "paper" && c.Environment.Mode != "live" {
 		return fmt.Errorf("environment.mode must be 'paper' or 'live'")
+	}
+
+	// OTOCO validation - reject OTOCO flags in live mode as they are unimplemented no-ops
+	if c.Environment.Mode == "live" && (c.Broker.UseOTOCO || c.Broker.OTOCOPreview || c.Broker.OTOCOFallback) {
+		return fmt.Errorf("OTOCO flags are not allowed in live mode; these features are unimplemented no-ops")
 	}
 
 	// Broker validation

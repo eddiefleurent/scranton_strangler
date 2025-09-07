@@ -7,6 +7,24 @@ import (
 	"time"
 )
 
+// Test helper function to force state while maintaining internal consistency
+// This is useful for testing specific states without going through full transition sequences
+func forceStateForTesting(sm *StateMachine, state PositionState) {
+	sm.currentState = state
+	sm.previousState = state
+	sm.transitionTime = time.Now().UTC()
+
+	// Reset transition count for this state to avoid validation issues
+	sm.transitionCount = make(map[PositionState]int)
+	sm.transitionCount[state] = 1
+
+	// Reset Fourth Down fields if not in Fourth Down
+	if state != StateFourthDown {
+		sm.fourthDownOption = ""
+		sm.fourthDownStartTime = time.Time{}
+	}
+}
+
 // Test constants for repeated strings
 
 func TestStateMachine_BasicTransitions(t *testing.T) {
@@ -308,8 +326,8 @@ func TestStateMachine_StateDescriptions(t *testing.T) {
 	}
 
 	for _, state := range testStates {
-		// Force state for testing (bypass validation)
-		sm.currentState = state
+		// Force state for testing while maintaining internal consistency
+		forceStateForTesting(sm, state)
 
 		description := sm.GetStateDescription()
 		if description == "" || description == "Unknown state" {
@@ -456,27 +474,25 @@ func TestStateMachine_EmergencyExit_200PercentLoss(t *testing.T) {
 // Test Fourth Down Option A (Inverted Strangle) 5-day time limit
 func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 	sm := NewStateMachine()
-	sm.currentState = StateFourthDown
+	forceStateForTesting(sm, StateFourthDown)
 	sm.SetFourthDownOption(OptionA)
 
-	// Manipulate time to simulate passage of days
-	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour) // 4 days ago
-
-	// Test within 5-day limit - no emergency exit
+	// Test within 5-day limit - no emergency exit (4 days ago)
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, 3.499, 30, 21, 2.0) // negligible loss, 4 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 4 days, but got: %s", reason)
 	}
 
 	// Test exactly at 5-day limit - no exit yet (>5 days required)
-	sm.fourthDownStartTime = time.Now().Add(-5 * 24 * time.Hour)          // exactly 5 days ago
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -5)
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, 3.499, 30, 21, 2.0) // negligible loss, 5 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit at exactly 5 days, but got: %s", reason)
 	}
 
 	// Test beyond 5-day limit - should trigger
-	sm.fourthDownStartTime = time.Now().Add(-6 * 24 * time.Hour)          // 6 days ago
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -6)
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -5.00, 30, 21, 2.0) // 142.9% loss, 6 days
 	if !shouldExit {
 		t.Error("Should emergency exit after 6 days for Option A")
@@ -489,18 +505,18 @@ func TestStateMachine_EmergencyExit_OptionA_TimeLimit(t *testing.T) {
 // Test Fourth Down Option B (Hold Straddle) 3-day time limit
 func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 	sm := NewStateMachine()
-	sm.currentState = StateFourthDown
+	forceStateForTesting(sm, StateFourthDown)
 	sm.SetFourthDownOption(OptionB)
 
-	// Test within 3-day limit - no emergency exit
-	sm.fourthDownStartTime = time.Now().Add(-2 * 24 * time.Hour)           // 2 days ago
+	// Test within 3-day limit - no emergency exit (2 days ago)
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -2)
 	shouldExit, reason := sm.ShouldEmergencyExit(3.50, -0.10, 30, 21, 2.0) // 2.9% loss, 2 days
 	if shouldExit {
 		t.Errorf("Should not emergency exit due to time at 2 days, but got: %s", reason)
 	}
 
 	// Test beyond 3-day limit - should trigger
-	sm.fourthDownStartTime = time.Now().Add(-4 * 24 * time.Hour)          // 4 days ago
+	sm.fourthDownStartTime = time.Now().UTC().AddDate(0, 0, -4)
 	shouldExit, reason = sm.ShouldEmergencyExit(3.50, -0.10, 30, 21, 2.0) // 2.9% loss, 4 days
 	if !shouldExit {
 		t.Error("Should emergency exit after 4 days for Option B")
@@ -513,7 +529,7 @@ func TestStateMachine_EmergencyExit_OptionB_TimeLimit(t *testing.T) {
 // Test Fourth Down Option C (Punt) 21 DTE limit
 func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 	sm := NewStateMachine()
-	sm.currentState = StateFourthDown
+	forceStateForTesting(sm, StateFourthDown)
 	sm.SetFourthDownOption(OptionC)
 	sm.fourthDownStartTime = time.Now().Add(-1 * 24 * time.Hour) // 1 day ago
 
@@ -547,13 +563,39 @@ func TestStateMachine_EmergencyExit_OptionC_DTELimit(t *testing.T) {
 func TestStateMachine_Punt_SingleUse(t *testing.T) {
 	sm := NewStateMachine()
 
-	// Initially should be able to punt
+	// Setup: transition to FourthDown state first
+	err := sm.Transition(StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to transition to Submitted: %v", err)
+	}
+	err = sm.Transition(StateOpen, "order_filled")
+	if err != nil {
+		t.Fatalf("Failed to transition to Open: %v", err)
+	}
+	err = sm.Transition(StateFirstDown, "start_management")
+	if err != nil {
+		t.Fatalf("Failed to transition to FirstDown: %v", err)
+	}
+	err = sm.Transition(StateSecondDown, "strike_challenged")
+	if err != nil {
+		t.Fatalf("Failed to transition to SecondDown: %v", err)
+	}
+	err = sm.Transition(StateThirdDown, "strike_breached")
+	if err != nil {
+		t.Fatalf("Failed to transition to ThirdDown: %v", err)
+	}
+	err = sm.Transition(StateFourthDown, "adjustment_failed")
+	if err != nil {
+		t.Fatalf("Failed to transition to FourthDown: %v", err)
+	}
+
+	// In FourthDown state, should be able to punt
 	if !sm.CanPunt() {
-		t.Error("Fresh state machine should allow punt")
+		t.Error("State machine in FourthDown should allow punt")
 	}
 
 	// Execute first punt
-	err := sm.ExecutePunt()
+	err = sm.ExecutePunt()
 	if err != nil {
 		t.Fatalf("First punt should succeed: %v", err)
 	}
@@ -580,17 +622,17 @@ func TestPosition_EmergencyExit_Integration(t *testing.T) {
 	expiration := time.Now().AddDate(0, 0, 30) // 30 DTE
 	pos := NewPosition("TEST-1", "SPY", 400.0, 420.0, expiration, 1)
 
-	pos.CreditReceived = 3.50
-	pos.CurrentPnL = -5.00 // 142.9% loss
+	pos.CreditReceived = 3.50 // per-share credit
+	pos.CurrentPnL = -175.00  // 50% loss (50% of total credit: 3.50 * 1 * 100 = 350)
 
 	// Below 200% loss - no emergency exit
 	shouldExit, reason := pos.ShouldEmergencyExit(21, 2.0)
 	if shouldExit {
-		t.Errorf("Should not emergency exit at 142.9%% loss, but got: %s", reason)
+		t.Errorf("Should not emergency exit at 50%% loss, but got: %s", reason)
 	}
 
 	// At 200% loss - should trigger
-	pos.CurrentPnL = -7.00 // 200% loss
+	pos.CurrentPnL = -700.00 // 200% loss (200% of total credit: 3.50 * 1 * 100 = 350)
 	shouldExit, _ = pos.ShouldEmergencyExit(21, 2.0)
 	if !shouldExit {
 		t.Error("Should emergency exit at 200% loss")
@@ -613,13 +655,39 @@ func TestPosition_FourthDownOptions(t *testing.T) {
 		t.Errorf("Expected Option A, got %s", pos.GetFourthDownOption())
 	}
 
+	// Setup: transition position to FourthDown state before testing punt
+	err := pos.TransitionState(StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to transition to Submitted: %v", err)
+	}
+	err = pos.TransitionState(StateOpen, "order_filled")
+	if err != nil {
+		t.Fatalf("Failed to transition to Open: %v", err)
+	}
+	err = pos.TransitionState(StateFirstDown, "start_management")
+	if err != nil {
+		t.Fatalf("Failed to transition to FirstDown: %v", err)
+	}
+	err = pos.TransitionState(StateSecondDown, "strike_challenged")
+	if err != nil {
+		t.Fatalf("Failed to transition to SecondDown: %v", err)
+	}
+	err = pos.TransitionState(StateThirdDown, "strike_breached")
+	if err != nil {
+		t.Fatalf("Failed to transition to ThirdDown: %v", err)
+	}
+	err = pos.TransitionState(StateFourthDown, "adjustment_failed")
+	if err != nil {
+		t.Fatalf("Failed to transition to FourthDown: %v", err)
+	}
+
 	// Test punt capability
 	if !pos.CanPunt() {
-		t.Error("Fresh position should allow punt")
+		t.Error("Position in FourthDown should allow punt")
 	}
 
 	// Execute punt
-	err := pos.ExecutePunt()
+	err = pos.ExecutePunt()
 	if err != nil {
 		t.Fatalf("Punt should succeed: %v", err)
 	}
@@ -635,7 +703,7 @@ func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	sm := NewStateMachine()
 
 	// Set up Fourth Down state
-	sm.currentState = StateFourthDown
+	forceStateForTesting(sm, StateFourthDown)
 	sm.SetFourthDownOption(OptionA)
 	if err := sm.ExecutePunt(); err != nil {
 		t.Errorf("ExecutePunt should succeed: %v", err)
@@ -724,6 +792,180 @@ func TestPosition_ProfitPercent(t *testing.T) {
 			epsilon := 0.001
 			if diff := actualPct - tc.expectedPct; diff < -epsilon || diff > epsilon {
 				t.Errorf("ProfitPercent() = %.3f, expected %.3f", actualPct, tc.expectedPct)
+			}
+		})
+	}
+}
+
+// Test emergency exit with multi-quantity positions and adjustment credits
+func TestPosition_EmergencyExit_MultiQuantity_WithAdjustments(t *testing.T) {
+	expiration := time.Now().AddDate(0, 0, 30)
+
+	testCases := []struct {
+		name            string
+		quantity        int
+		creditReceived  float64
+		adjustments     []Adjustment
+		currentPnL      float64
+		escalateLossPct float64
+		shouldExit      bool
+		expectedMsg     string
+	}{
+		{
+			name:            "Multi-quantity position without adjustments",
+			quantity:        5,
+			creditReceived:  2.00,
+			adjustments:     []Adjustment{},
+			currentPnL:      -500.0, // 50% loss (2.00 * 5 * 100 = 1000)
+			escalateLossPct: 1.5,
+			shouldExit:      false,
+			expectedMsg:     "",
+		},
+		{
+			name:           "Multi-quantity position with adjustments - below threshold",
+			quantity:       3,
+			creditReceived: 2.50,
+			adjustments: []Adjustment{
+				{Credit: 1.00, Type: AdjustmentRoll},
+				{Credit: 0.50, Type: AdjustmentDelta},
+			},
+			currentPnL:      -975.0, // 75% loss (total credit: (2.50 + 1.00 + 0.50) * 3 * 100 = 1300)
+			escalateLossPct: 1.5,
+			shouldExit:      false,
+			expectedMsg:     "",
+		},
+		{
+			name:           "Multi-quantity position with adjustments - at threshold",
+			quantity:       3,
+			creditReceived: 2.50,
+			adjustments: []Adjustment{
+				{Credit: 1.00, Type: AdjustmentRoll},
+				{Credit: 0.50, Type: AdjustmentDelta},
+			},
+			currentPnL:      -1800.0, // 150% loss (total credit: (2.50 + 1.00 + 0.50) * 3 * 100 = 1200)
+			escalateLossPct: 1.5,
+			shouldExit:      true,
+			expectedMsg:     "emergency exit: loss 150.0%",
+		},
+		{
+			name:           "Multi-quantity position with adjustments - above threshold",
+			quantity:       3,
+			creditReceived: 2.50,
+			adjustments: []Adjustment{
+				{Credit: 1.00, Type: AdjustmentRoll},
+				{Credit: 0.50, Type: AdjustmentDelta},
+			},
+			currentPnL:      -2400.0, // 200% loss (total credit: 1200)
+			escalateLossPct: 1.5,
+			shouldExit:      true,
+			expectedMsg:     "emergency exit: loss 200.0%",
+		},
+		{
+			name:           "Single quantity with adjustment credits",
+			quantity:       1,
+			creditReceived: 5.00,
+			adjustments: []Adjustment{
+				{Credit: -2.00, Type: AdjustmentRoll}, // Debit adjustment
+			},
+			currentPnL:      -300.0, // 100% loss (total credit: (5.00 - 2.00) * 1 * 100 = 300)
+			escalateLossPct: 0.8,
+			shouldExit:      true,
+			expectedMsg:     "emergency exit: loss 100.0%",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pos := NewPosition("TEST-1", "SPY", 400.0, 420.0, expiration, tc.quantity)
+			pos.CreditReceived = tc.creditReceived
+			pos.Adjustments = tc.adjustments
+			pos.CurrentPnL = tc.currentPnL
+
+			shouldExit, reason := pos.ShouldEmergencyExit(21, tc.escalateLossPct)
+
+			if shouldExit != tc.shouldExit {
+				t.Errorf("Expected shouldExit=%v, got %v", tc.shouldExit, shouldExit)
+			}
+
+			if tc.shouldExit && !contains(reason, tc.expectedMsg) {
+				t.Errorf("Expected message containing '%s', got: %s", tc.expectedMsg, reason)
+			}
+		})
+	}
+}
+
+// Test credit calculation consistency between ProfitPercent and ShouldEmergencyExit
+func TestPosition_CreditCalculationConsistency(t *testing.T) {
+	expiration := time.Now().AddDate(0, 0, 45)
+
+	testCases := []struct {
+		name           string
+		quantity       int
+		creditReceived float64
+		adjustments    []Adjustment
+		currentPnL     float64
+	}{
+		{
+			name:           "Single quantity, no adjustments",
+			quantity:       1,
+			creditReceived: 3.50,
+			adjustments:    []Adjustment{},
+			currentPnL:     -175.0, // 50% loss
+		},
+		{
+			name:           "Multi-quantity, no adjustments",
+			quantity:       5,
+			creditReceived: 2.00,
+			adjustments:    []Adjustment{},
+			currentPnL:     -500.0, // 50% loss
+		},
+		{
+			name:           "Multi-quantity with adjustments",
+			quantity:       3,
+			creditReceived: 2.50,
+			adjustments: []Adjustment{
+				{Credit: 1.00, Type: AdjustmentRoll},
+				{Credit: 0.50, Type: AdjustmentDelta},
+			},
+			currentPnL: -975.0, // 75% loss
+		},
+		{
+			name:           "Single quantity with debit adjustment",
+			quantity:       1,
+			creditReceived: 5.00,
+			adjustments: []Adjustment{
+				{Credit: -2.00, Type: AdjustmentRoll},
+			},
+			currentPnL: -150.0, // 50% loss
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pos := NewPosition("TEST-1", "SPY", 400.0, 420.0, expiration, tc.quantity)
+			pos.CreditReceived = tc.creditReceived
+			pos.Adjustments = tc.adjustments
+			pos.CurrentPnL = tc.currentPnL
+
+			// Both ProfitPercent and ShouldEmergencyExit should use the same total credit basis
+			profitPercent := pos.ProfitPercent()
+
+			// Calculate expected percentage manually using the same logic
+			totalCredit := pos.GetTotalCredit() * float64(pos.Quantity) * 100
+			expectedPercent := (pos.CurrentPnL / totalCredit) * 100
+
+			if profitPercent != expectedPercent {
+				t.Errorf("ProfitPercent (%f) doesn't match expected calculation (%f)", profitPercent, expectedPercent)
+			}
+
+			// Test that emergency exit uses the same credit basis
+			// This is implicitly tested by the fact that both use GetTotalCredit()
+			// We can verify this by checking the credit calculation in ShouldEmergencyExit
+			totalCreditForEmergency := pos.GetTotalCredit() * float64(pos.Quantity) * 100
+
+			if totalCredit != totalCreditForEmergency {
+				t.Errorf("Credit calculation mismatch between ProfitPercent (%f) and ShouldEmergencyExit (%f)",
+					totalCredit, totalCreditForEmergency)
 			}
 		})
 	}

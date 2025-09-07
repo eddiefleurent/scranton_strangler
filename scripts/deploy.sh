@@ -4,7 +4,8 @@
 # Usage: ./scripts/deploy.sh [environment]
 # Environments: staging, production
 
-set -e
+set -euo pipefail
+IFS=$'\n\t'
 
 ENVIRONMENT=${1:-staging}
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,40 +66,55 @@ if command -v docker compose &>/dev/null; then
 else
     COMPOSE="docker-compose"
 fi
+COMPOSE=${COMPOSE:-docker-compose}  # Fallback in case neither condition is met
 
-# Ensure bind-mount targets exist
-mkdir -p "$PROJECT_ROOT/logs"
-touch "$PROJECT_ROOT/positions.json"
+# Ensure bind-mount targets exist (see docker-compose.yml volumes section)
+# Creates directories for: ./data:/data:rw and ./logs:/logs:rw
+mkdir -p "$PROJECT_ROOT/data"
+mkdir -p "$PROJECT_ROOT/data/logs"
+
+# Seed positions.json in data directory if it doesn't exist
+if [[ ! -f "$PROJECT_ROOT/data/positions.json" ]]; then
+    echo '[]' > "$PROJECT_ROOT/data/positions.json"
+    log_info "Created empty positions.json seed file in data directory"
+fi
+
+# Determine compose command with appropriate flags
+if [[ "$ENVIRONMENT" == "production" ]]; then
+    COMPOSE_CMD="$COMPOSE -f docker-compose.yml -f docker-compose.prod.yml"
+else
+    COMPOSE_CMD="$COMPOSE"
+fi
 
 # Stop existing containers
 log_info "Stopping existing containers..."
-$COMPOSE down || true
+$COMPOSE_CMD down || true
 
 # Start services
 log_info "Starting services..."
-if [[ "$ENVIRONMENT" == "production" ]]; then
-    $COMPOSE -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-else
-    $COMPOSE up -d --build
-fi
+$COMPOSE_CMD up -d --build
 
 # Wait for services to be healthy
-log_info "Waiting for services to be ready..."
-sleep 10
+log_info "Waiting for services to be healthy..."
+deadline=$((SECONDS+120))
+while :; do
+  unhealthy=$($COMPOSE_CMD ps --format json | jq -r '.[] | select(.Health!="healthy") | .Name' | wc -l)
+  [[ "$unhealthy" -eq 0 ]] && break
+  [[ $SECONDS -ge $deadline ]] && break
+  sleep 3
+done
 
-# Check if services are running
-if $COMPOSE ps | grep -q "Up"; then
+# Check health
+if $COMPOSE_CMD ps --format json | jq -e '.[] | select(.Health!="healthy")' >/dev/null; then
+    log_error "Deployment failed. One or more services are not healthy."
+    $COMPOSE_CMD logs
+    exit 1
+else
     log_info "Deployment to $ENVIRONMENT completed successfully!"
 
-    # Show running containers
+    # Show running containers and recent logs
     log_info "Running containers:"
-    $COMPOSE ps
-
-    # Show logs
+    $COMPOSE_CMD ps
     log_info "Recent logs:"
-    $COMPOSE logs --tail=20 strangle-bot
-else
-    log_error "Deployment failed. Services are not running properly."
-    $COMPOSE logs
-    exit 1
+    $COMPOSE_CMD logs --tail=20 strangle-bot
 fi

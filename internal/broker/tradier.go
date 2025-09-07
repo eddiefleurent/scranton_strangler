@@ -249,6 +249,18 @@ type BalanceResponse struct {
 	} `json:"balances"`
 }
 
+// MarketClockResponse represents the market clock response from the Tradier API.
+type MarketClockResponse struct {
+	Clock struct {
+		Date        string `json:"date"`
+		Description string `json:"description"`
+		State       string `json:"state"`
+		Timestamp   int64  `json:"timestamp"`
+		NextChange  string `json:"next_change"`
+		NextState   string `json:"next_state"`
+	} `json:"clock"`
+}
+
 // OrderResponse represents the order response from the Tradier API.
 type OrderResponse struct {
 	Order struct {
@@ -275,7 +287,10 @@ type OrderResponse struct {
 
 // GetQuote retrieves the current market quote for a symbol.
 func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
-	endpoint := fmt.Sprintf("%s/markets/quotes?symbols=%s&greeks=false", t.baseURL, symbol)
+	params := url.Values{}
+	params.Set("symbols", symbol)
+	params.Set("greeks", "false")
+	endpoint := t.baseURL + "/markets/quotes?" + params.Encode()
 
 	var response QuotesResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
@@ -293,8 +308,11 @@ func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 
 // GetExpirations retrieves available expiration dates for options on a symbol.
 func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
-	endpoint := fmt.Sprintf("%s/markets/options/expirations?symbol=%s&includeAllRoots=true&strikes=false",
-		t.baseURL, symbol)
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("includeAllRoots", "true")
+	params.Set("strikes", "false")
+	endpoint := t.baseURL + "/markets/options/expirations?" + params.Encode()
 
 	var response ExpirationsResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
@@ -306,8 +324,11 @@ func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
 
 // GetOptionChain retrieves the option chain for a symbol and expiration date.
 func (t *TradierAPI) GetOptionChain(symbol, expiration string, greeks bool) ([]Option, error) {
-	endpoint := fmt.Sprintf("%s/markets/options/chains?symbol=%s&expiration=%s&greeks=%t",
-		t.baseURL, symbol, expiration, greeks)
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("expiration", expiration)
+	params.Set("greeks", fmt.Sprintf("%t", greeks))
+	endpoint := t.baseURL + "/markets/options/chains?" + params.Encode()
 
 	var response OptionChainResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
@@ -341,6 +362,30 @@ func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	return &response, nil
 }
 
+// GetMarketClock retrieves the current market clock status.
+func (t *TradierAPI) GetMarketClock(delayed bool) (*MarketClockResponse, error) {
+	endpoint := fmt.Sprintf("%s/markets/clock?delayed=%t", t.baseURL, delayed)
+
+	var response MarketClockResponse
+	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
+// IsTradingDay checks if the market is currently open for trading.
+// Returns true if state is "open", "premarket", or "postmarket", false otherwise.
+func (t *TradierAPI) IsTradingDay(delayed bool) (bool, error) {
+	clock, err := t.GetMarketClock(delayed)
+	if err != nil {
+		return false, err
+	}
+
+	state := clock.Clock.State
+	return state == "open" || state == "premarket" || state == "postmarket", nil
+}
+
 // normalizeDuration normalizes and validates duration parameter
 func normalizeDuration(duration string) (string, error) {
 	if duration == "" {
@@ -354,18 +399,16 @@ func normalizeDuration(duration string) (string, error) {
 	switch normalized {
 	case "good-til-cancelled", "goodtilcancelled", "gtc":
 		return "gtc", nil
-	case "good-til-date", "goodtildate", "gtd":
-		return "gtd", nil
 	case "day":
 		return "day", nil
 	}
 
 	// Check against allowed values
 	switch normalized {
-	case "day", "gtc", "gtd":
+	case "day", "gtc":
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("invalid duration '%s': must be one of 'day', 'gtc', or 'gtd'", duration)
+		return "", fmt.Errorf("invalid duration '%s': must be one of 'day' or 'gtc'", duration)
 	}
 }
 
@@ -403,10 +446,10 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 ) (*OrderResponse, error) {
 	// Validate duration (should be normalized by caller)
 	switch duration {
-	case "day", "gtc", "gtd":
+	case "day", "gtc":
 		// Valid duration
 	default:
-		return nil, fmt.Errorf("invalid duration '%s': must be one of 'day', 'gtc', or 'gtd'", duration)
+		return nil, fmt.Errorf("invalid duration '%s': must be one of 'day' or 'gtc'", duration)
 	}
 
 	// Validate price for credit/debit orders
@@ -616,7 +659,7 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 		log.Printf("Rate limit remaining: %s", remaining)
 	}
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return &APIError{Status: resp.StatusCode, Body: "failed to read error body"}
@@ -624,11 +667,15 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 		return &APIError{Status: resp.StatusCode, Body: string(body)}
 	}
 
-	decErr := json.NewDecoder(resp.Body).Decode(response)
-	if decErr == io.EOF {
+	if resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	return decErr
+	dec := json.NewDecoder(resp.Body)
+	if err := dec.Decode(response); err == io.EOF {
+		return nil
+	} else {
+		return err
+	}
 }
 
 // ============ Helper Functions ============
@@ -686,13 +733,14 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 // CalculateStrangleCredit calculates expected credit from put and call
 func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (float64, error) {
 	var putCredit, callCredit float64
+	const eps = 1e-6 // Small epsilon for floating-point comparison
 
 	for _, opt := range options {
-		if opt.Strike == putStrike && opt.OptionType == optionTypePut {
+		if math.Abs(opt.Strike-putStrike) <= 1e-4 && opt.OptionType == optionTypePut {
 			// Use mid price between bid and ask
 			putCredit = (opt.Bid + opt.Ask) / 2
 		}
-		if opt.Strike == callStrike && opt.OptionType == optionTypeCall {
+		if math.Abs(opt.Strike-callStrike) <= 1e-4 && opt.OptionType == optionTypeCall {
 			// Use mid price between bid and ask
 			callCredit = (opt.Bid + opt.Ask) / 2
 		}
@@ -717,7 +765,7 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 		}
 
 		// Short positions have negative quantity
-		if pos.Quantity >= 0 {
+		if pos.Quantity >= -1e-6 { // treat tiny negatives as zero
 			continue
 		}
 
@@ -740,6 +788,11 @@ func abs(x float64) float64 {
 	return x
 }
 
+// almostEqual compares two floats with epsilon tolerance for floating-point precision issues
+func almostEqual(a, b, eps float64) bool {
+	return math.Abs(a-b) <= eps
+}
+
 // extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"
 func extractUnderlyingFromOSI(s string) string {
@@ -755,11 +808,6 @@ func extractUnderlyingFromOSI(s string) string {
 			// Check that the 6-digit sequence is not part of a longer numeric run
 			if i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
 				continue // previous char is digit, skip
-			}
-
-			// Check that 6-digit expiration is followed by P/C and exactly 8 digits
-			if i+15 > len(s) {
-				continue // not enough chars remaining
 			}
 
 			expirationEnd := i + 6

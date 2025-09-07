@@ -134,7 +134,7 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 				m.logger.Printf("Order filled for position %s", positionID)
 				m.handleOrderFilled(positionID, isEntryOrder)
 				return
-			case "canceled", "rejected", "expired":
+			case "canceled", "cancelled", "rejected", "expired":
 				m.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
 				m.handleOrderFailed(positionID, orderID, orderStatus.Order.Status)
 				return
@@ -205,13 +205,11 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 
 	// Check if this is an exit order failure - verify the orderID matches
 	isExitOrder := position.ExitOrderID != "" &&
-		position.GetCurrentState() == models.StateAdjusting &&
 		position.ExitOrderID == fmt.Sprintf("%d", orderID)
 
 	if isExitOrder {
-		m.logger.Printf("Exit order failed for position %s: %s, reverting to previous state", positionID, reason)
-		// For exit order failures, revert to the previous state (likely Open or management state)
-		// and clear the exit order ID
+		m.logger.Printf("Exit order failed for position %s: %s, marking position as error and clearing exit order", positionID, reason)
+		// For exit order failures, mark position as error and clear the exit order ID
 		position.ExitOrderID = ""
 		position.ExitReason = ""
 		if err := position.TransitionState(models.StateError, "adjustment_failed"); err != nil {

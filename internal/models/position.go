@@ -11,12 +11,12 @@ type Position struct {
 	Adjustments    []Adjustment  `json:"adjustments"`
 	ID             string        `json:"id"`
 	Symbol         string        `json:"symbol"`
-	EntryOrderID   string        `json:"entry_order_id"`
-	ExitOrderID    string        `json:"exit_order_id"`
-	ExitReason     string        `json:"exit_reason"`
+	EntryOrderID   string        `json:"entry_order_id,omitempty"`
+	ExitOrderID    string        `json:"exit_order_id,omitempty"`
+	ExitReason     string        `json:"exit_reason,omitempty"`
 	Expiration     time.Time     `json:"expiration"`
-	EntryDate      time.Time     `json:"entry_date"`
-	ExitDate       time.Time     `json:"exit_date"`
+	EntryDate      time.Time     `json:"entry_date,omitempty"`
+	ExitDate       time.Time     `json:"exit_date,omitempty"`
 	CreditReceived float64       `json:"credit_received"`
 	EntryIVR       float64       `json:"entry_ivr"`
 	EntrySpot      float64       `json:"entry_spot"`
@@ -61,13 +61,19 @@ func (p *Position) CalculateDTE() int {
 	return days
 }
 
-// GetTotalCredit returns the total credit received including adjustments.
-func (p *Position) GetTotalCredit() float64 {
+// GetNetCredit returns the net credit received including adjustments (can be negative if adjustments include debits).
+func (p *Position) GetNetCredit() float64 {
 	total := p.CreditReceived
 	for _, adj := range p.Adjustments {
 		total += adj.Credit
 	}
 	return total
+}
+
+// GetTotalCredit returns the total credit received including adjustments.
+// Deprecated: Use GetNetCredit instead for better semantic clarity.
+func (p *Position) GetTotalCredit() float64 {
+	return p.GetNetCredit()
 }
 
 // ProfitPercent returns the profit/loss as a percentage (0-100), not a ratio
@@ -247,8 +253,10 @@ func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (boo
 	if dte < 0 {
 		dte = 0
 	}
+	// Convert total credit to total dollars for consistent units (includes adjustments)
+	totalCredit := p.GetTotalCredit() * float64(p.Quantity) * 100
 	return p.StateMachine.ShouldEmergencyExit(
-		p.CreditReceived, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
+		totalCredit, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
 }
 
 // SetFourthDownOption sets the Fourth Down strategy option

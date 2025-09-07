@@ -483,8 +483,8 @@ func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
 
 		config.normalizeExitConfig()
 
-		if config.Risk.MaxPositionLoss != 2.0 {
-			t.Errorf("Expected MaxPositionLoss to be defaulted to 2.0, got %.2f", config.Risk.MaxPositionLoss)
+		if config.Risk.MaxPositionLoss != 3.0 {
+			t.Errorf("Expected MaxPositionLoss to be defaulted to 3.0, got %.2f", config.Risk.MaxPositionLoss)
 		}
 	})
 }

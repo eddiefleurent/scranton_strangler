@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,7 +122,7 @@ func (s *JSONStorage) saveUnsafe() error {
 	tmpFile := f.Name()
 
 	// Set restrictive permissions on the temporary file
-	if err := f.Chmod(0600); err != nil {
+	if err := f.Chmod(0o600); err != nil {
 		return fmt.Errorf("failed to set temp file permissions: %w", err)
 	}
 
@@ -201,28 +202,65 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 		}
 	}()
 
-	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600) // #nosec G304 - paths are validated above
+	// Get source file info for preserving mode
+	srcInfo, err := srcFile.Stat()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to stat source file: %w", err)
 	}
-	if err := dstFile.Chmod(0600); err != nil {
-		return fmt.Errorf("failed to set file permissions: %w", err)
+
+	// Create temporary file in destination directory for atomic operation
+	dstDir := filepath.Dir(dst)
+	tmpFile, err := ioutil.TempFile(dstDir, ".tmp_*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
+	tmpFileName := tmpFile.Name()
+
+	// Ensure temp file is cleaned up on error
+	var tempFileClosed bool
 	defer func() {
-		if err := dstFile.Close(); err != nil {
-			// Error already being handled, just log if needed
-			_ = err
+		if !tempFileClosed {
+			_ = tmpFile.Close()
+		}
+		if tmpFileName != "" {
+			_ = os.Remove(tmpFileName)
 		}
 	}()
 
-	if _, err := io.Copy(dstFile, srcFile); err != nil {
-		return err
+	// Set permissions on temp file
+	if err := tmpFile.Chmod(srcInfo.Mode()); err != nil {
+		return fmt.Errorf("failed to set temp file permissions: %w", err)
 	}
 
-	// Sync the destination file
-	if err := dstFile.Sync(); err != nil {
-		return err
+	// Copy contents to temp file
+	if _, err := io.Copy(tmpFile, srcFile); err != nil {
+		return fmt.Errorf("failed to copy to temp file: %w", err)
 	}
+
+	// Sync the temp file
+	if err := tmpFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
+	}
+
+	// Close temp file before rename
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	tempFileClosed = true
+
+	// Sync the destination directory
+	if dir, err := os.Open(dstDir); err == nil {
+		defer dir.Close()
+		_ = dir.Sync()
+	}
+
+	// Atomically rename temp file to final destination
+	if err := os.Rename(tmpFileName, dst); err != nil {
+		return fmt.Errorf("failed to rename temp file to destination: %w", err)
+	}
+
+	// Clear temp file name since rename succeeded
+	tmpFileName = ""
 
 	return nil
 }
@@ -238,14 +276,26 @@ func (s *JSONStorage) validateFilePath(path string) error {
 		return fmt.Errorf("failed to resolve storage root: %w", err)
 	}
 
+	// Resolve symlinks in storage root
+	storageRootResolved, err := filepath.EvalSymlinks(storageRootAbs)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks in storage root: %w", err)
+	}
+
 	// Clean and resolve the target path to absolute path
 	targetAbs, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return fmt.Errorf("failed to resolve target path: %w", err)
 	}
 
-	// Compute the relative path from storage root to target
-	relPath, err := filepath.Rel(storageRootAbs, targetAbs)
+	// Resolve symlinks in target path
+	targetResolved, err := filepath.EvalSymlinks(targetAbs)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks in target path: %w", err)
+	}
+
+	// Compute the relative path from resolved storage root to resolved target
+	relPath, err := filepath.Rel(storageRootResolved, targetResolved)
 	if err != nil {
 		return fmt.Errorf("failed to compute relative path: %w", err)
 	}
@@ -253,7 +303,7 @@ func (s *JSONStorage) validateFilePath(path string) error {
 	// Check if the relative path escapes the storage directory
 	// Reject if relative path equals ".." or starts with ".." + separator
 	if relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) {
-		return fmt.Errorf("path escapes storage directory: %s (resolved to: %s)", path, targetAbs)
+		return fmt.Errorf("path escapes storage directory: %s (resolved to: %s)", path, targetResolved)
 	}
 
 	return nil
@@ -295,38 +345,7 @@ func (s *JSONStorage) GetCurrentPosition() *models.Position {
 		return nil
 	}
 
-	// Create a new Position and copy all primitive fields
-	pos := &models.Position{
-		ID:             s.data.CurrentPosition.ID,
-		Symbol:         s.data.CurrentPosition.Symbol,
-		PutStrike:      s.data.CurrentPosition.PutStrike,
-		CallStrike:     s.data.CurrentPosition.CallStrike,
-		Expiration:     s.data.CurrentPosition.Expiration,
-		Quantity:       s.data.CurrentPosition.Quantity,
-		CreditReceived: s.data.CurrentPosition.CreditReceived,
-		EntryDate:      s.data.CurrentPosition.EntryDate,
-		EntryIVR:       s.data.CurrentPosition.EntryIVR,
-		EntrySpot:      s.data.CurrentPosition.EntrySpot,
-		CurrentPnL:     s.data.CurrentPosition.CurrentPnL,
-		DTE:            s.data.CurrentPosition.DTE,
-		EntryOrderID:   s.data.CurrentPosition.EntryOrderID,
-		ExitOrderID:    s.data.CurrentPosition.ExitOrderID,
-		ExitReason:     s.data.CurrentPosition.ExitReason,
-		ExitDate:       s.data.CurrentPosition.ExitDate,
-	}
-
-	// Deep copy Adjustments slice
-	if len(s.data.CurrentPosition.Adjustments) > 0 {
-		pos.Adjustments = make([]models.Adjustment, len(s.data.CurrentPosition.Adjustments))
-		copy(pos.Adjustments, s.data.CurrentPosition.Adjustments)
-	}
-
-	// Deep copy StateMachine
-	if s.data.CurrentPosition.StateMachine != nil {
-		pos.StateMachine = s.data.CurrentPosition.StateMachine.Copy()
-	}
-
-	return pos
+	return clonePosition(s.data.CurrentPosition)
 }
 
 // SetCurrentPosition updates the current active position in storage.

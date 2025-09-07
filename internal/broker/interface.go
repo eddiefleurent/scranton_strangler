@@ -20,6 +20,8 @@ type Broker interface {
 	GetQuote(symbol string) (*QuoteItem, error)
 	GetExpirations(symbol string) ([]string, error)
 	GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
+	GetMarketClock(delayed bool) (*MarketClockResponse, error)
+	IsTradingDay(delayed bool) (bool, error)
 
 	// Order placement
 	// PlaceStrangleOrder: limitPrice is the total credit/debit limit for the entire strangle (per spread)
@@ -45,6 +47,16 @@ type TradierClient struct {
 	*TradierAPI
 	useOTOCO     bool    // Configuration for whether to use OTOCO orders
 	profitTarget float64 // Configurable profit target for OTOCO orders
+}
+
+// isPermanentAPIError checks if an error is a permanent API error that should trigger fallback
+func isPermanentAPIError(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		// Consider 4xx errors as permanent (except 429 Too Many Requests which is retryable)
+		return apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 429
+	}
+	return false
 }
 
 // Ensure TradierClient implements Broker at compile time.
@@ -85,15 +97,15 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 		orderResp, err := t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
 			expiration, quantity, limitPrice, t.profitTarget, preview)
 		if err != nil {
-			// Check if error indicates OTOCO unsupported - fall back to regular order
-			if errors.Is(err, ErrOTOCOUnsupported) {
+			// Check if error indicates OTOCO unsupported or other permanent API errors - fall back to regular order
+			if errors.Is(err, ErrOTOCOUnsupported) || isPermanentAPIError(err) {
 				// Log OTOCO-specific error and fall back to regular order
-				log.Printf("warning: OTOCO unavailable, falling back to regular multileg: %v", err)
+				log.Printf("warning: OTOCO unavailable or permanent API error, falling back to regular multileg: %v", err)
 				// Use regular strangle order as fallback
 				return t.TradierAPI.PlaceStrangleOrder(symbol, putStrike, callStrike,
 					expiration, quantity, limitPrice, preview, duration)
 			}
-			// Return the original error if it's not OTOCO-related
+			// Return the original error if it's not permanent
 			return nil, err
 		}
 		return orderResp, nil
@@ -106,6 +118,13 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders
 func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error) {
+	if profitTarget < 0 {
+		log.Printf("warning: profitTarget %.3f is below valid range [0,1]; clamping to 0.0", profitTarget)
+		profitTarget = 0
+	} else if profitTarget > 1 {
+		log.Printf("warning: profitTarget %.3f is above valid range [0,1]; clamping to 1.0", profitTarget)
+		profitTarget = 1
+	}
 	return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
 		expiration, quantity, credit, profitTarget, preview)
 }
@@ -133,17 +152,39 @@ func (t *TradierClient) PlaceBuyToCloseOrder(optionSymbol string, quantity int,
 	return t.TradierAPI.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice)
 }
 
+// GetMarketClock retrieves the current market clock status
+func (t *TradierClient) GetMarketClock(delayed bool) (*MarketClockResponse, error) {
+	return t.TradierAPI.GetMarketClock(delayed)
+}
+
+// IsTradingDay checks if the market is currently open for trading
+func (t *TradierClient) IsTradingDay(delayed bool) (bool, error) {
+	return t.TradierAPI.IsTradingDay(delayed)
+}
+
 // CalculateIVR calculates Implied Volatility Rank from historical data
 func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
-	if len(historicalIVs) == 0 || math.IsNaN(currentIV) || math.IsInf(currentIV, 0) {
+	if math.IsNaN(currentIV) || math.IsInf(currentIV, 0) {
+		return 0
+	}
+
+	// Filter invalid historical values
+	clean := make([]float64, 0, len(historicalIVs))
+	for _, v := range historicalIVs {
+		if !math.IsNaN(v) && !math.IsInf(v, 0) {
+			clean = append(clean, v)
+		}
+	}
+
+	if len(clean) == 0 {
 		return 0
 	}
 
 	// Find min and max IV over the period
-	minIV := historicalIVs[0]
-	maxIV := historicalIVs[0]
+	minIV := clean[0]
+	maxIV := clean[0]
 
-	for _, iv := range historicalIVs {
+	for _, iv := range clean {
 		if iv < minIV {
 			minIV = iv
 		}
@@ -169,7 +210,7 @@ func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 // GetOptionByStrike finds an option with a specific strike price
 func GetOptionByStrike(options []Option, strike float64, optionType OptionType) *Option {
 	for i := range options {
-		if math.Abs(options[i].Strike-strike) < 1e-6 && options[i].OptionType == string(optionType) {
+		if math.Abs(options[i].Strike-strike) <= 1e-4 && options[i].OptionType == string(optionType) {
 			return &options[i]
 		}
 	}
@@ -214,7 +255,14 @@ func execCircuitBreaker[T any](
 	if err != nil {
 		return zero, err
 	}
-	return res.(T), nil
+	if res == nil {
+		return zero, nil
+	}
+	v, ok := res.(T)
+	if !ok {
+		return zero, errors.New("circuit breaker: type assertion failed")
+	}
+	return v, nil
 }
 
 // NewCircuitBreakerBroker creates a new CircuitBreakerBroker with sensible defaults
@@ -332,5 +380,19 @@ func (c *CircuitBreakerBroker) PlaceBuyToCloseOrder(optionSymbol string, quantit
 	maxPrice float64) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
 		return b.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice)
+	})
+}
+
+// GetMarketClock wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetMarketClock(delayed bool) (*MarketClockResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*MarketClockResponse, error) {
+		return b.GetMarketClock(delayed)
+	})
+}
+
+// IsTradingDay wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) IsTradingDay(delayed bool) (bool, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (bool, error) {
+		return b.IsTradingDay(delayed)
 	})
 }

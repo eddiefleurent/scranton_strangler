@@ -95,11 +95,51 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
 
 ## Safety First
 
-⚠️ **IMPORTANT**: 
+⚠️ **IMPORTANT**:
 - Always start with paper trading
 - Test for minimum 30 days
 - Verify all trades match expected behavior
 - Never trade with money you can't afford to lose
+
+## Production Deployment
+
+### Docker Compose vs Docker Swarm
+
+The production configuration (`docker-compose.prod.yml`) includes resource limits that are **only honored by Docker Swarm**, not by regular Docker Compose:
+
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 512M
+      cpus: '0.5'
+    reservations:
+      memory: 256M
+      cpus: '0.25'
+```
+
+### For Production Use
+
+**Option A: Use Docker Swarm** (Recommended)
+```bash
+# Initialize swarm (one-time)
+docker swarm init
+
+# Deploy using stack
+docker stack deploy -c docker-compose.yml -c docker-compose.prod.yml strangle-bot
+
+# Check status
+docker stack services strangle-bot
+```
+
+**Option B: Use Docker Run with explicit limits**
+```bash
+# Remove deploy.* sections from docker-compose.prod.yml
+docker run --memory=512m --cpus=0.5 --memory-reservation=256m \
+  --name strangle-bot your-image:tag
+```
+
+The repository currently uses Option A - production deployment requires Docker Swarm to honor the resource limits defined in `docker-compose.prod.yml`.
 
 ## Monitoring
 

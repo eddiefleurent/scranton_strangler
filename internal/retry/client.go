@@ -111,7 +111,11 @@ func (c *Client) ClosePositionWithRetry(
 		)
 
 		if err == nil {
-			c.logger.Printf("Close order placed successfully on attempt %d: %d", attempt+1, closeOrder.Order.ID)
+			if closeOrder != nil && closeOrder.Order != nil {
+				c.logger.Printf("Close order placed successfully on attempt %d: %d", attempt+1, closeOrder.Order.ID)
+			} else {
+				c.logger.Printf("Close order placed successfully on attempt %d", attempt+1)
+			}
 			return closeOrder, nil
 		}
 

@@ -33,7 +33,7 @@
   - [x] Prevent overlapping positions (one at a time for MVP)
 - [x] **Hard Stops**
   - [x] Close at 250% of credit received
-  - [x] Close at 5 DTE (assignment risk)
+  - [x] Close at 21 DTE (forced exit)
   - [x] Close on any API/system error
 
 ### 3. Scheduler & Logging  
@@ -134,7 +134,7 @@
 
 ## Implementation Priority (Week by Week)
 
-### Week 1: Critical Test Foundation (MVP Blocker - 29.5% Overall Coverage)
+### Week 1: Critical Test Foundation (MVP Blocker - Current Coverage: See CI Report)
 - [ ] **Strategy Function Tests (Currently 0% Coverage)**
   - [ ] Create test suite for `CheckEntryConditions()` with mock data
   - [ ] Create test suite for `FindStrangleStrikes()` with various market scenarios
@@ -180,13 +180,13 @@
 ### MVP Definition: Working Paper Trading Bot
 A bot that can automatically:
 1. Enter SPY short strangles when IVR > 30
-2. Exit at 50% profit (via OTOCO) or 21 DTE  
-3. Apply emergency stops (250% loss, 5 DTE)
+2. Exit at 50% profit (via OTOCO) or 21 DTE
+3. Apply emergency stops (250% loss, 21 DTE)
 4. Run unattended for 1 week without issues
 5. Complete 3 successful trade cycles
 
 ### Must Have for Launch
-- [ ] **Minimum 60% Test Coverage** (Currently 29.5% - CRITICAL GAP)
+- [ ] **Minimum 60% Test Coverage** (Current Coverage: See CI Report)
   - [ ] Core strategy functions fully tested (0% → 80%+ target)
   - [ ] Broker integration tested with mocks (0% → 70%+ target)  
   - [ ] Main bot loop tested (0% → 60%+ target)
@@ -234,7 +234,7 @@ A bot that can automatically:
 - ✅ SPY only
 - ✅ Forward testing only
 
-## CRITICAL TEST COVERAGE ANALYSIS (Current: 29.5%)
+## CRITICAL TEST COVERAGE ANALYSIS (Current Coverage: See CI Report)
 
 ### 🚨 IMMEDIATE MVP BLOCKERS - 0% Coverage:
 1. **Core Strategy Logic** (`internal/strategy/strangle.go`)
@@ -272,7 +272,7 @@ A bot that can automatically:
 - Storage Interface (57.0%) - Position persistence
 
 ### 🎯 Test Coverage Targets for MVP Launch:
-- **Overall Coverage**: 29.5% → **60%+** (minimum)
+- **Overall Coverage**: See CI Report → **60%+** (minimum)
 - **Strategy Functions**: 0% → **80%+** (critical path)
 - **Broker Integration**: 0% → **70%+** (API reliability)
 - **Main Bot Loop**: 0% → **60%+** (core functionality)
@@ -285,4 +285,6 @@ A bot that can automatically:
 4. **Week 4**: Order management and retry logic tests
 5. **Week 5**: End-to-end testing in sandbox environment
 
-**Bottom Line**: The current 29.5% test coverage is insufficient for a reliable trading bot. The 0% coverage on core strategy and broker functions represents significant risk. Testing must be prioritized before any production deployment.
+**Bottom Line**: Test coverage is insufficient for a reliable trading bot. The 0% coverage on core strategy and broker functions represents significant risk. Testing must be prioritized before any production deployment.
+
+**Note**: Consider adding a CI coverage badge to the README to provide real-time visibility into test coverage metrics.

@@ -11,10 +11,18 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
+// optionChainCacheEntry represents a cached option chain entry
+type optionChainCacheEntry struct {
+	chain     []broker.Option
+	timestamp time.Time
+}
+
 // StrangleStrategy implements a short strangle options strategy.
 type StrangleStrategy struct {
-	broker broker.Broker
-	config *Config
+	broker     broker.Broker
+	config     *Config
+	logger     *log.Logger
+	chainCache map[string]*optionChainCacheEntry // Cache for option chains by symbol+expiration
 }
 
 // Config contains configuration parameters for the strangle strategy.
@@ -30,7 +38,9 @@ type Config struct {
 	EscalateLossPct     float64 // e.g., 2.0 (200% loss triggers escalation)
 	StopLossPct         float64 // e.g., 2.5 (250% loss triggers hard stop)
 	MaxPositionLoss     float64 // Maximum position loss percentage from risk config
+	MaxContracts        int     // Maximum number of contracts per position
 	UseMockHistoricalIV bool    // Whether to use mock historical IV data
+	FailOpenOnIVError   bool    // If true, allow entries when IV data is unavailable (dev/test only)
 }
 
 // ExitReason represents the reason for exiting a position
@@ -54,10 +64,12 @@ const (
 )
 
 // NewStrangleStrategy creates a new strangle strategy instance.
-func NewStrangleStrategy(b broker.Broker, config *Config) *StrangleStrategy {
+func NewStrangleStrategy(b broker.Broker, config *Config, logger *log.Logger) *StrangleStrategy {
 	return &StrangleStrategy{
-		broker: b,
-		config: config,
+		broker:     b,
+		config:     config,
+		logger:     logger,
+		chainCache: make(map[string]*optionChainCacheEntry),
 	}
 }
 
@@ -105,6 +117,11 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 		return nil, fmt.Errorf("no strikes found near target delta")
 	}
 
+	// Sanity checks for strike selection
+	if err := s.validateStrikeSelection(putStrike, callStrike, quote.Last); err != nil {
+		return nil, fmt.Errorf("strike validation failed: %w", err)
+	}
+
 	// Calculate expected credit
 	credit := s.calculateExpectedCredit(options, putStrike, callStrike)
 
@@ -138,23 +155,29 @@ func (s *StrangleStrategy) calculateIVR() float64 {
 	currentIV, err := s.getCurrentImpliedVolatility()
 	if err != nil {
 		// Fallback to 0.0 for fail-closed behavior - block entries on IV errors
-		log.Printf("Warning: Using 0.0 IVR due to error: %v", err)
+		s.logger.Printf("Warning: Using 0.0 IVR due to error: %v", err)
 		return 0.0
 	}
 
 	// Get historical IV data (20-day lookback for MVP)
 	historicalIVs, err := s.getHistoricalImpliedVolatility(20)
 	if err != nil || len(historicalIVs) == 0 {
-		// Fallback to 0.0 for fail-closed behavior - block entries on insufficient data
-		log.Printf("Warning: Using 0.0 IVR due to insufficient historical data")
-		return 0.0
+		if s.config.FailOpenOnIVError {
+			// Fail-open: Use mock data for dev/test when historical data unavailable
+			s.logger.Printf("Warning: Using mock historical IV data for IVR calculation (fail-open mode)")
+			historicalIVs = s.generateMockHistoricalIV(20)
+		} else {
+			// Fail-closed: Block entries when historical data unavailable (conservative approach)
+			s.logger.Printf("Warning: Using 0.0 IVR due to insufficient historical data (fail-closed mode)")
+			return 0.0
+		}
 	}
 
 	// Calculate IVR using the standard formula
 	ivr := broker.CalculateIVR(currentIV, historicalIVs)
 
 	// Log IV calculation details
-	log.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f%%",
+	s.logger.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f%%",
 		currentIV*100, getMinIV(historicalIVs)*100, getMaxIV(historicalIVs)*100, ivr)
 
 	return ivr
@@ -211,11 +234,20 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 }
 
 // getHistoricalImpliedVolatility retrieves historical IV data
-// For MVP, this is a simplified implementation
+//
+// IVR (Implied Volatility Rank) calculation requires historical IV data to compare
+// current IV against past levels. When historical data is unavailable:
+//
+//   - Default behavior (FailOpenOnIVError=false): Returns error, causing IVR=0.0
+//     This blocks new position entries as a conservative "fail-closed" approach
+//     to prevent trading without proper volatility context.
+//
+//   - Dev/Test behavior (FailOpenOnIVError=true): Returns mock data to allow
+//     testing and development when real historical data is unavailable.
+//
+// For production, implement proper historical IV storage and retrieval.
+// Current MVP implementation uses mock data when UseMockHistoricalIV=true.
 func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, error) {
-	// TODO: Implement proper historical IV storage/retrieval
-	// For MVP, we'll simulate historical data or use a simple approach
-
 	// Option 1: Use mock historical data for testing
 	if s.shouldUseMockHistoricalData() {
 		return s.generateMockHistoricalIV(days), nil
@@ -305,15 +337,44 @@ func getMaxIV(historicalIVs []float64) float64 {
 	return maxIV
 }
 
+// getCachedOptionChain retrieves option chain from cache or fetches from broker if not cached or expired
+func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	cacheKey := fmt.Sprintf("%s-%s-%t", symbol, expiration, withGreeks)
+	const cacheDuration = 1 * time.Minute // Cache for 1 minute
+
+	// Check cache first
+	if entry, exists := s.chainCache[cacheKey]; exists {
+		if time.Since(entry.timestamp) < cacheDuration {
+			return entry.chain, nil
+		}
+		// Cache expired, remove it
+		delete(s.chainCache, cacheKey)
+	}
+
+	// Fetch from broker
+	chain, err := s.broker.GetOptionChain(symbol, expiration, withGreeks)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the result
+	s.chainCache[cacheKey] = &optionChainCacheEntry{
+		chain:     chain,
+		timestamp: time.Now(),
+	}
+
+	return chain, nil
+}
+
 // CalculatePositionPnL calculates current P&L for a position using live option quotes
 func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (float64, error) {
 	if position == nil {
 		return 0, fmt.Errorf("position is nil")
 	}
 
-	// Get option chain for the position's expiration
+	// Get option chain for the position's expiration (cached)
 	expiration := position.Expiration.Format("2006-01-02")
-	chain, err := s.broker.GetOptionChain(position.Symbol, expiration, false)
+	chain, err := s.getCachedOptionChain(position.Symbol, expiration, false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get option chain: %w", err)
 	}
@@ -346,9 +407,9 @@ func (s *StrangleStrategy) GetCurrentPositionValue(position *models.Position) (f
 		return 0, fmt.Errorf("position is nil")
 	}
 
-	// Get option chain for the position's expiration
+	// Get option chain for the position's expiration (cached)
 	expiration := position.Expiration.Format("2006-01-02")
-	chain, err := s.broker.GetOptionChain(position.Symbol, expiration, false)
+	chain, err := s.getCachedOptionChain(position.Symbol, expiration, false)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get option chain: %w", err)
 	}
@@ -386,7 +447,46 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 		}
 		target = target.AddDate(0, 0, 1)
 	}
-	return target.Format("2006-01-02")
+
+	// Check if option chain data is available for this date
+	// If not (e.g., holiday), iterate forward until we find valid data
+	// Bound the search to prevent infinite loops (max 7 days forward)
+	const maxIterations = 7
+	for i := 0; i < maxIterations; i++ {
+		expirationStr := target.Format("2006-01-02")
+
+		// Try to get option chain to verify data availability
+		_, err := s.broker.GetOptionChain(s.config.Symbol, expirationStr, false)
+		if err == nil {
+			// Option chain available, use this date
+			return expirationStr
+		}
+
+		// Log the attempt and try next valid expiration date
+		s.logger.Printf("No option chain available for %s (possibly holiday), trying next expiration", expirationStr)
+
+		// Move to next M/W/F
+		for {
+			target = target.AddDate(0, 0, 1)
+			weekday := target.Weekday()
+			if weekday == time.Monday || weekday == time.Wednesday || weekday == time.Friday {
+				break
+			}
+		}
+	}
+
+	// If we couldn't find valid data after max iterations, return the original target
+	// This is a fallback to avoid breaking the system completely
+	originalTarget := time.Now().AddDate(0, 0, targetDTE)
+	for {
+		weekday := originalTarget.Weekday()
+		if weekday == time.Monday || weekday == time.Wednesday || weekday == time.Friday {
+			break
+		}
+		originalTarget = originalTarget.AddDate(0, 0, 1)
+	}
+	s.logger.Printf("Warning: Could not find valid option chain data, using fallback date")
+	return originalTarget.Format("2006-01-02")
 }
 
 func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelta float64, isPut bool) float64 {
@@ -455,6 +555,12 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 		return 0
 	}
 
+	// Apply config-based MaxContracts cap to keep concerns local
+	if s.config.MaxContracts > 0 && maxContracts > s.config.MaxContracts {
+		maxContracts = s.config.MaxContracts
+		s.logger.Printf("Position size capped at %d contracts (config limit)", maxContracts)
+	}
+
 	return maxContracts
 }
 
@@ -469,7 +575,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	if err != nil {
 		// Fall back to stored P&L if real-time calculation fails
 		currentPnL = position.CurrentPnL
-		log.Printf("Warning: Using stored P&L due to calculation error: %v", err)
+		s.logger.Printf("Warning: Using stored P&L due to calculation error: %v", err)
 	}
 
 	// Check profit target
@@ -523,6 +629,48 @@ func (s *StrangleStrategy) CalculatePnL(pos *models.Position) float64 {
 		return pos.CurrentPnL
 	}
 	return pnl
+}
+
+// validateStrikeSelection performs sanity checks on selected strikes
+func (s *StrangleStrategy) validateStrikeSelection(putStrike, callStrike, spotPrice float64) error {
+	// Check for inverted strikes (put should be below call)
+	if putStrike >= callStrike {
+		return fmt.Errorf("inverted strikes detected: put %.0f >= call %.0f", putStrike, callStrike)
+	}
+
+	// Calculate spread width as percentage of spot price
+	spreadWidth := (callStrike - putStrike) / spotPrice
+
+	// Reject excessively tight spreads (< 1% of spot price)
+	const minSpreadPct = 0.01
+	if spreadWidth < minSpreadPct {
+		return fmt.Errorf("spread too tight: %.2f%% < %.2f%% (put=%.0f, call=%.0f)",
+			spreadWidth*100, minSpreadPct*100, putStrike, callStrike)
+	}
+
+	// Reject excessively wide spreads (> 10% of spot price)
+	const maxSpreadPct = 0.10
+	if spreadWidth > maxSpreadPct {
+		return fmt.Errorf("spread too wide: %.2f%% > %.2f%% (put=%.0f, call=%.0f)",
+			spreadWidth*100, maxSpreadPct*100, putStrike, callStrike)
+	}
+
+	// Check that strikes are reasonably close to spot price
+	// Put should not be more than 15% below spot, call not more than 15% above
+	const maxDeviationPct = 0.15
+	putDeviation := (spotPrice - putStrike) / spotPrice
+	callDeviation := (callStrike - spotPrice) / spotPrice
+
+	if putDeviation > maxDeviationPct {
+		return fmt.Errorf("put strike too far from spot: %.0f (%.1f%% below spot)",
+			putStrike, putDeviation*100)
+	}
+	if callDeviation > maxDeviationPct {
+		return fmt.Errorf("call strike too far from spot: %.0f (%.1f%% above spot)",
+			callStrike, callDeviation*100)
+	}
+
+	return nil
 }
 
 // StrangleOrder represents the details of a strangle order to be placed.

@@ -60,7 +60,7 @@ type StateTransition struct {
 var ValidTransitions = []StateTransition{
 	// Position lifecycle
 	{StateIdle, StateSubmitted, "order_placed", "Order submitted to broker"},
-	{StateIdle, StateFirstDown, "punt_executed", "Punting on position entry"},
+	{StateIdle, StateFirstDown, "skip_order_entry", "Skipping order entry, going directly to management"},
 	{StateSubmitted, StateOpen, "order_filled", "Order filled successfully"},
 	{StateSubmitted, StateError, "order_failed", "Order failed or canceled"},
 	{StateSubmitted, StateClosed, "order_timeout", "Order timed out without fill"},
@@ -102,6 +102,24 @@ var ValidTransitions = []StateTransition{
 	{StateError, StateClosed, "force_close", "Force close position"},
 }
 
+// transitionLookup provides O(1) lookup for valid transitions: map[fromState][toState][condition]bool
+var transitionLookup map[PositionState]map[PositionState]map[string]bool
+
+// init precomputes the transition lookup map for O(1) lookups
+func init() {
+	transitionLookup = make(map[PositionState]map[PositionState]map[string]bool)
+
+	for _, transition := range ValidTransitions {
+		if transitionLookup[transition.From] == nil {
+			transitionLookup[transition.From] = make(map[PositionState]map[string]bool)
+		}
+		if transitionLookup[transition.From][transition.To] == nil {
+			transitionLookup[transition.From][transition.To] = make(map[string]bool)
+		}
+		transitionLookup[transition.From][transition.To][transition.Condition] = true
+	}
+}
+
 // StateMachine manages position state transitions
 type StateMachine struct {
 	transitionTime      time.Time
@@ -115,15 +133,20 @@ type StateMachine struct {
 	puntCount           int
 }
 
-// NewStateMachine creates a new state machine
+// NewStateMachine creates a new state machine with default limits
 func NewStateMachine() *StateMachine {
+	return NewStateMachineWithLimits(3, 1)
+}
+
+// NewStateMachineWithLimits creates a new state machine with configurable limits
+func NewStateMachineWithLimits(maxAdj, maxRolls int) *StateMachine {
 	return &StateMachine{
 		currentState:    StateIdle,
 		previousState:   StateIdle,
 		transitionTime:  time.Now().UTC(),
 		transitionCount: make(map[PositionState]int),
-		maxAdjustments:  3, // Max 3 strike adjustments per trade
-		maxTimeRolls:    1, // Max 1 time roll per trade
+		maxAdjustments:  maxAdj,
+		maxTimeRolls:    maxRolls,
 	}
 }
 
@@ -147,37 +170,21 @@ func (sm *StateMachine) IsValidTransition(to PositionState, condition string) er
 	return sm.validateTransitionLimits(to)
 }
 
-// isTransitionDefined checks if the transition is defined in ValidTransitions
+// isTransitionDefined checks if the transition is defined using O(1) map lookup
 func (sm *StateMachine) isTransitionDefined(to PositionState, condition string) bool {
-	for _, transition := range ValidTransitions {
-		if sm.matchesTransition(transition, to, condition) {
-			return true
+	if fromMap, exists := transitionLookup[sm.currentState]; exists {
+		if toMap, exists := fromMap[to]; exists {
+			// Check if condition exists in the map (handles empty condition case)
+			if _, exists := toMap[condition]; exists {
+				return true
+			}
+			// Also check for empty condition if provided condition is not found
+			if condition != "" {
+				if _, exists := toMap[""]; exists {
+					return true
+				}
+			}
 		}
-	}
-	return false
-}
-
-// matchesTransition checks if a transition matches the given state and condition
-func (sm *StateMachine) matchesTransition(transition StateTransition, to PositionState, condition string) bool {
-	if transition.From != sm.currentState || transition.To != to {
-		return false
-	}
-	return sm.conditionMatches(transition.Condition, condition)
-}
-
-// conditionMatches checks if the condition requirements are satisfied
-func (sm *StateMachine) conditionMatches(transitionCondition, providedCondition string) bool {
-	// No condition required and none provided
-	if transitionCondition == "" && providedCondition == "" {
-		return true
-	}
-	// Condition required and matches
-	if transitionCondition != "" && providedCondition != "" && providedCondition == transitionCondition {
-		return true
-	}
-	// No condition required but one provided (allowed)
-	if transitionCondition == "" && providedCondition != "" {
-		return true
 	}
 	return false
 }
@@ -264,6 +271,26 @@ func (sm *StateMachine) CanRoll() bool {
 	return sm.transitionCount[StateRolling] < sm.maxTimeRolls
 }
 
+// SetMaxAdjustments sets the maximum number of adjustments allowed
+func (sm *StateMachine) SetMaxAdjustments(max int) {
+	sm.maxAdjustments = max
+}
+
+// SetMaxTimeRolls sets the maximum number of time rolls allowed
+func (sm *StateMachine) SetMaxTimeRolls(max int) {
+	sm.maxTimeRolls = max
+}
+
+// GetMaxAdjustments returns the maximum number of adjustments allowed
+func (sm *StateMachine) GetMaxAdjustments() int {
+	return sm.maxAdjustments
+}
+
+// GetMaxTimeRolls returns the maximum number of time rolls allowed
+func (sm *StateMachine) GetMaxTimeRolls() int {
+	return sm.maxTimeRolls
+}
+
 // GetStateDescription returns a human-readable description of the current state
 func (sm *StateMachine) GetStateDescription() string {
 	switch sm.currentState {
@@ -347,15 +374,17 @@ func (sm *StateMachine) ShouldEmergencyExit(
 
 	// Check Fourth Down time-based limits if in Fourth Down state
 	if sm.currentState == StateFourthDown && !sm.fourthDownStartTime.IsZero() {
-		daysInFourthDown := time.Since(sm.fourthDownStartTime).Hours() / 24
+		nowDay := time.Now().UTC().Truncate(24 * time.Hour)
+		startDay := sm.fourthDownStartTime.UTC().Truncate(24 * time.Hour)
+		elapsedDays := int(nowDay.Sub(startDay) / (24 * time.Hour))
 
 		switch sm.fourthDownOption {
 		case OptionA:
-			if daysInFourthDown >= 6 { // Test expects > 5 days, so >= 6
+			if elapsedDays > 5 {
 				return true, "emergency exit: Option A exceeded 5-day limit"
 			}
 		case OptionB:
-			if daysInFourthDown >= 4 { // Test expects > 3 days, so >= 4
+			if elapsedDays > 3 {
 				return true, "emergency exit: Option B exceeded 3-day limit"
 			}
 		case OptionC:
@@ -383,8 +412,12 @@ func (sm *StateMachine) CanPunt() bool {
 	return sm.puntCount == 0 // Allow only one punt per position
 }
 
-// ExecutePunt performs punt operation
+// ExecutePunt performs punt operation (FourthDown rescue mechanism)
 func (sm *StateMachine) ExecutePunt() error {
+	if sm.currentState != StateFourthDown {
+		return fmt.Errorf("punt only allowed from FourthDown state, current state: %s", sm.currentState)
+	}
+
 	if !sm.CanPunt() {
 		return fmt.Errorf("punt not allowed: already used")
 	}
@@ -395,6 +428,15 @@ func (sm *StateMachine) ExecutePunt() error {
 	}
 	sm.puntCount++
 	return nil
+}
+
+// SkipOrderEntry allows skipping the order entry process and going directly to management
+func (sm *StateMachine) SkipOrderEntry() error {
+	if sm.currentState != StateIdle {
+		return fmt.Errorf("skip order entry only allowed from Idle state, current state: %s", sm.currentState)
+	}
+
+	return sm.Transition(StateFirstDown, "skip_order_entry")
 }
 
 // Copy creates a deep copy of the StateMachine
