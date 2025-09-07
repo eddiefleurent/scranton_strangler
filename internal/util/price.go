@@ -6,8 +6,10 @@ import "math"
 // RoundToTick rounds x to the nearest tick increment.
 // For example, with tick=0.01, 1.2345 becomes 1.23 or 1.24 depending on rounding.
 func RoundToTick(x, tick float64) float64 {
-	if tick <= 0 {
+	// Guard non-finite inputs and zero tick
+	if tick == 0 || math.IsNaN(tick) || math.IsInf(tick, 0) || math.IsNaN(x) || math.IsInf(x, 0) {
 		return x
 	}
-	return math.Round(x/tick) * tick
+	t := math.Abs(tick)
+	return math.Round(x/t) * t
 }

@@ -787,15 +787,6 @@ func prettyForm(raw string) string {
 	return dec
 }
 
-// Round-trip encode/decode check for JSON bodies used in tests (defensive)
-func mustMarshal(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-	return b
-}
 
 // Sanity: ensure placeStrangleOrderInternal builds OCC symbols correctly (YYMMDD and 1/1000 rounding)
 func TestPlaceStrangleOrderInternal_OCCSymbolBuild(t *testing.T) {
