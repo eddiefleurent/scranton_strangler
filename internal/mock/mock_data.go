@@ -62,7 +62,7 @@ func (m *DataProvider) randomInt63n(n int64) int64 {
 		if n <= 0 {
 			return 0
 		}
-		// Use Int64N to avoid narrowing when n > math.MaxInt
+		// Use Int63n to avoid narrowing when n > math.MaxInt
 		return m.rng.Int63n(n)
 	}
 	return secureInt63n(n)
@@ -262,11 +262,11 @@ func (m *DataProvider) CalculateStrangleCredit(
 	foundPut, foundCall := false, false
 
 	for _, option := range options {
-		if math.Abs(option.Strike-putStrike) <= 1e-4 && option.OptionType == string(broker.OptionTypePut) {
+		if math.Abs(option.Strike-putStrike) <= broker.StrikeMatchEpsilon && option.OptionType == string(broker.OptionTypePut) {
 			putCredit = (option.Bid + option.Ask) / 2
 			foundPut = true
 		}
-		if math.Abs(option.Strike-callStrike) <= 1e-4 && option.OptionType == string(broker.OptionTypeCall) {
+		if math.Abs(option.Strike-callStrike) <= broker.StrikeMatchEpsilon && option.OptionType == string(broker.OptionTypeCall) {
 			callCredit = (option.Bid + option.Ask) / 2
 			foundCall = true
 		}

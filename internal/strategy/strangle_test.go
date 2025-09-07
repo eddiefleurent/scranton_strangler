@@ -575,6 +575,7 @@ func (m *mockBroker) PlaceBuyToCloseOrder(
 	_ string,
 	_ int,
 	_ float64,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }

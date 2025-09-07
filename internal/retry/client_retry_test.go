@@ -89,7 +89,7 @@ func (f *fakeBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broke
 	return &broker.OrderResponse{}, nil
 }
 
-func (f *fakeBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*broker.OrderResponse, error) {
+func (f *fakeBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 

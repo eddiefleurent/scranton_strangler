@@ -468,19 +468,19 @@ func TestPlaceBuyToCloseOrder_ValidatesInputsAndBuildsForm(t *testing.T) {
 	defer srv.Close()
 
 	// Valid
-	resp, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 2.75)
+	resp, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 2.75, "day")
 	if err != nil || resp.Order.ID != 9001 {
 		t.Fatalf("PlaceBuyToCloseOrder got (%+v,%v)", resp, err)
 	}
 
 	// Invalids
-	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 0); err == nil {
+	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 0, "day"); err == nil {
 		t.Fatalf("expected error: non-positive price")
 	}
-	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 0, 1); err == nil {
+	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 0, 1, "day"); err == nil {
 		t.Fatalf("expected error: non-positive quantity")
 	}
-	if _, err := api.PlaceBuyToCloseOrder("???", 1, 1); err == nil {
+	if _, err := api.PlaceBuyToCloseOrder("???", 1, 1, "day"); err == nil {
 		t.Fatalf("expected error: invalid underlying extraction")
 	}
 }

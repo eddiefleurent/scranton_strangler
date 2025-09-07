@@ -112,7 +112,7 @@ func TestCalculateIVR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := CalculateIVR(tt.currentIV, tt.historicalIV)
-			if result != tt.expected {
+			if math.Abs(result-tt.expected) > 1e-9 {
 				t.Errorf("CalculateIVR(%v, %v) = %v, want %v",
 					tt.currentIV, tt.historicalIV, result, tt.expected)
 			}
@@ -849,7 +849,7 @@ func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
 }
 
 func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
-	_ float64) (*OrderResponse, error) {
+	_ float64, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -972,11 +972,11 @@ func TestCircuitBreakerBroker_FailureScenarios(t *testing.T) {
 
 func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
 	mockBroker := &MockBroker{shouldFail: true, failAfter: 3}
-	// Use fast settings for testing to avoid 30-second delays
+	// Use very fast settings for testing to avoid delays
 	fastSettings := CircuitBreakerSettings{
 		MaxRequests:  3,
-		Interval:     50 * time.Millisecond,
-		Timeout:      80 * time.Millisecond,
+		Interval:     10 * time.Millisecond,
+		Timeout:      15 * time.Millisecond,
 		MinRequests:  5,
 		FailureRatio: 0.6,
 	}
@@ -992,9 +992,24 @@ func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
 		t.Fatalf("Circuit breaker should be open, but state is %s", cb.breaker.State())
 	}
 
-	// Wait for timeout (80ms in test config) - REQUIRED for circuit breaker recovery test
-	time.Sleep(100 * time.Millisecond) // Slightly > Timeout to ensure half-open
+	// Poll for state transition instead of fixed sleep - more reliable in CI
+	timeout := time.After(50 * time.Millisecond) // Total timeout for polling
+	ticker := time.NewTicker(1 * time.Millisecond) // Poll every 1ms
 
+	for {
+		select {
+		case <-timeout:
+			ticker.Stop()
+			t.Fatalf("Circuit breaker did not transition to half-open within timeout")
+		case <-ticker.C:
+			if cb.breaker.State() == gobreaker.StateHalfOpen {
+				ticker.Stop()
+				goto halfOpen
+			}
+		}
+	}
+
+halfOpen:
 	// Breaker should be half-open now, allow limited requests
 	mockBroker.shouldFail = false // Make broker succeed again
 
@@ -1018,9 +1033,22 @@ func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
 		}
 	}
 
-	// Breaker should be closed again after successful calls
-	if cb.breaker.State() != gobreaker.StateClosed {
-		t.Errorf("Circuit breaker should be closed after recovery, but state is %s", cb.breaker.State())
+	// Poll for final state transition to closed
+	timeout = time.After(50 * time.Millisecond)
+	ticker = time.NewTicker(1 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeout:
+			ticker.Stop()
+			t.Fatalf("Circuit breaker did not transition to closed within timeout")
+		case <-ticker.C:
+			if cb.breaker.State() == gobreaker.StateClosed {
+				ticker.Stop()
+				return // Success
+			}
+		}
 	}
 }
 
@@ -1052,7 +1080,7 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 			return err
 		}},
 		{"PlaceBuyToCloseOrder", func() error {
-			_, err := cb.PlaceBuyToCloseOrder("SPY241220P00400000", 1, 5.0)
+			_, err := cb.PlaceBuyToCloseOrder("SPY241220P00400000", 1, 5.0, "day")
 			return err
 		}},
 	}

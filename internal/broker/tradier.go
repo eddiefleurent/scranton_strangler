@@ -312,7 +312,8 @@ func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 		return nil, fmt.Errorf("no quote found for symbol: %s", symbol)
 	}
 
-	return &quotes[0], nil
+	first := quotes[0]
+	return &first, nil
 }
 
 // GetExpirations retrieves available expiration dates for options on a symbol.
@@ -588,7 +589,7 @@ func (t *TradierAPI) GetOrderStatusCtx(ctx context.Context, orderID int) (*Order
 }
 
 // PlaceBuyToCloseOrder places a buy-to-close order for an option position.
-func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64) (*OrderResponse, error) {
+func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*OrderResponse, error) {
 	// Validate price for limit orders
 	if maxPrice <= 0 {
 		return nil, fmt.Errorf("invalid price for limit order: %.2f, price must be positive", maxPrice)
@@ -597,6 +598,12 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	// Validate quantity for order
 	if quantity <= 0 {
 		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
+	}
+
+	// Validate and normalize duration
+	nd, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract underlying symbol from option OCC/OSI code
@@ -612,7 +619,7 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	params.Add("side", "buy_to_close")
 	params.Add("quantity", fmt.Sprintf("%d", quantity))
 	params.Add("type", "limit")
-	params.Add("duration", "day")
+	params.Add("duration", nd)
 	params.Add("price", fmt.Sprintf("%.2f", maxPrice))
 
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
@@ -686,7 +693,7 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 			remaining = resp.Header.Get("X-RateLimit-Remaining")
 		}
 	}
-	if remaining != "" {
+	if remaining != "" && t.sandbox {
 		log.Printf("Rate limit remaining: %s", remaining)
 	}
 
