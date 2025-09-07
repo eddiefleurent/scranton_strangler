@@ -140,13 +140,18 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 		return nil, fmt.Errorf("credit too low: %.2f < %.2f", credit, s.config.MinCredit)
 	}
 
+	quantity := s.calculatePositionSize(credit)
+	if quantity <= 0 {
+		return nil, fmt.Errorf("calculated position size is invalid: %d - unable to allocate capital for trade", quantity)
+	}
+
 	return &StrangleOrder{
 		Symbol:       s.config.Symbol,
 		PutStrike:    putStrike,
 		CallStrike:   callStrike,
 		Expiration:   targetExp,
 		Credit:       credit,
-		Quantity:     s.calculatePositionSize(credit),
+		Quantity:     quantity,
 		SpotPrice:    quote.Last,
 		ProfitTarget: s.config.ProfitTarget,
 	}, nil
@@ -726,8 +731,8 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		if sl <= 0 {
 			sl = 2.5
 		} // Default to 250% to match old behavior
-		// Clamp the stop-loss to the risk cap
-		if sl > s.config.MaxPositionLoss {
+		// Clamp the stop-loss to the risk cap only when MaxPositionLoss is explicitly set (> 0)
+		if s.config.MaxPositionLoss > 0 && sl > s.config.MaxPositionLoss {
 			sl = s.config.MaxPositionLoss
 		}
 		if profitPct <= -sl {
