@@ -230,6 +230,40 @@ func TestValidateFilePath_AllowsWithinStorageDirAndRejectsEscape(t *testing.T) {
 	}
 }
 
+func TestValidateFilePath_RejectsSymlinkEscapeOnNonExistentDestination(t *testing.T) {
+	dir := mustTempDir(t)
+	path := filepath.Join(dir, "store.json")
+	s, err := NewJSONStorage(path)
+	if err != nil {
+		t.Fatalf("NewJSONStorage: %v", err)
+	}
+
+	// Create a directory outside the storage root
+	outsideDir := mustTempDir(t)
+
+	// Create a symlink inside storage dir that points to outside dir
+	linkName := filepath.Join(dir, "escape_link")
+	if err := os.Symlink(outsideDir, linkName); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+
+	// Create a path that uses the symlink as parent but points to non-existent file
+	// This should be rejected because the symlink parent escapes the storage root
+	escapingPath := filepath.Join(linkName, "nonexistent.json")
+
+	// The file doesn't exist at escapingPath, but validateFilePath should detect
+	// that resolving the symlink parent would escape the storage directory
+	validationErr := s.validateFilePath(escapingPath)
+	if validationErr == nil {
+		t.Fatalf("expected rejection for path with symlinked parent escaping storage dir")
+	}
+
+	// Verify the error message indicates path escape
+	if !strings.Contains(validationErr.Error(), "path escapes storage directory") {
+		t.Fatalf("expected 'path escapes storage directory' error, got: %v", validationErr)
+	}
+}
+
 func TestCopyFile_CopiesAndSyncsWith0600(t *testing.T) {
 	dir := mustTempDir(t)
 	dstPath := filepath.Join(dir, "store.json")

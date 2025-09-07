@@ -598,3 +598,8 @@ func (m *mockBroker) GetMarketClock(_ bool) (*broker.MarketClockResponse, error)
 func (m *mockBroker) IsTradingDay(_ bool) (bool, error) {
 	return true, nil
 }
+
+func (m *mockBroker) GetOptionBuyingPower() (float64, error) {
+	// Return a mock option buying power (typically less than account balance)
+	return m.balance * 0.8, nil
+}

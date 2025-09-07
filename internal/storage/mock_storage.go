@@ -93,6 +93,16 @@ func (m *MockStorage) GetHistory() []models.Position {
 	return m.history
 }
 
+// HasInHistory checks if a position with the given ID exists in the mock history.
+func (m *MockStorage) HasInHistory(id string) bool {
+	for _, pos := range m.history {
+		if pos.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // GetStatistics returns the mock statistics data.
 func (m *MockStorage) GetStatistics() *Statistics {
 	return m.statistics

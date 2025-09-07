@@ -166,6 +166,11 @@ func (b *Bot) Run(ctx context.Context) error {
 
 func (b *Bot) runTradingCycle() {
 	now := time.Now()
+	if loc, err := time.LoadLocation("America/New_York"); err == nil {
+		now = now.In(loc)
+	} else {
+		b.logger.Printf("Warning: failed to load NY timezone: %v", err)
+	}
 
 	// Check if within trading hours
 	isWithinHours := b.config.IsWithinTradingHours(now)
@@ -230,11 +235,9 @@ func (b *Bot) checkExistingPosition() bool {
 		// Check if this position was just closed by an exit order and needs completion
 		if position.ExitOrderID != "" && position.ExitReason != "" {
 			// Prevent double-finalization if already recorded in history
-			for _, h := range b.storage.GetHistory() {
-				if h.ID == position.ID {
-					b.logger.Printf("Position %s already finalized in history; skipping completion", position.ID)
-					return false
-				}
+			if b.storage.HasInHistory(position.ID) {
+				b.logger.Printf("Position %s already finalized in history; skipping completion", position.ID)
+				return false
 			}
 			b.logger.Printf("Position %s was closed by exit order, completing position close", position.ID)
 			exitReason := strategy.ExitReason(position.ExitReason)
@@ -450,6 +453,8 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 
 	switch reason {
 	case strategy.ExitReasonProfitTarget:
+		// Close at max debit that locks in the configured profit fraction:
+		// debit = credit * (1 - profitTarget). Example: credit=$2, pt=0.5 → debit=$1.
 		return position.CreditReceived * (1.0 - b.config.Strategy.Exit.ProfitTarget)
 	case strategy.ExitReasonTime:
 		if cvErr == nil && position.Quantity != 0 {
@@ -496,9 +501,13 @@ func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.Exit
 	if err != nil {
 		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
 		if reason == strategy.ExitReasonProfitTarget {
-			return position.CreditReceived * float64(position.Quantity) * 100 * 0.5
+			return position.CreditReceived * float64(position.Quantity) * 100 * b.config.Strategy.Exit.ProfitTarget
 		}
-		return position.CreditReceived * float64(position.Quantity) * 100 * 0.2
+		sl := b.config.Strategy.Exit.StopLossPct
+		if sl <= 0 {
+			sl = 2.5
+		}
+		return position.CreditReceived * float64(position.Quantity) * 100 * sl
 	}
 	return actualPnL
 }

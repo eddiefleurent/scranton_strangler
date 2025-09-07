@@ -14,6 +14,7 @@ import (
 type Broker interface {
 	// Account operations
 	GetAccountBalance() (float64, error)
+	GetOptionBuyingPower() (float64, error)
 	GetPositions() ([]PositionItem, error)
 
 	// Market data
@@ -49,12 +50,25 @@ type TradierClient struct {
 	profitTarget float64 // Configurable profit target for OTOCO orders
 }
 
-// isPermanentAPIError checks if an error is a permanent API error that should trigger fallback
+// isPermanentAPIError checks if an error is a permanent API error that should trigger fallback.
+// Error classification policy:
+// - 4xx: Permanent (except 408 Request Timeout and 429 Too Many Requests which are retryable)
+// - 5xx: Transient (except 501 Not Implemented and 505 HTTP Version Not Supported which are permanent)
 func isPermanentAPIError(err error) bool {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		// Consider 4xx errors as permanent (except 429 Too Many Requests which is retryable)
-		return apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != 429
+		// 4xx errors: permanent except retryable ones
+		if apiErr.Status >= 400 && apiErr.Status < 500 {
+			// 408 Request Timeout is retryable
+			// 429 Too Many Requests is retryable
+			return apiErr.Status != 408 && apiErr.Status != 429
+		}
+		// 5xx errors: transient except permanent ones
+		if apiErr.Status >= 500 && apiErr.Status < 600 {
+			// 501 Not Implemented is permanent (server doesn't support this functionality)
+			// 505 HTTP Version Not Supported is permanent
+			return apiErr.Status == 501 || apiErr.Status == 505
+		}
 	}
 	return false
 }
@@ -87,6 +101,15 @@ func (t *TradierClient) GetAccountBalance() (float64, error) {
 		return 0, err
 	}
 	return balance.Balances.TotalEquity, nil
+}
+
+// GetOptionBuyingPower returns the option buying power available for options trading
+func (t *TradierClient) GetOptionBuyingPower() (float64, error) {
+	balance, err := t.GetBalance()
+	if err != nil {
+		return 0, err
+	}
+	return balance.Balances.OptionBuyingPower, nil
 }
 
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
@@ -133,7 +156,7 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
-		expiration, quantity, maxDebit, tag)
+		expiration, quantity, maxDebit, "day", tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order
@@ -164,7 +187,13 @@ func (t *TradierClient) IsTradingDay(delayed bool) (bool, error) {
 
 // CalculateIVR calculates Implied Volatility Rank from historical data
 func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
-	if math.IsNaN(currentIV) || math.IsInf(currentIV, 0) {
+	if math.IsNaN(currentIV) {
+		return 0
+	}
+	if math.IsInf(currentIV, 1) { // Positive infinity
+		return 100
+	}
+	if math.IsInf(currentIV, -1) { // Negative infinity
 		return 0
 	}
 
@@ -225,6 +254,14 @@ const (
 	OptionTypePut OptionType = "put"
 	// OptionTypeCall represents a call option contract
 	OptionTypeCall OptionType = "call"
+)
+
+// String constants for option types to prevent drift and maintain consistency
+const (
+	// OptionTypePutString represents the string value for a put option
+	OptionTypePutString = "put"
+	// OptionTypeCallString represents the string value for a call option
+	OptionTypeCallString = "call"
 )
 
 // DaysBetween calculates the number of days between two dates
@@ -313,6 +350,11 @@ func NewCircuitBreakerBrokerWithSettings(broker Broker, settings CircuitBreakerS
 // GetAccountBalance wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) GetAccountBalance() (float64, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) { return b.GetAccountBalance() })
+}
+
+// GetOptionBuyingPower wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetOptionBuyingPower() (float64, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) { return b.GetOptionBuyingPower() })
 }
 
 // GetPositions wraps the underlying broker call with circuit breaker

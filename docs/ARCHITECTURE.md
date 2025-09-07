@@ -329,25 +329,36 @@ Next Trade:
 spy-strangle-bot/
 ├── cmd/bot/main.go           # Entry point with dependency injection
 ├── internal/
-│   ├── interfaces/           # All interface definitions
-│   │   ├── broker.go
-│   │   ├── storage.go
-│   │   └── strategy.go
 │   ├── broker/
+│   │   ├── interface.go      # Broker interface + wrappers
 │   │   ├── tradier.go        # Implements Broker interface
+│   │   ├── interface_test.go
 │   │   └── tradier_test.go
 │   ├── strategy/
 │   │   ├── strangle.go       # Implements Strategy interface
 │   │   └── strangle_test.go
 │   ├── storage/
-│   │   ├── json_storage.go   # Implements Storage interface
-│   │   └── storage_test.go
+│   │   ├── interface.go      # Storage interface
+│   │   ├── storage.go        # JSON storage implementation
+│   │   ├── interface_test.go
+│   │   ├── storage_test.go
+│   │   └── mock_storage.go
 │   ├── models/
-│   │   └── position.go
-│   ├── state/
-│   │   └── machine.go        # Position state machine
-│   └── config/
-│       └── config.go
+│   │   ├── position.go
+│   │   ├── state_machine.go   # Position state machine
+│   │   └── state_machine_test.go
+│   ├── config/
+│   │   ├── config.go
+│   │   └── config_test.go
+│   ├── orders/
+│   │   ├── manager.go         # Order execution manager
+│   │   └── manager_test.go
+│   ├── retry/
+│   │   ├── client.go          # Retry client wrapper
+│   │   └── client_retry_test.go
+│   └── mock/
+│       ├── mock_data.go       # Mock data providers
+│       └── mock_data_test.go
 ├── config.yaml
 ├── positions.json            # Temporary, migrate to SQLite
 └── go.mod
@@ -695,7 +706,7 @@ GET  /accounts/{id}/orders        # Check order status
 
 The bot supports optional after-hours position monitoring via the `after_hours_check` configuration flag:
 
-- **Default Behavior**: When `false`, the bot only runs during regular trading hours (09:45-15:45 ET, Monday-Friday)
+- **Default Behavior**: When `false`, the bot runs during a configured window (default 09:45–15:45 America/New_York, Mon–Fri; U.S. market holidays excluded)
 - **After-Hours Mode**: When `true`, the bot continues monitoring existing positions even outside regular hours
 - **Functionality During After-Hours**:
   - Monitors existing positions for exit conditions (stop losses, profit targets)

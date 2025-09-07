@@ -247,18 +247,15 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 	}
 	tempFileClosed = true
 
-	// #nosec G304
-	// Sync the destination directory
-	if dir, err := os.Open(dstDir); err == nil {
-		defer func() {
-			_ = dir.Close() // Ignore close error to avoid failing the sync operation
-		}()
-		_ = dir.Sync()
-	}
-
 	// Atomically rename temp file to final destination
 	if err := os.Rename(tmpFileName, dst); err != nil {
 		return fmt.Errorf("failed to rename temp file to destination: %w", err)
+	}
+
+	// Sync the destination directory to persist the new entry
+	if dir, err := os.Open(dstDir); err == nil {
+		defer func() { _ = dir.Close() }()
+		_ = dir.Sync()
 	}
 
 	// Clear temp file name since rename succeeded
@@ -269,11 +266,10 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 
 // validateFilePath ensures the file path is safe and within expected bounds
 func (s *JSONStorage) validateFilePath(path string) error {
-	// Get the storage root directory (directory containing the storage file)
+	// Resolve storage root (directory containing the storage file)
 	storageRoot := filepath.Dir(s.filepath)
-
-	// Clean and resolve the storage root to absolute path
-	storageRootAbs, err := filepath.Abs(filepath.Clean(storageRoot))
+	storageRootClean := filepath.Clean(storageRoot)
+	storageRootAbs, err := filepath.Abs(storageRootClean)
 	if err != nil {
 		return fmt.Errorf("failed to resolve storage root: %w", err)
 	}
@@ -285,19 +281,31 @@ func (s *JSONStorage) validateFilePath(path string) error {
 	}
 
 	// Clean and resolve the target path to absolute path
-	targetAbs, err := filepath.Abs(filepath.Clean(path))
+	targetClean := filepath.Clean(path)
+	targetAbs, err := filepath.Abs(targetClean)
 	if err != nil {
 		return fmt.Errorf("failed to resolve target path: %w", err)
 	}
 
-	// Resolve symlinks in target path (only if file exists)
-	targetResolved := targetAbs
-	if _, err := os.Stat(targetAbs); err == nil {
-		// File exists, try to resolve symlinks
+	// Resolve symlinks for target:
+	// - If target exists: EvalSymlinks on target.
+	// - If target missing: EvalSymlinks on parent, then re-join the base.
+	var targetResolved string
+	if _, statErr := os.Stat(targetAbs); statErr == nil {
 		if resolved, err := filepath.EvalSymlinks(targetAbs); err == nil {
 			targetResolved = resolved
+		} else {
+			return fmt.Errorf("failed to resolve symlinks in target: %w", err)
 		}
-		// If symlink resolution fails, use the absolute path as-is
+	} else if os.IsNotExist(statErr) {
+		parent := filepath.Dir(targetAbs)
+		parentResolved, perr := filepath.EvalSymlinks(parent)
+		if perr != nil {
+			return fmt.Errorf("failed to resolve symlinks in target parent: %w", perr)
+		}
+		targetResolved = filepath.Join(parentResolved, filepath.Base(targetAbs))
+	} else {
+		return fmt.Errorf("failed to stat target path: %w", statErr)
 	}
 
 	// Compute the relative path from resolved storage root to resolved target
@@ -499,6 +507,19 @@ func (s *JSONStorage) GetHistory() []models.Position {
 		}
 	}
 	return history
+}
+
+// HasInHistory checks if a position with the given ID exists in the history.
+func (s *JSONStorage) HasInHistory(id string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, pos := range s.data.History {
+		if pos.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // AddAdjustment adds an adjustment to the current position.

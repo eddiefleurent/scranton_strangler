@@ -2,9 +2,11 @@
 package strategy
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -23,6 +25,7 @@ type StrangleStrategy struct {
 	config     *Config
 	logger     *log.Logger
 	chainCache map[string]*optionChainCacheEntry // Cache for option chains by symbol+expiration
+	cacheMutex sync.RWMutex                      // Protects concurrent access to chainCache
 }
 
 // Config contains configuration parameters for the strangle strategy.
@@ -102,8 +105,8 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	// Find expiration around 45 DTE
 	targetExp := s.findTargetExpiration(s.config.DTETarget)
 
-	// Get option chain with Greeks
-	options, err := s.broker.GetOptionChain(s.config.Symbol, targetExp, true)
+	// Get option chain with Greeks (using cache)
+	options, err := s.getCachedOptionChain(s.config.Symbol, targetExp, true)
 	if err != nil {
 		return nil, err
 	}
@@ -342,28 +345,79 @@ func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withG
 	cacheKey := fmt.Sprintf("%s-%s-%t", symbol, expiration, withGreeks)
 	const cacheDuration = 1 * time.Minute // Cache for 1 minute
 
-	// Check cache first
+	// Check cache first (read lock)
+	s.cacheMutex.RLock()
 	if entry, exists := s.chainCache[cacheKey]; exists {
 		if time.Since(entry.timestamp) < cacheDuration {
+			s.cacheMutex.RUnlock()
 			return entry.chain, nil
 		}
-		// Cache expired, remove it
-		delete(s.chainCache, cacheKey)
 	}
+	s.cacheMutex.RUnlock()
 
-	// Fetch from broker
+	// Fetch from broker (no lock needed here)
 	chain, err := s.broker.GetOptionChain(symbol, expiration, withGreeks)
 	if err != nil {
 		return nil, err
 	}
 
-	// Cache the result
+	// Cache the result (write lock)
+	s.cacheMutex.Lock()
 	s.chainCache[cacheKey] = &optionChainCacheEntry{
 		chain:     chain,
 		timestamp: time.Now(),
 	}
+	s.cacheMutex.Unlock()
 
 	return chain, nil
+}
+
+// getCachedOptionChainWithContext retrieves option chain from cache or fetches from broker with context timeout
+func (s *StrangleStrategy) getCachedOptionChainWithContext(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	cacheKey := fmt.Sprintf("%s-%s-%t", symbol, expiration, withGreeks)
+	const cacheDuration = 1 * time.Minute // Cache for 1 minute
+
+	// Check cache first (read lock)
+	s.cacheMutex.RLock()
+	if entry, exists := s.chainCache[cacheKey]; exists {
+		if time.Since(entry.timestamp) < cacheDuration {
+			s.cacheMutex.RUnlock()
+			return entry.chain, nil
+		}
+	}
+	s.cacheMutex.RUnlock()
+
+	// Fetch from broker with context timeout
+	type result struct {
+		chain []broker.Option
+		err   error
+	}
+
+	resultChan := make(chan result, 1)
+
+	go func() {
+		chain, err := s.broker.GetOptionChain(symbol, expiration, withGreeks)
+		resultChan <- result{chain: chain, err: err}
+	}()
+
+	select {
+	case res := <-resultChan:
+		if res.err != nil {
+			return nil, res.err
+		}
+
+		// Cache the result (write lock)
+		s.cacheMutex.Lock()
+		s.chainCache[cacheKey] = &optionChainCacheEntry{
+			chain:     res.chain,
+			timestamp: time.Now(),
+		}
+		s.cacheMutex.Unlock()
+
+		return res.chain, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // CalculatePositionPnL calculates current P&L for a position using live option quotes
@@ -437,6 +491,10 @@ func (s *StrangleStrategy) hasMajorEventsNearby() bool {
 }
 
 func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
+	// Create a context with timeout to prevent blocking on slow APIs
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	target := time.Now().AddDate(0, 0, targetDTE)
 
 	// SPY options expire on M/W/F - find the closest expiration
@@ -455,11 +513,17 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 	for i := 0; i < maxIterations; i++ {
 		expirationStr := target.Format("2006-01-02")
 
-		// Try to get option chain to verify data availability
-		_, err := s.broker.GetOptionChain(s.config.Symbol, expirationStr, false)
+		// Try to get option chain to verify data availability with timeout
+		_, err := s.getCachedOptionChainWithContext(ctx, s.config.Symbol, expirationStr, false)
 		if err == nil {
 			// Option chain available, use this date
 			return expirationStr
+		}
+
+		// Check if context was cancelled (timeout)
+		if ctx.Err() != nil {
+			s.logger.Printf("Context cancelled during expiration probing: %v, using fallback", ctx.Err())
+			break
 		}
 
 		// Log the attempt and try next valid expiration date
@@ -496,7 +560,7 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 
 	for _, option := range options {
 		// Only consider options of the correct type
-		if (isPut && option.OptionType != broker.OptionTypePutString) || (!isPut && option.OptionType != broker.OptionTypeCallString) {
+		if (isPut && option.OptionType != string(broker.OptionTypePut)) || (!isPut && option.OptionType != string(broker.OptionTypeCall)) {
 			continue
 		}
 
@@ -542,6 +606,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 
 	balance, err := s.broker.GetAccountBalance()
 	if err != nil {
+		s.logger.Printf("Error getting account balance for sizing: %v", err)
 		return 0
 	}
 	allocatedCapital := balance * s.config.AllocationPct

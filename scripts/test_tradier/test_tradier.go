@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -88,7 +89,7 @@ func main() {
 
 		fmt.Println("\n  Next 10 expirations (with DTE):")
 		displayCount := 0
-		for i := 0; i < len(expirations) && displayCount < 10; i++ {
+		for i := 0; i < len(expirations); i++ {
 			expDate, err := time.Parse("2006-01-02", expirations[i])
 			if err != nil {
 				fmt.Printf("Error parsing date %s: %v\n", expirations[i], err)
@@ -96,16 +97,19 @@ func main() {
 			}
 
 			// Parse date at midnight UTC to avoid timezone issues
-			expDate = time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, time.UTC)
-			dte := int(time.Until(expDate).Hours() / 24)
+			expDateUTC := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, time.UTC)
+			nowUTC := time.Date(time.Now().Year(), time.Now().Month(), time.Now().Day(), 0, 0, 0, 0, time.UTC)
+			dte := int(expDateUTC.Sub(nowUTC).Hours() / 24)
 
 			// Skip past or negative DTE expirations
 			if dte < 0 {
 				continue
 			}
 
-			displayCount++
-			fmt.Printf("  %d. %s (DTE: %d)\n", displayCount, expirations[i], dte)
+			if displayCount < 10 {
+				displayCount++
+				fmt.Printf("  %d. %s (DTE: %d)\n", displayCount, expirations[i], dte)
+			}
 
 			// Select closest to 45 DTE (only consider non-negative futures)
 			if selectedExp == "" || abs(dte-targetDTE) < abs(selectedDTE-targetDTE) {
@@ -179,9 +183,10 @@ func main() {
 						fmt.Printf("  - Type: Credit (Short Strangle)\n")
 
 						// Preview the order
+						px := roundToTick(credit*0.95, 0.01)
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,
-							1, credit*0.95, // slightly below mid for better fill
+							1, px, // slightly below mid for better fill (rounded)
 							true,      // preview mode
 							"day",     // duration
 							"preview", // tag
@@ -305,6 +310,14 @@ func abs[T float64 | int](x T) T {
 		return -x
 	}
 	return x
+}
+
+// roundToTick rounds x to the nearest tick increment.
+func roundToTick(x, tick float64) float64 {
+	if tick <= 0 {
+		return x
+	}
+	return math.Round(x/tick) * tick
 }
 
 // isOptionSymbol performs a robust OPRA-style check: TICKER + YYMMDD + [C|P] + strike

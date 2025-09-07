@@ -22,6 +22,7 @@ type Interface interface {
 
 	// Historical data and analytics
 	GetHistory() []models.Position
+	HasInHistory(id string) bool
 	GetStatistics() *Statistics
 	GetDailyPnL(date string) float64
 }

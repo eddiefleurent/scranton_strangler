@@ -29,9 +29,16 @@ type fakeBroker struct {
 	resp *broker.OrderResponse
 }
 
+// Ensure fakeBroker implements broker.Broker at compile time.
+var _ broker.Broker = (*fakeBroker)(nil)
+
 // Implement the Broker interface methods
 func (f *fakeBroker) GetAccountBalance() (float64, error) {
 	return 10000.0, nil
+}
+
+func (f *fakeBroker) GetOptionBuyingPower() (float64, error) {
+	return 5000.0, nil
 }
 
 func (f *fakeBroker) GetPositions() ([]broker.PositionItem, error) {
@@ -112,29 +119,10 @@ func (f *fakeBroker) successResponse() *broker.OrderResponse {
 	}
 	// Construct a minimal plausible OrderResponse.
 	// We only access Order.ID in production code logs; keep structure compatible.
-	return &broker.OrderResponse{
-		Order: struct {
-			CreateDate        string  `json:"create_date"`
-			Type              string  `json:"type"`
-			Symbol            string  `json:"symbol"`
-			Side              string  `json:"side"`
-			Class             string  `json:"class"`
-			Status            string  `json:"status"`
-			Duration          string  `json:"duration"`
-			TransactionDate   string  `json:"transaction_date"`
-			AvgFillPrice      float64 `json:"avg_fill_price"`
-			ExecQuantity      float64 `json:"exec_quantity"`
-			LastFillPrice     float64 `json:"last_fill_price"`
-			LastFillQuantity  float64 `json:"last_fill_quantity"`
-			RemainingQuantity float64 `json:"remaining_quantity"`
-			ID                int     `json:"id"`
-			Price             float64 `json:"price"`
-			Quantity          float64 `json:"quantity"`
-		}{
-			ID:     12345,
-			Status: "ok",
-		},
-	}
+	resp := &broker.OrderResponse{}
+	resp.Order.ID = 12345
+	resp.Order.Status = "ok"
+	return resp
 }
 
 func newTestPosition() *models.Position {
@@ -198,6 +186,9 @@ func TestNewClient_ConfigSanitizationAndDefaults(t *testing.T) {
 	if c2.logger != l {
 		t.Fatalf("expected provided logger to be used")
 	}
+	if c2.config != DefaultConfig {
+		t.Fatalf("expected DefaultConfig when cfg not provided; got %+v", c2.config)
+	}
 }
 
 func TestIsTransientError_Patterns(t *testing.T) {
@@ -219,6 +210,8 @@ func TestIsTransientError_Patterns(t *testing.T) {
 		{"502", errors.New("502 bad gateway"), true},
 		{"503", errors.New("Service Unavailable (503)"), true},
 		{"504", errors.New("504 Gateway Timeout"), true},
+		{"408", errors.New("408 Request Timeout"), true},
+		{"i/o timeout", errors.New("i/o timeout"), true},
 		{"network", errors.New("network unreachable"), true},
 		{"dns", errors.New("dns lookup failed"), true},
 		{"tcp", errors.New("tcp handshake failed"), true},
@@ -293,7 +286,7 @@ func TestClosePositionWithRetry_SucceedsFirstAttempt(t *testing.T) {
 	if atomic.LoadInt32(&fb.callCount) != 1 {
 		t.Fatalf("expected 1 broker call, got %d", fb.callCount)
 	}
-	if !strings.Contains(buf.String(), "Close attempt 1/") {
+	if !strings.Contains(buf.String(), "Close attempt 1") {
 		t.Fatalf("expected log to contain attempt log, got: %s", buf.String())
 	}
 }
@@ -309,7 +302,7 @@ func TestClosePositionWithRetry_RetriesOnTransientAndThenSucceeds(t *testing.T) 
 		MaxBackoff:     3 * time.Millisecond,
 		Timeout:        250 * time.Millisecond,
 	}
-	c, _ := makeClient(t, fb, cfg)
+	c, buf := makeClient(t, fb, cfg)
 
 	ctx := context.Background()
 	pos := newTestPosition()
@@ -328,6 +321,14 @@ func TestClosePositionWithRetry_RetriesOnTransientAndThenSucceeds(t *testing.T) 
 	// Ensure some small wait occurred (not strict, just sanity)
 	if elapsed := time.Since(start); elapsed < 2*time.Millisecond {
 		t.Fatalf("expected some backoff elapsed, got %v", elapsed)
+	}
+	// Assert that attempts 1 and 2 were logged
+	logs := buf.String()
+	if !strings.Contains(logs, "Close attempt 1") {
+		t.Fatalf("expected log to contain attempt 1, got: %s", logs)
+	}
+	if !strings.Contains(logs, "Close attempt 2") {
+		t.Fatalf("expected log to contain attempt 2, got: %s", logs)
 	}
 }
 
@@ -374,6 +375,9 @@ func TestClosePositionWithRetry_NilPosition(t *testing.T) {
 	}
 	if got := buf.String(); !strings.Contains(got, "nil position") {
 		t.Fatalf("expected log mentioning nil position, got: %s", got)
+	}
+	if atomic.LoadInt32(&fb.callCount) != 0 {
+		t.Fatalf("expected 0 broker calls on nil position, got %d", fb.callCount)
 	}
 }
 
@@ -431,6 +435,9 @@ func TestClosePositionWithRetry_TimeoutDuringBackoff(t *testing.T) {
 	if !strings.Contains(msg, "timed out") {
 		t.Fatalf("expected timeout-related error, got: %v", err)
 	}
+	if atomic.LoadInt32(&fb.callCount) != 1 {
+		t.Fatalf("expected 1 broker attempt before timing out during backoff, got %d", fb.callCount)
+	}
 }
 
 func TestClosePositionWithRetry_TimeoutBeforeCallLoop(t *testing.T) {
@@ -447,7 +454,7 @@ func TestClosePositionWithRetry_TimeoutBeforeCallLoop(t *testing.T) {
 	c, _ := makeClient(t, fb, cfg)
 
 	// Give the timeout a chance to expire
-	time.Sleep(2 * time.Nanosecond)
+	time.Sleep(100 * time.Microsecond)
 
 	ctx := context.Background()
 	pos := newTestPosition()

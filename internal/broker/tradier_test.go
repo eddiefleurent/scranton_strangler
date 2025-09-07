@@ -404,7 +404,7 @@ func TestPlaceStrangleBuyToClose_SetsDebitAndSide(t *testing.T) {
 	})
 	defer srv.Close()
 
-	resp, err := api.PlaceStrangleBuyToClose("AAPL", 95, 105, "2025-01-17", 3, 2.50, "")
+	resp, err := api.PlaceStrangleBuyToClose("AAPL", 95, 105, "2025-01-17", 3, 2.50, "day", "")
 	if err != nil {
 		t.Fatalf("PlaceStrangleBuyToClose error: %v", err)
 	}
@@ -534,6 +534,88 @@ func TestCalculateStrangleCredit_MidPricesAndMissingStrikes(t *testing.T) {
 	}
 }
 
+func TestCalculateStrangleCredit_EpsilonComparisonEdgeCases(t *testing.T) {
+	tests := []struct {
+		name         string
+		opts         []Option
+		targetPut    float64
+		targetCall   float64
+		expectCredit float64
+		expectError  bool
+	}{
+		{
+			name: "exact match",
+			opts: []Option{
+				{OptionType: "put", Strike: 95.0, Bid: 1.0, Ask: 1.4},
+				{OptionType: "call", Strike: 105.0, Bid: 1.2, Ask: 1.6},
+			},
+			targetPut:    95.0,
+			targetCall:   105.0,
+			expectCredit: 2.6, // (1.0+1.4)/2 + (1.2+1.6)/2 = 1.2 + 1.4 = 2.6
+			expectError:  false,
+		},
+		{
+			name: "within epsilon 1e-5",
+			opts: []Option{
+				{OptionType: "put", Strike: 95.00001, Bid: 1.0, Ask: 1.4},
+				{OptionType: "call", Strike: 104.99999, Bid: 1.2, Ask: 1.6},
+			},
+			targetPut:    95.0,
+			targetCall:   105.0,
+			expectCredit: 2.6,
+			expectError:  false,
+		},
+		{
+			name: "at epsilon boundary 1e-4",
+			opts: []Option{
+				{OptionType: "put", Strike: 95.000099, Bid: 1.0, Ask: 1.4},
+				{OptionType: "call", Strike: 104.999901, Bid: 1.2, Ask: 1.6},
+			},
+			targetPut:    95.0,
+			targetCall:   105.0,
+			expectCredit: 2.6,
+			expectError:  false,
+		},
+		{
+			name: "beyond epsilon 1.1e-4",
+			opts: []Option{
+				{OptionType: "put", Strike: 95.00011, Bid: 1.0, Ask: 1.4},
+				{OptionType: "call", Strike: 105.0, Bid: 1.2, Ask: 1.6},
+			},
+			targetPut:    95.0,
+			targetCall:   105.0,
+			expectCredit: 0,
+			expectError:  true,
+		},
+		{
+			name: "rounding mismatch at boundary",
+			opts: []Option{
+				{OptionType: "put", Strike: 394.995, Bid: 1.0, Ask: 1.4},
+				{OptionType: "call", Strike: 404.995, Bid: 1.2, Ask: 1.6},
+			},
+			targetPut:    395.0,
+			targetCall:   405.0,
+			expectCredit: 0,
+			expectError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			credit, err := CalculateStrangleCredit(tt.opts, tt.targetPut, tt.targetCall)
+			if tt.expectError && err == nil {
+				t.Fatalf("expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !tt.expectError && math.Abs(credit-tt.expectCredit) > 1e-10 {
+				t.Fatalf("credit = %v, want %v", credit, tt.expectCredit)
+			}
+		})
+	}
+}
+
 func TestCheckStranglePosition_FindsShortPutAndCallForUnderlying(t *testing.T) {
 	positions := []PositionItem{
 		{Symbol: "MSFT250101P00150000", Quantity: -1}, // different underlying
@@ -550,9 +632,9 @@ func TestCheckStranglePosition_FindsShortPutAndCallForUnderlying(t *testing.T) {
 	}
 }
 
-func TestAbs(t *testing.T) {
-	if abs(-2.5) != 2.5 || abs(2.5) != 2.5 || abs(0) != 0 {
-		t.Fatalf("abs failed")
+func TestMathAbs(t *testing.T) {
+	if math.Abs(-2.5) != 2.5 || math.Abs(2.5) != 2.5 || math.Abs(0) != 0 {
+		t.Fatalf("math.Abs failed")
 	}
 }
 
@@ -569,6 +651,20 @@ func TestExtractUnderlyingFromOSI_BasicAndEdgeCases(t *testing.T) {
 		{"AAPL25010P00150000", ""},       // invalid 6-digit sequence
 		{"AAPL", ""},                     // too short
 		{"FOO012345P00123456", "FOO"},    // 6 digits then P and 8 digits
+		// Edge cases with digits/dots in underlying symbol
+		{"BRK.B250101P00150000", "BRK.B"}, // dot in symbol
+		{"BRK.B240920C00450000", "BRK.B"}, // Berkshire Hathaway class B
+		{"A2B250101P00150000", "A2B"},     // digit in symbol
+		{"C3.AI250101C00150000", "C3.AI"}, // mixed digits and dots
+		{"123456P00123456", ""},           // all digits, no valid underlying
+		{"A250101P00150000", "A"},         // single letter underlying
+		{"VERYVERYLONGUNDERLYINGSYMBOL250101P00150000", "VERYVERYLONGUNDERLYINGSYMBOL"}, // long underlying
+		{"SPY250101P00150000EXTRA", ""}, // extra characters after valid symbol
+		{"SPY250101P0015000", ""},       // strike too short (7 digits instead of 8)
+		{"SPY250101P001500000", ""},     // strike too long (9 digits)
+		{"SPY250101P0015000A", ""},      // non-digit in strike
+		{"SPY250101P00150000 ", "SPY"},  // trailing space (should be trimmed)
+		{"spy250101p00150000", "spy"},   // lowercase (underlying preserves case)
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {

@@ -16,16 +16,11 @@ import (
 	"time"
 )
 
-// Option type constants - exported for use in comparisons
+// Market clock state constants
 const (
-	// OptionTypePutString is the string value for put options
-	OptionTypePutString = "put"
-	// OptionTypeCallString is the string value for call options
-	OptionTypeCallString = "call"
-
-	// Internal aliases for backward compatibility
-	optionTypePut  = OptionTypePutString
-	optionTypeCall = OptionTypeCallString
+	marketStateOpen       = "open"
+	marketStatePreMarket  = "premarket"
+	marketStatePostMarket = "postmarket"
 )
 
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
@@ -389,7 +384,7 @@ func (t *TradierAPI) IsTradingDay(delayed bool) (bool, error) {
 	}
 
 	state := clock.Clock.State
-	return state == "open" || state == "premarket" || state == "postmarket", nil
+	return state == marketStateOpen || state == marketStatePreMarket || state == marketStatePostMarket, nil
 }
 
 // normalizeDuration normalizes and validates duration parameter
@@ -489,6 +484,9 @@ func (t *TradierAPI) placeStrangleOrderInternal(
 
 	// Build option symbols: SYMBOL + YYMMDD + P/C + 8-digit strike
 	// Use rounded 1/1000th dollars to build OCC strike field
+	// Note: Rounding to 1/1000 and %08d is standard OCC format, but edge cases like
+	// strikes ending in .995 (e.g., 394.995) may round to unexpected values.
+	// Consider unit tests covering .05 boundaries for validation.
 	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, int(math.Round(putStrike*1000)))
 	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, int(math.Round(callStrike*1000)))
 
@@ -546,9 +544,14 @@ func (t *TradierAPI) PlaceStrangleBuyToClose(
 	expiration string,
 	quantity int,
 	maxDebit float64,
+	duration string,
 	tag string,
 ) (*OrderResponse, error) {
-	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, "day", tag)
+	nd, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
+	}
+	return t.placeStrangleOrderInternal(symbol, putStrike, callStrike, expiration, quantity, maxDebit, false, true, nd, tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order by ID
@@ -649,6 +652,7 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 
 	req.Header.Add("Authorization", "Bearer "+t.apiKey)
 	req.Header.Add("Accept", "application/json")
+	req.Header.Add("User-Agent", "scranton-strangler/1.0 (+tradier)")
 
 	resp, err := t.client.Do(req)
 	if err != nil {
@@ -685,11 +689,10 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 		return nil
 	}
 	dec := json.NewDecoder(resp.Body)
-	if err := dec.Decode(response); err == io.EOF {
-		return nil
-	} else {
+	if err := dec.Decode(response); err != nil && err != io.EOF {
 		return err
 	}
+	return nil
 }
 
 // ============ Helper Functions ============
@@ -710,21 +713,21 @@ func FindStrangleStrikes(options []Option, targetDelta float64) (putStrike, call
 		}
 
 		switch opt.OptionType {
-		case optionTypePut:
+		case string(OptionTypePut):
 			// Put deltas are negative, so we use absolute value
 			delta := opt.Greeks.Delta
 			if delta < 0 {
 				delta = -delta
 			}
 
-			diff := abs(delta - targetDelta)
+			diff := math.Abs(delta - targetDelta)
 			if diff < bestPutDiff {
 				bestPutDiff = diff
 				bestPut = opt
 			}
-		case optionTypeCall:
+		case string(OptionTypeCall):
 			// Call deltas are positive
-			diff := abs(opt.Greeks.Delta - targetDelta)
+			diff := math.Abs(opt.Greeks.Delta - targetDelta)
 			if diff < bestCallDiff {
 				bestCallDiff = diff
 				bestCall = opt
@@ -749,11 +752,11 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (f
 	var putCredit, callCredit float64
 
 	for _, opt := range options {
-		if math.Abs(opt.Strike-putStrike) <= 1e-4 && opt.OptionType == optionTypePut {
+		if math.Abs(opt.Strike-putStrike) <= 1e-4 && opt.OptionType == string(OptionTypePut) {
 			// Use mid price between bid and ask
 			putCredit = (opt.Bid + opt.Ask) / 2
 		}
-		if math.Abs(opt.Strike-callStrike) <= 1e-4 && opt.OptionType == optionTypeCall {
+		if math.Abs(opt.Strike-callStrike) <= 1e-4 && opt.OptionType == string(OptionTypeCall) {
 			// Use mid price between bid and ask
 			callCredit = (opt.Bid + opt.Ask) / 2
 		}
@@ -794,49 +797,48 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 	return
 }
 
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
 // extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"
 func extractUnderlyingFromOSI(s string) string {
 	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
 	// We need to find the start of the 6-digit expiration date
-	if len(s) < 16 { // minimum length for a valid option symbol
+	trimmedS := strings.TrimSpace(s)
+	if len(trimmedS) < 16 { // minimum length for a valid option symbol
 		return ""
 	}
 
 	// Look for the first 6-digit sequence (expiration date) with proper validation
-	for i := 0; i <= len(s)-15; i++ { // need at least 15 chars after start for YYMMDD + P/C + 8 digits
-		if isSixDigits(s[i : i+6]) {
+	for i := 0; i <= len(trimmedS)-15; i++ { // need at least 15 chars after start for YYMMDD + P/C + 8 digits
+		if isSixDigits(trimmedS[i : i+6]) {
 			// Check that the 6-digit sequence is not part of a longer numeric run
-			if i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+			if i > 0 && trimmedS[i-1] >= '0' && trimmedS[i-1] <= '9' {
 				continue // previous char is digit, skip
 			}
 
 			expirationEnd := i + 6
-			typeChar := s[expirationEnd]
-			if typeChar != 'P' && typeChar != 'C' {
-				continue // not followed by P or C
+			typeChar := trimmedS[expirationEnd]
+			if typeChar != 'P' && typeChar != 'C' && typeChar != 'p' && typeChar != 'c' {
+				continue // not followed by P or C (case insensitive)
 			}
 
 			strikeStart := expirationEnd + 1
-			if !isEightDigits(s[strikeStart : strikeStart+8]) {
+			if !isEightDigits(trimmedS[strikeStart : strikeStart+8]) {
 				continue // not followed by exactly 8 digits
 			}
 
 			// Check that the strike is not part of a longer numeric run
 			strikeEnd := strikeStart + 8
-			if strikeEnd < len(s) && s[strikeEnd] >= '0' && s[strikeEnd] <= '9' {
+			if strikeEnd < len(trimmedS) && trimmedS[strikeEnd] >= '0' && trimmedS[strikeEnd] <= '9' {
 				continue // next char is digit, skip
 			}
 
+			// Check that the string ends exactly after the strike (no extra characters)
+			if strikeEnd != len(trimmedS) {
+				continue // extra characters after valid pattern
+			}
+
 			// All conditions met, return underlying
-			return strings.TrimSpace(s[:i])
+			return trimmedS[:i]
 		}
 	}
 

@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -51,6 +52,60 @@ func TestCalculateIVR(t *testing.T) {
 			currentIV:    35.0,
 			historicalIV: []float64{15.0, 20.0, 25.0, 30.0, 40.0},
 			expected:     80.0, // (35-15)/(40-15) * 100 = 80
+		},
+		{
+			name:         "monotonic bounds - current IV below historical min",
+			currentIV:    5.0,
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     0.0, // Should clamp to 0 when current IV < min historical
+		},
+		{
+			name:         "monotonic bounds - current IV above historical max",
+			currentIV:    50.0,
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     100.0, // Should clamp to 100 when current IV > max historical
+		},
+		{
+			name:         "monotonic bounds - negative current IV",
+			currentIV:    -5.0,
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     0.0, // Should clamp to 0 for negative current IV
+		},
+		{
+			name:         "monotonic bounds - extreme high current IV",
+			currentIV:    1000.0,
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     100.0, // Should clamp to 100 for extremely high current IV
+		},
+		{
+			name:         "robustness - current IV is NaN",
+			currentIV:    math.NaN(),
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     0.0, // Should return 0 for NaN current IV
+		},
+		{
+			name:         "robustness - current IV is +Inf",
+			currentIV:    math.Inf(1),
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     100.0, // Should clamp to 100 for +Inf current IV
+		},
+		{
+			name:         "robustness - current IV is -Inf",
+			currentIV:    math.Inf(-1),
+			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
+			expected:     0.0, // Should clamp to 0 for -Inf current IV
+		},
+		{
+			name:         "robustness - historical IV contains NaN",
+			currentIV:    20.0,
+			historicalIV: []float64{10.0, math.NaN(), 20.0, 25.0, 30.0},
+			expected:     50.0, // Should filter out NaN and compute: (20-10)/(30-10) * 100 = 50
+		},
+		{
+			name:         "robustness - historical IV contains Inf",
+			currentIV:    20.0,
+			historicalIV: []float64{10.0, math.Inf(1), 20.0, 25.0, 30.0},
+			expected:     50.0, // Should filter out Inf and compute: (20-10)/(30-10) * 100 = 50
 		},
 	}
 
@@ -238,17 +293,17 @@ func TestExtractUnderlyingFromOSI(t *testing.T) {
 	}{
 		// Valid OSI symbols with different underlying lengths
 		{
-			name:     "4-char underlying (SPY)",
+			name:     "3-char underlying (SPY)",
 			input:    "SPY241220P00450000",
 			expected: "SPY",
 		},
 		{
-			name:     "5-char underlying (TSLA)",
+			name:     "4-char underlying (TSLA)",
 			input:    "TSLA241220P00250000",
 			expected: "TSLA",
 		},
 		{
-			name:     "6-char underlying (NVDA)",
+			name:     "4-char underlying (NVDA)",
 			input:    "NVDA241220P00500000",
 			expected: "NVDA",
 		},
@@ -670,6 +725,14 @@ func (m *MockBroker) GetAccountBalance() (float64, error) {
 	return 1000.0, nil
 }
 
+func (m *MockBroker) GetOptionBuyingPower() (float64, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return 0, errors.New("mock broker error")
+	}
+	return 5000.0, nil
+}
+
 func (m *MockBroker) GetPositions() ([]PositionItem, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
@@ -838,7 +901,14 @@ func TestCircuitBreakerBroker_SuccessfulCalls(t *testing.T) {
 
 func TestCircuitBreakerBroker_FailureScenarios(t *testing.T) {
 	mockBroker := &MockBroker{shouldFail: true, failAfter: 3}
-	cb := NewCircuitBreakerBroker(mockBroker)
+	testSettings := CircuitBreakerSettings{
+		MaxRequests:  1,
+		Interval:     10 * time.Millisecond,
+		Timeout:      20 * time.Millisecond,
+		MinRequests:  1,
+		FailureRatio: 0.5,
+	}
+	cb := NewCircuitBreakerBrokerWithSettings(mockBroker, testSettings)
 
 	// Make several calls to trip the breaker
 	for i := 0; i < 8; i++ {
@@ -867,8 +937,8 @@ func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
 	// Use fast settings for testing to avoid 30-second delays
 	fastSettings := CircuitBreakerSettings{
 		MaxRequests:  3,
-		Interval:     1 * time.Second,
-		Timeout:      2 * time.Second, // Fast recovery for tests
+		Interval:     50 * time.Millisecond,
+		Timeout:      80 * time.Millisecond,
 		MinRequests:  5,
 		FailureRatio: 0.6,
 	}
@@ -884,8 +954,8 @@ func TestCircuitBreakerBroker_RecoveryBehavior(t *testing.T) {
 		t.Fatalf("Circuit breaker should be open, but state is %s", cb.breaker.State())
 	}
 
-	// Wait for timeout (2 seconds in test config) - REQUIRED for circuit breaker recovery test
-	time.Sleep(2100 * time.Millisecond) // Slightly longer than 2s to ensure timeout
+	// Wait for timeout (80ms in test config) - REQUIRED for circuit breaker recovery test
+	time.Sleep(100 * time.Millisecond) // Slightly > Timeout to ensure half-open
 
 	// Breaker should be half-open now, allow limited requests
 	mockBroker.shouldFail = false // Make broker succeed again
