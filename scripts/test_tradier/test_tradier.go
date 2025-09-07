@@ -193,7 +193,7 @@ func main() {
 						if ts, err := client.GetTickSize("SPY"); err == nil {
 							tickSize = ts
 						}
-						px := util.RoundToTick(credit*0.95, tickSize)
+						px := util.FloorToTick(credit*0.95, tickSize)
 						fmt.Printf("  - Limit Price: $%.2f (95%% of mid, rounded to %.4f tick)\n", px, tickSize)
 						orderResp, err := client.PlaceStrangleOrder(
 							"SPY", putStrike, callStrike, selectedExp,

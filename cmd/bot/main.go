@@ -337,7 +337,7 @@ func (b *Bot) executeEntry() {
 		tickSize = 0.01
 	}
 
-	px := util.RoundToTick(order.Credit, tickSize)
+	px := util.FloorToTick(order.Credit, tickSize)
 	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
 
 	placedOrder, err := b.broker.PlaceStrangleOrder(

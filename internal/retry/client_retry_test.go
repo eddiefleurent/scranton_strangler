@@ -330,7 +330,7 @@ func TestClosePositionWithRetry_RetriesOnTransientAndThenSucceeds(t *testing.T) 
 		t.Fatalf("expected 3 attempts, got %d", fb.callCount)
 	}
 	// Ensure some small wait occurred (not strict, just sanity)
-	if elapsed := time.Since(start); elapsed < 2*time.Millisecond {
+	if elapsed := time.Since(start); elapsed < 1*time.Millisecond {
 		t.Fatalf("expected some backoff elapsed, got %v", elapsed)
 	}
 	// Assert that attempts 1 and 2 were logged

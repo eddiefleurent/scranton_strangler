@@ -91,7 +91,7 @@ func (m *MockStorage) Load() error {
 
 // GetHistory returns the mock historical position data.
 func (m *MockStorage) GetHistory() []models.Position {
-	return m.history
+	return append([]models.Position(nil), m.history...)
 }
 
 // HasInHistory checks if a position with the given ID exists in the mock history.

@@ -13,3 +13,21 @@ func RoundToTick(x, tick float64) float64 {
 	t := math.Abs(tick)
 	return math.Round(x/t) * t
 }
+
+// FloorToTick rounds down to the nearest tick (use for sell credits).
+func FloorToTick(x, tick float64) float64 {
+	if tick == 0 || math.IsNaN(tick) || math.IsInf(tick, 0) || math.IsNaN(x) || math.IsInf(x, 0) {
+		return x
+	}
+	t := math.Abs(tick)
+	return math.Floor(x/t) * t
+}
+
+// CeilToTick rounds up to the nearest tick (use for buy debits).
+func CeilToTick(x, tick float64) float64 {
+	if tick == 0 || math.IsNaN(tick) || math.IsInf(tick, 0) || math.IsNaN(x) || math.IsInf(x, 0) {
+		return x
+	}
+	t := math.Abs(tick)
+	return math.Ceil(x/t) * t
+}
