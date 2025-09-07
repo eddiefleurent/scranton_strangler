@@ -560,7 +560,7 @@ func (b *Bot) completePositionClose(
 
 	stats := b.storage.GetStatistics()
 	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
-		stats.TotalTrades, stats.WinRate*100, stats.TotalPnL)
+		stats.TotalTrades, stats.WinRate, stats.TotalPnL)
 }
 
 func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.ExitReason) float64 {
