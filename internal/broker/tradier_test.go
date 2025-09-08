@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -365,6 +366,86 @@ func TestPlaceStrangleOrder_NormalizesAndBuildsRequest(t *testing.T) {
 	}
 	if resp.Order.ID != 123 || resp.Order.Type != "credit" || resp.Order.Duration != "gtc" {
 		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestPlaceStrangleOrder_ExtendedHoursDurations(t *testing.T) {
+	// Test cases for extended-hours durations "pre" and "post"
+	testCases := []struct {
+		name             string
+		inputDuration    string
+		expectedDuration string
+	}{
+		{
+			name:             "pre-market duration",
+			inputDuration:    "pre",
+			expectedDuration: "pre",
+		},
+		{
+			name:             "post-market duration",
+			inputDuration:    "post",
+			expectedDuration: "post",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			api, srv := newTestAPIWithServer(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Fatalf("method = %s, want POST", r.Method)
+				}
+				if got := r.URL.Path; !strings.HasSuffix(got, "/accounts/ACC123/orders") {
+					t.Fatalf("path = %s", got)
+				}
+				body, _ := io.ReadAll(r.Body)
+				got := string(body)
+				
+				// Verify expected duration is in request
+				expectedParam := fmt.Sprintf("duration=%s", tc.expectedDuration)
+				if !strings.Contains(got, expectedParam) {
+					t.Fatalf("request body missing %q; body=%s", expectedParam, got)
+				}
+				
+				// Verify other required parameters
+				for _, expect := range []string{
+					"class=multileg",
+					"symbol=SPY",
+					"type=credit",
+					"side%5B0%5D=sell_to_open",
+					"side%5B1%5D=sell_to_open",
+					"quantity%5B0%5D=1",
+					"quantity%5B1%5D=1",
+				} {
+					if !strings.Contains(got, expect) {
+						t.Fatalf("request body missing %q; body=%s", expect, got)
+					}
+				}
+				
+				// Verify option symbols are present
+				if !strings.Contains(got, "option_symbol%5B0%5D=SPY") || !strings.Contains(got, "option_symbol%5B1%5D=SPY") {
+					t.Fatalf("missing leg symbols: %s", got)
+				}
+				
+				w.WriteHeader(http.StatusAccepted)
+				response := fmt.Sprintf(`{"order":{"create_date":"","type":"credit","symbol":"SPY","side":"sell_to_open","class":"multileg","status":"ok","duration":"%s","transaction_date":"","avg_fill_price":0,"exec_quantity":0,"last_fill_price":0,"last_fill_quantity":0,"remaining_quantity":0,"id":456,"price":2.50,"quantity":1}}`, tc.expectedDuration)
+				_, _ = w.Write([]byte(response))
+			})
+			defer srv.Close()
+
+			resp, err := api.PlaceStrangleOrder("SPY", 450.0, 470.0, "2025-02-21", 1, 2.50, false, tc.inputDuration, "")
+			if err != nil {
+				t.Fatalf("PlaceStrangleOrder error: %v", err)
+			}
+			if resp.Order.ID != 456 {
+				t.Fatalf("unexpected order ID: got %d, want 456", resp.Order.ID)
+			}
+			if resp.Order.Duration != tc.expectedDuration {
+				t.Fatalf("unexpected duration: got %s, want %s", resp.Order.Duration, tc.expectedDuration)
+			}
+			if resp.Order.Type != "credit" {
+				t.Fatalf("unexpected order type: got %s, want credit", resp.Order.Type)
+			}
+		})
 	}
 }
 

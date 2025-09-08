@@ -16,14 +16,6 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
-// Transition condition constants to avoid stringly-typed conditions
-const (
-	ConditionPositionClosed = "position_closed"
-	ConditionExitConditions = "exit_conditions"
-	ConditionForceClose     = "force_close"
-	ConditionHardStop       = "hard_stop"
-	ConditionOrderTimeout   = "order_timeout"
-)
 
 // JSONStorage implements Interface using JSON file persistence
 type JSONStorage struct {
@@ -431,27 +423,31 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	// Prefer explicit reason when provided
 	switch reason {
 	case "manual":
-		condition = ConditionForceClose
+		condition = models.ConditionForceClose
 	case "hard_stop":
-		condition = ConditionHardStop
+		condition = models.ConditionHardStop
 	}
 	if condition == "" {
 		currentState := s.data.CurrentPosition.GetCurrentState()
 		switch currentState {
 		case models.StateOpen:
-			condition = ConditionPositionClosed
+			condition = models.ConditionPositionClosed
 		case models.StateSubmitted:
-			condition = ConditionOrderTimeout
-		case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
-			condition = ConditionExitConditions
+			condition = models.ConditionOrderTimeout
+		case models.StateFirstDown, models.StateSecondDown:
+			condition = models.ConditionExitConditions
+		case models.StateThirdDown:
+			condition = models.ConditionHardStop
+		case models.StateFourthDown:
+			condition = models.ConditionEmergencyExit
 		case models.StateError:
-			condition = ConditionForceClose
+			condition = models.ConditionForceClose
 		case models.StateAdjusting:
-			condition = ConditionHardStop
+			condition = models.ConditionHardStop
 		case models.StateRolling:
-			condition = ConditionForceClose
+			condition = models.ConditionForceClose
 		default:
-			condition = ConditionExitConditions // fallback
+			condition = models.ConditionExitConditions // fallback
 		}
 	}
 

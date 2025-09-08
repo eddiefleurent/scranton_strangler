@@ -739,11 +739,34 @@ GET  /accounts/{id}/positions     # Get positions
 GET  /accounts/{id}/orders        # Check order status
 ```
 
-### After-Hours Functionality
+### Trading Hours & Order Duration Configuration
+
+#### Trading Schedule
+The bot operates on a configurable schedule optimized for options liquidity:
+
+- **Default Trading Window**: 09:45–15:45 America/New_York (Mon–Fri, excluding U.S. market holidays)
+  - Starts 15 minutes after market open for price stability
+  - Stops 15 minutes before close to avoid end-of-day volatility
+- **Check Interval**: Every 15 minutes via cron scheduler
+- **Time Zone Aware**: Handles daylight saving time transitions automatically
+
+#### Order Duration Types
+The Tradier API integration supports multiple order duration types:
+
+| Duration | Description | Use Case |
+|----------|-------------|----------|
+| **GTC** | Good Till Cancelled - remains active until filled or manually cancelled | **Default for limit orders** - ensures orders persist across trading sessions |
+| **Day** | Expires at end of regular trading day (4:00 PM ET) | Quick fills or day-specific strategies |
+| **Pre** | Extended hours pre-market (4:00 AM - 9:30 AM ET) | Pre-market trading (rarely used for options) |
+| **Post** | Extended hours post-market (4:00 PM - 8:00 PM ET) | After-hours trading (rarely used for options) |
+
+**Note**: Options typically have limited liquidity outside regular market hours. The bot defaults to GTC orders for strangle positions to ensure fills during regular trading hours across multiple sessions if needed.
+
+#### After-Hours Functionality
 
 The bot supports optional after-hours position monitoring via the `after_hours_check` configuration flag:
 
-- **Default Behavior**: When `false`, the bot runs during a configured window (default 09:45–15:45 America/New_York, Mon–Fri; U.S. market holidays excluded)
+- **Default Behavior**: When `false`, the bot runs during the configured trading window only
 - **After-Hours Mode**: When `true`, the bot continues monitoring existing positions even outside regular hours
 - **Functionality During After-Hours**:
   - Monitors existing positions for exit conditions (stop losses, profit targets)
@@ -751,7 +774,7 @@ The bot supports optional after-hours position monitoring via the `after_hours_c
   - **Does NOT** perform position adjustments (Phase 2 feature)
   - Logs after-hours activity for transparency
 
-#### Use Cases
+##### Use Cases
 - Risk management for overnight positions
 - Monitoring positions during extended hours trading
 - Emergency exit capabilities outside normal hours

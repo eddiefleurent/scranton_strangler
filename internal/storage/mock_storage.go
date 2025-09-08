@@ -67,19 +67,23 @@ func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 	currentState := m.currentPosition.GetCurrentState()
 	switch currentState {
 	case models.StateOpen:
-		condition = ConditionPositionClosed
+		condition = models.ConditionPositionClosed
 	case models.StateSubmitted:
-		condition = ConditionOrderTimeout
-	case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
-		condition = ConditionExitConditions
+		condition = models.ConditionOrderTimeout
+	case models.StateFirstDown, models.StateSecondDown:
+		condition = models.ConditionExitConditions
+	case models.StateThirdDown:
+		condition = models.ConditionHardStop
+	case models.StateFourthDown:
+		condition = models.ConditionEmergencyExit
 	case models.StateError:
-		condition = ConditionForceClose
+		condition = models.ConditionForceClose
 	case models.StateAdjusting:
-		condition = ConditionHardStop
+		condition = models.ConditionHardStop
 	case models.StateRolling:
-		condition = ConditionForceClose
+		condition = models.ConditionForceClose
 	default:
-		condition = ConditionExitConditions // fallback
+		condition = models.ConditionExitConditions // fallback
 	}
 
 	// Transition state to closed using canonical condition constant

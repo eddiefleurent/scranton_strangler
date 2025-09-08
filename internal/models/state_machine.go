@@ -54,6 +54,50 @@ const (
 	fourthDownOptionBMaxDays = 3
 )
 
+// Condition constants for state transitions - centralized to prevent string drift
+const (
+	// Order lifecycle conditions
+	ConditionOrderPlaced     = "order_placed"
+	ConditionOrderFilled     = "order_filled"
+	ConditionOrderFailed     = "order_failed"
+	ConditionOrderTimeout    = "order_timeout"
+	ConditionSkipOrderEntry  = "skip_order_entry"
+
+	// Management lifecycle conditions
+	ConditionStartManagement    = "start_management"
+	ConditionPositionClosed      = "position_closed"
+
+	// Football system progression conditions
+	ConditionStrikeChallenged    = "strike_challenged"
+	ConditionStrikeBreached      = "strike_breached"
+	ConditionAdjustmentFailed    = "adjustment_failed"
+
+	// Recovery conditions
+	ConditionPriceRecovered      = "price_recovered"
+	ConditionAdjustmentSuccessful = "adjustment_successful"
+	ConditionRecoverySuccessful   = "recovery_successful"
+	ConditionPuntExecuted         = "punt_executed"
+
+	// Exit conditions
+	ConditionExitConditions = "exit_conditions"
+	ConditionHardStop       = "hard_stop"
+	ConditionEmergencyExit  = "emergency_exit"
+	ConditionForceClose     = "force_close"
+
+	// Adjustment conditions
+	ConditionRollUntested      = "roll_untested"
+	ConditionExecuteAdjustment = "execute_adjustment"
+	ConditionRollAsPunt        = "roll_as_punt"
+
+	// Return from adjustments
+	ConditionAdjustmentComplete = "adjustment_complete"
+	ConditionRollComplete       = "roll_complete"
+	ConditionRollFailed         = "roll_failed"
+
+	// Error recovery
+	ConditionManualIntervention = "manual_intervention"
+)
+
 // StateTransition defines valid state transitions
 type StateTransition struct {
 	From        PositionState
@@ -65,47 +109,47 @@ type StateTransition struct {
 // ValidTransitions defines the allowed state transitions for the position state machine.
 var ValidTransitions = []StateTransition{
 	// Position lifecycle
-	{StateIdle, StateSubmitted, "order_placed", "Order submitted to broker"},
-	{StateIdle, StateFirstDown, "skip_order_entry", "Skipping order entry, going directly to management"},
-	{StateSubmitted, StateOpen, "order_filled", "Order filled successfully"},
-	{StateSubmitted, StateError, "order_failed", "Order failed or canceled"},
-	{StateSubmitted, StateClosed, "order_timeout", "Order timed out without fill"},
-	{StateOpen, StateFirstDown, "start_management", "Begin football system monitoring"},
-	{StateOpen, StateClosed, "position_closed", "Position closed directly (profit target hit, time limit, etc.)"},
+	{StateIdle, StateSubmitted, ConditionOrderPlaced, "Order submitted to broker"},
+	{StateIdle, StateFirstDown, ConditionSkipOrderEntry, "Skipping order entry, going directly to management"},
+	{StateSubmitted, StateOpen, ConditionOrderFilled, "Order filled successfully"},
+	{StateSubmitted, StateError, ConditionOrderFailed, "Order failed or canceled"},
+	{StateSubmitted, StateClosed, ConditionOrderTimeout, "Order timed out without fill"},
+	{StateOpen, StateFirstDown, ConditionStartManagement, "Begin football system monitoring"},
+	{StateOpen, StateClosed, ConditionPositionClosed, "Position closed directly (profit target hit, time limit, etc.)"},
 
 	// Football System progression
-	{StateFirstDown, StateSecondDown, "strike_challenged", "Price within 5 points of strike"},
-	{StateSecondDown, StateThirdDown, "strike_breached", "Price breached strike"},
-	{StateThirdDown, StateFourthDown, "adjustment_failed", "Adjustment attempt failed"},
+	{StateFirstDown, StateSecondDown, ConditionStrikeChallenged, "Price within 5 points of strike"},
+	{StateSecondDown, StateThirdDown, ConditionStrikeBreached, "Price breached strike"},
+	{StateThirdDown, StateFourthDown, ConditionAdjustmentFailed, "Adjustment attempt failed"},
 
 	// Recovery transitions
-	{StateSecondDown, StateFirstDown, "price_recovered", "Price moved away from strike"},
-	{StateThirdDown, StateFirstDown, "adjustment_successful", "Successfully adjusted position"},
-	{StateFourthDown, StateFirstDown, "recovery_successful", "Position recovered after critical adjustment"},
-	{StateFourthDown, StateFirstDown, "punt_executed", "Punting position in fourth down"},
+	{StateSecondDown, StateFirstDown, ConditionPriceRecovered, "Price moved away from strike"},
+	{StateThirdDown, StateFirstDown, ConditionAdjustmentSuccessful, "Successfully adjusted position"},
+	{StateFourthDown, StateFirstDown, ConditionRecoverySuccessful, "Position recovered after critical adjustment"},
+	{StateFourthDown, StateFirstDown, ConditionPuntExecuted, "Punting position in fourth down"},
 
 	// Exit transitions from any management state
-	{StateFirstDown, StateClosed, "exit_conditions", "Profit target or time limit reached"},
-	{StateSecondDown, StateClosed, "exit_conditions", "Exit conditions met"},
-	{StateThirdDown, StateClosed, "hard_stop", "Hard stop triggered"},
-	{StateFourthDown, StateClosed, "emergency_exit", "Emergency exit required"},
-	{StateAdjusting, StateClosed, "hard_stop", "Hard stop triggered during adjustment"},
-	{StateRolling, StateClosed, "force_close", "Force close during time roll"},
+	{StateFirstDown, StateClosed, ConditionExitConditions, "Profit target or time limit reached"},
+	{StateSecondDown, StateClosed, ConditionExitConditions, "Exit conditions met"},
+	{StateThirdDown, StateClosed, ConditionHardStop, "Hard stop triggered"},
+	{StateFourthDown, StateClosed, ConditionEmergencyExit, "Emergency exit required"},
+	{StateAdjusting, StateClosed, ConditionHardStop, "Hard stop triggered during adjustment"},
+	{StateRolling, StateClosed, ConditionForceClose, "Force close during time roll"},
 
 	// Adjustment transitions
-	{StateSecondDown, StateAdjusting, "roll_untested", "Rolling untested side"},
-	{StateThirdDown, StateAdjusting, "execute_adjustment", "Executing adjustment strategy"},
-	{StateFourthDown, StateRolling, "roll_as_punt", "Rolling to new expiration as punt strategy"},
+	{StateSecondDown, StateAdjusting, ConditionRollUntested, "Rolling untested side"},
+	{StateThirdDown, StateAdjusting, ConditionExecuteAdjustment, "Executing adjustment strategy"},
+	{StateFourthDown, StateRolling, ConditionRollAsPunt, "Rolling to new expiration as punt strategy"},
 
 	// Return from adjustments
-	{StateAdjusting, StateFirstDown, "adjustment_complete", "Adjustment completed successfully"},
-	{StateRolling, StateFirstDown, "roll_complete", "Time roll completed"},
-	{StateAdjusting, StateError, "adjustment_failed", "Adjustment failed"},
-	{StateRolling, StateError, "roll_failed", "Time roll failed"},
+	{StateAdjusting, StateFirstDown, ConditionAdjustmentComplete, "Adjustment completed successfully"},
+	{StateRolling, StateFirstDown, ConditionRollComplete, "Time roll completed"},
+	{StateAdjusting, StateError, ConditionAdjustmentFailed, "Adjustment failed"},
+	{StateRolling, StateError, ConditionRollFailed, "Time roll failed"},
 
 	// Error recovery
-	{StateError, StateIdle, "manual_intervention", "Manual intervention completed"},
-	{StateError, StateClosed, "force_close", "Force close position"},
+	{StateError, StateIdle, ConditionManualIntervention, "Manual intervention completed"},
+	{StateError, StateClosed, ConditionForceClose, "Force close position"},
 }
 
 // transitionLookup provides O(1) lookup for valid transitions: map[fromState][toState][condition]bool
@@ -445,7 +489,7 @@ func (sm *StateMachine) ExecutePunt() error {
 		return fmt.Errorf("punt not allowed: already used")
 	}
 
-	err := sm.Transition(StateFirstDown, "punt_executed")
+	err := sm.Transition(StateFirstDown, ConditionPuntExecuted)
 	if err != nil {
 		return err
 	}
@@ -459,7 +503,7 @@ func (sm *StateMachine) SkipOrderEntry() error {
 		return fmt.Errorf("skip order entry only allowed from Idle state, current state: %s", sm.currentState)
 	}
 
-	return sm.Transition(StateFirstDown, "skip_order_entry")
+	return sm.Transition(StateFirstDown, ConditionSkipOrderEntry)
 }
 
 // Copy creates a deep copy of the StateMachine

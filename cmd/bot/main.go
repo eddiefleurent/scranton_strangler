@@ -158,34 +158,22 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	// Verify broker connection with timeout
 	b.logger.Println("Verifying broker connection...")
-	balanceChan := make(chan float64, 1)
-	errChan := make(chan error, 1)
-
+	type balanceResult struct {
+		balance float64
+		err     error
+	}
+	resCh := make(chan balanceResult, 1)
 	go func() {
-		defer close(balanceChan)
-		defer close(errChan)
-
-		balance, err := b.broker.GetAccountBalance()
-		if err != nil {
-			select {
-			case errChan <- err:
-			case <-time.After(10 * time.Second):
-				// Prevent goroutine leak by timing out send attempt
-			}
-		} else {
-			select {
-			case balanceChan <- balance:
-			case <-time.After(10 * time.Second):
-				// Prevent goroutine leak by timing out send attempt
-			}
-		}
+		bal, err := b.broker.GetAccountBalance()
+		resCh <- balanceResult{balance: bal, err: err}
 	}()
 
 	select {
-	case balance := <-balanceChan:
-		b.logger.Printf("Connected to broker. Account balance: $%.2f", balance)
-	case err := <-errChan:
-		return fmt.Errorf("failed to connect to broker: %w", err)
+	case res := <-resCh:
+		if res.err != nil {
+			return fmt.Errorf("failed to connect to broker: %w", res.err)
+		}
+		b.logger.Printf("Connected to broker. Account balance: $%.2f", res.balance)
 	case <-time.After(10 * time.Second):
 		return fmt.Errorf("broker health check timed out after 10 seconds")
 	case <-ctx.Done():
@@ -193,7 +181,12 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 
 	// Main trading loop
-	ticker := time.NewTicker(b.config.GetCheckInterval())
+	interval := b.config.GetCheckInterval()
+	if interval <= 0 {
+		b.logger.Printf("Warning: invalid check interval %v; defaulting to 30s", interval)
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// Run immediately on start

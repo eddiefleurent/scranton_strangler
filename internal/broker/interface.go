@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/http"
 	"time"
 
 	"github.com/sony/gobreaker"
@@ -67,15 +68,56 @@ func isNotImplementedError(err error) bool {
 // Ensure TradierClient implements Broker at compile time.
 var _ Broker = (*TradierClient)(nil)
 
+// TradierClientOption represents a functional option for configuring TradierClient
+type TradierClientOption func(*TradierClientConfig)
+
+// TradierClientConfig holds configuration options for TradierClient
+type TradierClientConfig struct {
+	httpClient *http.Client
+}
+
+// WithHTTPClient sets a custom HTTP client for the TradierClient
+func WithHTTPClient(client *http.Client) TradierClientOption {
+	return func(config *TradierClientConfig) {
+		config.httpClient = client
+	}
+}
+
+// WithTransport sets a custom HTTP transport for the TradierClient
+func WithTransport(transport http.RoundTripper) TradierClientOption {
+	return func(config *TradierClientConfig) {
+		if config.httpClient == nil {
+			config.httpClient = &http.Client{Transport: transport}
+		} else {
+			config.httpClient.Transport = transport
+		}
+	}
+}
+
 // NewTradierClient creates a new Tradier broker client
 // profitTarget should be a ratio between 0.0 and 1.0 (e.g., 0.5 for 50% profit target)
 func NewTradierClient(apiKey, accountID string, sandbox bool,
-	useOTOCO bool, profitTarget float64) (*TradierClient, error) {
+	useOTOCO bool, profitTarget float64, opts ...TradierClientOption) (*TradierClient, error) {
 	if profitTarget < 0 || profitTarget > 1 {
 		return nil, fmt.Errorf("profitTarget %.3f is outside valid range [0.0, 1.0]", profitTarget)
 	}
+
+	// Apply functional options
+	config := &TradierClientConfig{}
+	for _, opt := range opts {
+		opt(config)
+	}
+
+	// Create TradierAPI with custom client if provided
+	var tradierAPI *TradierAPI
+	if config.httpClient != nil {
+		tradierAPI = NewTradierAPIWithClient(apiKey, accountID, sandbox, config.httpClient)
+	} else {
+		tradierAPI = NewTradierAPI(apiKey, accountID, sandbox)
+	}
+
 	return &TradierClient{
-		TradierAPI:   NewTradierAPI(apiKey, accountID, sandbox),
+		TradierAPI:   tradierAPI,
 		useOTOCO:     useOTOCO,
 		profitTarget: profitTarget,
 	}, nil

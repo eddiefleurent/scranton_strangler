@@ -3,7 +3,12 @@ package broker
 import (
 	"context"
 	"errors"
+	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,9 +219,61 @@ func TestAbsDaysBetween(t *testing.T) {
 	}
 }
 
+// testTransport redirects all requests to a test server for testing
+type testTransport struct {
+	serverURL string
+}
+
+func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Rewrite the URL to point to our test server
+	testURL, _ := url.Parse(t.serverURL + req.URL.Path + "?" + req.URL.RawQuery)
+	req.URL = testURL
+	req.Host = testURL.Host
+
+	// Use the default transport for the actual request
+	defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
+	return defaultTransport.RoundTrip(req)
+}
+
 func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
-	// Verify that TradierClient is created with profitTarget parameter
-	client, err := NewTradierClient("test", "test", true, true, 0.5)
+	// Create a test server to capture HTTP requests
+	var capturedRequestBody string
+	var capturedRequestMethod string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedRequestMethod = r.Method
+
+		// Read the request body
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("Failed to read request body: %v", err)
+			return
+		}
+		capturedRequestBody = string(body)
+
+		// Return a mock successful response
+		response := `{
+			"order": {
+				"id": 12345,
+				"status": "ok",
+				"partner_id": "test-partner"
+			}
+		}`
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(response))
+	}))
+	defer server.Close()
+
+	// Create a custom HTTP client that points to our test server
+	customClient := &http.Client{
+		Transport: &testTransport{
+			serverURL: server.URL,
+		},
+	}
+
+	// Create TradierClient with custom HTTP client and profitTarget
+	client, err := NewTradierClient("test", "test", true, true, 0.5, WithHTTPClient(customClient))
 	if err != nil {
 		t.Fatalf("NewTradierClient failed: %v", err)
 	}
@@ -226,8 +283,27 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 		t.Fatal("NewTradierClient returned nil")
 	}
 
-	// TODO: Add mock HTTP client to verify profitTarget is passed correctly in API calls
-	// This would require refactoring TradierClient to accept an http.Client interface
+	// Test placing a strangle order (this will use OTOCO since useOTOCO is true)
+	_, err = client.PlaceStrangleOrder("SPY", 450.0, 460.0, "2024-12-20", 1, 2.50, true, "day", "test-order")
+	if err != nil {
+		t.Fatalf("PlaceStrangleOrder failed: %v", err)
+	}
+
+	// Verify the request was made correctly
+	if capturedRequestMethod != "POST" {
+		t.Errorf("Expected POST request, got %s", capturedRequestMethod)
+	}
+
+	// Verify profitTarget is included in the request body
+	expectedProfitTarget := "0.500"
+	if !strings.Contains(capturedRequestBody, expectedProfitTarget) {
+		t.Errorf("Expected request body to contain profitTarget %s, got: %s", expectedProfitTarget, capturedRequestBody)
+	}
+
+	// Verify the tag contains the profit target for OTOCO orders
+	if !strings.Contains(capturedRequestBody, "otoco-profit-0.500") {
+		t.Errorf("Expected request body to contain OTOCO tag with profit target, got: %s", capturedRequestBody)
+	}
 }
 
 func TestNewTradierClient_ProfitTargetValidation(t *testing.T) {
