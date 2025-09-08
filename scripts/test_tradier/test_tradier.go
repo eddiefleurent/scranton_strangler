@@ -27,25 +27,35 @@ func main() {
 	fmt.Println("=== Tradier API Complete Test Suite ===")
 	fmt.Println()
 
-	// Check for API credentials
+	// Check for API credentials from environment or config
 	apiKey := os.Getenv("TRADIER_API_KEY")
 	accountID := os.Getenv("TRADIER_ACCOUNT_ID")
 
+	// If not set via environment, try to read from config.yaml
+	if apiKey == "" || accountID == "" {
+		var err error
+		apiKey, accountID, err = readConfigCredentials()
+		if err != nil {
+			fmt.Println("❌ Failed to read credentials from config.yaml")
+			fmt.Println("Error:", err)
+			fmt.Println("\nSetup Instructions:")
+			fmt.Println("1. Update config.yaml with your sandbox API key and account ID")
+			fmt.Println("2. Or export them as environment variables:")
+			fmt.Println("   export TRADIER_API_KEY='your_token_here'")
+			fmt.Println("   export TRADIER_ACCOUNT_ID='your_account_id'")
+			os.Exit(1)
+		}
+	}
+
 	if apiKey == "" {
 		fmt.Println("❌ TRADIER_API_KEY not set")
-		fmt.Println("\nSetup Instructions:")
-		fmt.Println("1. Go to https://developer.tradier.com/")
-		fmt.Println("2. Sign up for a free account")
-		fmt.Println("3. Get your sandbox API token")
-		fmt.Println("4. Get your sandbox account ID")
-		fmt.Println("5. Export them:")
-		fmt.Println("   export TRADIER_API_KEY='your_token_here'")
-		fmt.Println("   export TRADIER_ACCOUNT_ID='your_account_id'")
+		fmt.Println("Please update config.yaml or set TRADIER_API_KEY environment variable")
 		os.Exit(1)
 	}
 
 	if accountID == "" {
 		fmt.Println("⚠️  TRADIER_ACCOUNT_ID not set, some tests will be skipped")
+		fmt.Println("Please update config.yaml or set TRADIER_ACCOUNT_ID environment variable")
 	}
 
 	// Initialize client
@@ -356,4 +366,72 @@ func eq(a, b, eps float64) bool { return math.Abs(a-b) <= eps }
 // Uses regex pattern: ^[A-Z]{1,6}\d{6}[CP]\d{8}$
 func isOptionSymbol(s string) bool {
 	return optionSymbolRegex.MatchString(strings.ToUpper(strings.TrimSpace(s)))
+}
+
+// readConfigCredentials reads API key and account ID from config.yaml
+func readConfigCredentials() (apiKey, accountID string, err error) {
+	// Try to read config.yaml from current directory or parent directory
+	configPaths := []string{"config.yaml", "../config.yaml", "../../config.yaml"}
+
+	var configFile string
+	for _, path := range configPaths {
+		if _, err := os.Stat(path); err == nil {
+			configFile = path
+			break
+		}
+	}
+
+	if configFile == "" {
+		return "", "", fmt.Errorf("config.yaml not found in current or parent directories")
+	}
+
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read config file: %v", err)
+	}
+
+	// Simple YAML parsing to extract broker credentials
+	configContent := string(data)
+	lines := strings.Split(configContent, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "api_key:") && !strings.HasPrefix(line, "#") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				value := strings.TrimSpace(strings.Join(parts[1:], ":"))
+				// Remove comment if present
+				if idx := strings.Index(value, "#"); idx != -1 {
+					value = strings.TrimSpace(value[:idx])
+				}
+				apiKey = strings.Trim(value, `"`) // Remove quotes if present
+			}
+		}
+		if strings.Contains(line, "account_id:") && !strings.HasPrefix(line, "#") {
+			parts := strings.Split(line, ":")
+			if len(parts) >= 2 {
+				value := strings.TrimSpace(strings.Join(parts[1:], ":"))
+				// Remove comment if present
+				if idx := strings.Index(value, "#"); idx != -1 {
+					value = strings.TrimSpace(value[:idx])
+				}
+				accountID = strings.Trim(value, `"`) // Remove quotes if present
+			}
+		}
+
+		// Check if we're past the broker section
+		if strings.Contains(line, "strategy:") {
+			break
+		}
+	}
+
+	if apiKey == "" || apiKey == "YOUR_SANDBOX_API_KEY_HERE" {
+		return "", "", fmt.Errorf("API key not found or is placeholder in config.yaml")
+	}
+
+	if accountID == "" || accountID == "YOUR_ACCOUNT_ID_HERE" {
+		return "", "", fmt.Errorf("account ID not found or is placeholder in config.yaml")
+	}
+
+	return apiKey, accountID, nil
 }
