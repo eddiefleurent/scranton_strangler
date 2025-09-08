@@ -426,14 +426,18 @@ func normalizeDuration(duration string) (string, error) {
 		return "gtc", nil
 	case "day":
 		return "day", nil
+	case "pre", "pre-market", "premarket", "extended-hours-pre", "prehours":
+		return "pre", nil
+	case "post", "post-market", "postmarket", "extended-hours-post", "posthours":
+		return "post", nil
 	}
 
 	// Check against allowed values
 	switch normalized {
-	case "day", "gtc":
+	case "day", "gtc", "pre", "post":
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("invalid duration '%s': must be one of 'day' or 'gtc'", duration)
+		return "", fmt.Errorf("invalid duration '%s': must be one of 'day', 'gtc', 'pre', or 'post'", duration)
 	}
 }
 
@@ -539,8 +543,9 @@ func (t *TradierAPI) placeStrangleOrderInternalCtx(
 	// Use rounded 1/1000th dollars to build OCC strike field
 	// Note: Rounding to 1/1000 and %08d is standard OCC format, but edge cases like
 	// strikes ending in .995 (e.g., 394.995) may round to unexpected values.
-	putStrikeInt := int(math.Round(putStrike * 1000))
-	callStrikeInt := int(math.Round(callStrike * 1000))
+	const eps = 1e-9
+	putStrikeInt := int(math.Round(putStrike*1000 + eps))
+	callStrikeInt := int(math.Round(callStrike*1000 + eps))
 
 	putSymbol := fmt.Sprintf("%s%sP%08d", symbol, expFormatted, putStrikeInt)
 	callSymbol := fmt.Sprintf("%s%sC%08d", symbol, expFormatted, callStrikeInt)

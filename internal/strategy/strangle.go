@@ -516,7 +516,7 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 
 	// Calculate P&L: Credit received - Current value of sold options
 	// (Positive when options lose value, negative when they gain value)
-	totalCreditReceived := position.GetTotalCredit() * float64(position.Quantity) * 100
+	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity) * 100)
 	pnl := totalCreditReceived - currentTotalValue
 
 	return pnl, nil
@@ -690,7 +690,12 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	if bprMultiplier <= 0 {
 		bprMultiplier = 10.0 // Default to 10x if not configured
 	}
+	if bprMultiplier > 50.0 {
+		s.logger.Printf("Warning: BPRMultiplier=%.1f seems high; check config", bprMultiplier)
+	}
 	bprPerContract := creditPerShare * 100 * bprMultiplier
+	s.logger.Printf("Sizing: credit/contract=$%.2f, est BPR/contract=$%.2f, alloc=$%.2f",
+		creditPerShare*100, bprPerContract, allocatedCapital)
 
 	maxContracts := int(allocatedCapital / bprPerContract)
 	if maxContracts < 1 {
@@ -726,7 +731,7 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 	if totalCredit == 0 {
 		return true, ExitReasonError
 	}
-	profitPct := currentPnL / totalCredit
+	profitPct := currentPnL / math.Abs(totalCredit)
 	if profitPct >= s.config.ProfitTarget {
 		return true, ExitReasonProfitTarget
 	}

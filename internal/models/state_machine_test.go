@@ -888,6 +888,101 @@ func TestPosition_FourthDownOptions(t *testing.T) {
 }
 
 // Test state machine reset includes new Fourth Down fields
+// TestStateMachine_SetMaxAdjustments_NegativeValues tests that negative values are clamped to 0
+func TestStateMachine_SetMaxAdjustments_NegativeValues(t *testing.T) {
+	sm := NewStateMachine()
+
+	// Test negative value clamping
+	sm.SetMaxAdjustments(-5)
+	if sm.GetMaxAdjustments() != 0 {
+		t.Errorf("Expected max adjustments to be clamped to 0, got %d", sm.GetMaxAdjustments())
+	}
+
+	// Test positive value works normally
+	sm.SetMaxAdjustments(10)
+	if sm.GetMaxAdjustments() != 10 {
+		t.Errorf("Expected max adjustments to be 10, got %d", sm.GetMaxAdjustments())
+	}
+
+	// Test zero value works
+	sm.SetMaxAdjustments(0)
+	if sm.GetMaxAdjustments() != 0 {
+		t.Errorf("Expected max adjustments to be 0, got %d", sm.GetMaxAdjustments())
+	}
+}
+
+// TestStateMachine_SetMaxTimeRolls_NegativeValues tests that negative values are clamped to 0
+func TestStateMachine_SetMaxTimeRolls_NegativeValues(t *testing.T) {
+	sm := NewStateMachine()
+
+	// Test negative value clamping
+	sm.SetMaxTimeRolls(-3)
+	if sm.GetMaxTimeRolls() != 0 {
+		t.Errorf("Expected max time rolls to be clamped to 0, got %d", sm.GetMaxTimeRolls())
+	}
+
+	// Test positive value works normally
+	sm.SetMaxTimeRolls(5)
+	if sm.GetMaxTimeRolls() != 5 {
+		t.Errorf("Expected max time rolls to be 5, got %d", sm.GetMaxTimeRolls())
+	}
+
+	// Test zero value works
+	sm.SetMaxTimeRolls(0)
+	if sm.GetMaxTimeRolls() != 0 {
+		t.Errorf("Expected max time rolls to be 0, got %d", sm.GetMaxTimeRolls())
+	}
+}
+
+// TestFourthDownConstants tests that the constants are used correctly
+func TestFourthDownConstants(t *testing.T) {
+	sm := NewStateMachine()
+	sm.SetFourthDownOption(OptionA)
+
+	// Set up Fourth Down state by following the proper transition path
+	// Idle -> FirstDown -> SecondDown -> ThirdDown -> FourthDown
+	err := sm.Transition(StateFirstDown, "skip_order_entry")
+	if err != nil {
+		t.Fatalf("Failed to transition to FirstDown: %v", err)
+	}
+
+	err = sm.Transition(StateSecondDown, "strike_challenged")
+	if err != nil {
+		t.Fatalf("Failed to transition to SecondDown: %v", err)
+	}
+
+	err = sm.Transition(StateThirdDown, "strike_breached")
+	if err != nil {
+		t.Fatalf("Failed to transition to ThirdDown: %v", err)
+	}
+
+	err = sm.Transition(StateFourthDown, "adjustment_failed")
+	if err != nil {
+		t.Fatalf("Failed to transition to FourthDown: %v", err)
+	}
+
+	// Test Option A with elapsed days equal to the constant
+	sm.fourthDownStartTime = time.Now().UTC().Add(-time.Duration(fourthDownOptionAMaxDays) * 24 * time.Hour)
+	shouldExit, reason := sm.ShouldEmergencyExit(100, -50, 30, 10, 2.0)
+	if !shouldExit {
+		t.Errorf("Expected emergency exit for Option A at %d days, but got false", fourthDownOptionAMaxDays)
+	}
+	if !strings.Contains(reason, fmt.Sprintf("%d-day limit", fourthDownOptionAMaxDays)) {
+		t.Errorf("Expected reason to contain '%d-day limit', got: %s", fourthDownOptionAMaxDays, reason)
+	}
+
+	// Test Option B with elapsed days equal to the constant
+	sm.SetFourthDownOption(OptionB)
+	sm.fourthDownStartTime = time.Now().UTC().Add(-time.Duration(fourthDownOptionBMaxDays) * 24 * time.Hour)
+	shouldExit, reason = sm.ShouldEmergencyExit(100, -50, 30, 10, 2.0)
+	if !shouldExit {
+		t.Errorf("Expected emergency exit for Option B at %d days, but got false", fourthDownOptionBMaxDays)
+	}
+	if !strings.Contains(reason, fmt.Sprintf("%d-day limit", fourthDownOptionBMaxDays)) {
+		t.Errorf("Expected reason to contain '%d-day limit', got: %s", fourthDownOptionBMaxDays, reason)
+	}
+}
+
 func TestStateMachine_Reset_FourthDownFields(t *testing.T) {
 	sm := NewStateMachine()
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -140,9 +141,10 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 				continue
 			}
 
-			m.logger.Printf("Order %d status: %s", orderID, orderStatus.Order.Status)
+			status := strings.ToLower(orderStatus.Order.Status)
+			m.logger.Printf("Order %d status: %s", orderID, status)
 
-			switch orderStatus.Order.Status {
+			switch status {
 			case "filled":
 				m.logger.Printf("Order filled for position %s", positionID)
 				m.handleOrderFilled(positionID, isEntryOrder)

@@ -162,11 +162,22 @@ func (b *Bot) Run(ctx context.Context) error {
 	errChan := make(chan error, 1)
 
 	go func() {
+		defer close(balanceChan)
+		defer close(errChan)
+
 		balance, err := b.broker.GetAccountBalance()
 		if err != nil {
-			errChan <- err
+			select {
+			case errChan <- err:
+			case <-time.After(10 * time.Second):
+				// Prevent goroutine leak by timing out send attempt
+			}
 		} else {
-			balanceChan <- balance
+			select {
+			case balanceChan <- balance:
+			case <-time.After(10 * time.Second):
+				// Prevent goroutine leak by timing out send attempt
+			}
 		}
 	}()
 
@@ -303,9 +314,6 @@ func (b *Bot) checkExistingPosition(now time.Time) bool {
 				b.logger.Printf("Warning: Failed to update position P&L: %v", err)
 			} else {
 				b.lastPnLUpdate = now
-				if err := b.storage.Save(); err != nil {
-					b.logger.Printf("Warning: Failed to persist P&L update: %v", err)
-				}
 			}
 		}
 	}
@@ -428,9 +436,6 @@ func (b *Bot) executeEntry() {
 	if err := b.storage.SetCurrentPosition(position); err != nil {
 		b.logger.Printf("Failed to save position: %v", err)
 		return
-	}
-	if err := b.storage.Save(); err != nil {
-		b.logger.Printf("Warning: Failed to persist position save: %v", err)
 	}
 
 	b.logger.Printf("Position saved: ID=%s, LimitPrice=$%.2f, DTE=%d",

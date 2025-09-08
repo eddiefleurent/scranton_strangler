@@ -27,9 +27,10 @@ const (
 
 // JSONStorage implements Interface using JSON file persistence
 type JSONStorage struct {
-	data     *Data
-	filepath string
-	mu       sync.RWMutex
+	data            *Data
+	filepath        string
+	storageRoot     string // Cached resolved storage root to reduce syscall overhead
+	mu              sync.RWMutex
 }
 
 // Data represents the complete data structure stored in JSON files.
@@ -65,6 +66,11 @@ func NewJSONStorage(filePath string) (*JSONStorage, error) {
 		},
 	}
 
+	// Cache the resolved storage root to reduce syscall overhead on frequent saves
+	if err := s.cacheStorageRoot(); err != nil {
+		return nil, fmt.Errorf("failed to cache storage root: %w", err)
+	}
+
 	// Create parent directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
 		return nil, fmt.Errorf("creating parent directory: %w", err)
@@ -80,6 +86,26 @@ func NewJSONStorage(filePath string) (*JSONStorage, error) {
 	}
 
 	return s, nil
+}
+
+// cacheStorageRoot resolves and caches the storage root directory to reduce syscall overhead
+func (s *JSONStorage) cacheStorageRoot() error {
+	// Resolve storage root (directory containing the storage file)
+	storageRoot := filepath.Dir(s.filepath)
+	storageRootClean := filepath.Clean(storageRoot)
+	storageRootAbs, err := filepath.Abs(storageRootClean)
+	if err != nil {
+		return fmt.Errorf("failed to resolve storage root: %w", err)
+	}
+
+	// Resolve symlinks in storage root
+	storageRootResolved, err := filepath.EvalSymlinks(storageRootAbs)
+	if err != nil {
+		return fmt.Errorf("failed to resolve symlinks in storage root: %w", err)
+	}
+
+	s.storageRoot = storageRootResolved
+	return nil
 }
 
 // Load reads position data from the JSON file.
@@ -298,19 +324,8 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 
 // validateFilePath ensures the file path is safe and within expected bounds
 func (s *JSONStorage) validateFilePath(path string) error {
-	// Resolve storage root (directory containing the storage file)
-	storageRoot := filepath.Dir(s.filepath)
-	storageRootClean := filepath.Clean(storageRoot)
-	storageRootAbs, err := filepath.Abs(storageRootClean)
-	if err != nil {
-		return fmt.Errorf("failed to resolve storage root: %w", err)
-	}
-
-	// Resolve symlinks in storage root
-	storageRootResolved, err := filepath.EvalSymlinks(storageRootAbs)
-	if err != nil {
-		return fmt.Errorf("failed to resolve symlinks in storage root: %w", err)
-	}
+	// Use cached resolved storage root to reduce syscall overhead
+	storageRootResolved := s.storageRoot
 
 	// Clean and resolve the target path to absolute path
 	targetClean := filepath.Clean(path)
@@ -413,22 +428,31 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	// Position state will be managed by the state machine, not a string field
 	// Map the reason to appropriate state transition condition
 	var condition string
-	currentState := s.data.CurrentPosition.GetCurrentState()
-	switch currentState {
-	case models.StateOpen:
-		condition = ConditionPositionClosed
-	case models.StateSubmitted:
-		condition = ConditionOrderTimeout
-	case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
-		condition = ConditionExitConditions
-	case models.StateError:
+	// Prefer explicit reason when provided
+	switch reason {
+	case "manual":
 		condition = ConditionForceClose
-	case models.StateAdjusting:
+	case "hard_stop":
 		condition = ConditionHardStop
-	case models.StateRolling:
-		condition = ConditionForceClose
-	default:
-		condition = ConditionExitConditions // fallback
+	}
+	if condition == "" {
+		currentState := s.data.CurrentPosition.GetCurrentState()
+		switch currentState {
+		case models.StateOpen:
+			condition = ConditionPositionClosed
+		case models.StateSubmitted:
+			condition = ConditionOrderTimeout
+		case models.StateFirstDown, models.StateSecondDown, models.StateThirdDown, models.StateFourthDown:
+			condition = ConditionExitConditions
+		case models.StateError:
+			condition = ConditionForceClose
+		case models.StateAdjusting:
+			condition = ConditionHardStop
+		case models.StateRolling:
+			condition = ConditionForceClose
+		default:
+			condition = ConditionExitConditions // fallback
+		}
 	}
 
 	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, condition); err != nil {

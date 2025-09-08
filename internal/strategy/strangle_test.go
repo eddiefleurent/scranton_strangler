@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"context"
+	"log"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,7 @@ func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
 			strategy := &StrangleStrategy{
 				broker:     mockClient,
 				config:     cfg,
+				logger:     log.Default(),
 				chainCache: make(map[string]*optionChainCacheEntry),
 			}
 
@@ -103,6 +105,7 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 	}
 
 	strategy := &StrangleStrategy{
+		logger:     log.Default(),
 		chainCache: make(map[string]*optionChainCacheEntry),
 	}
 
@@ -246,6 +249,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			strategy := &StrangleStrategy{
 				broker:     mockClient,
 				config:     cfg,
+				logger:     log.Default(),
 				chainCache: make(map[string]*optionChainCacheEntry),
 			}
 
@@ -334,6 +338,7 @@ func TestStrangleStrategy_findStrikeByDelta(t *testing.T) {
 	}
 
 	strategy := &StrangleStrategy{
+		logger:     log.Default(),
 		chainCache: make(map[string]*optionChainCacheEntry),
 	}
 
@@ -390,6 +395,7 @@ func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
 	strategy := &StrangleStrategy{
 		broker:     mockClient,
 		config:     cfg,
+		logger:     log.Default(),
 		chainCache: make(map[string]*optionChainCacheEntry),
 	}
 

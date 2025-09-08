@@ -1145,20 +1145,36 @@ func TestNormalizeDuration(t *testing.T) {
 		// Valid standard values
 		{"valid day", "day", "day", false},
 		{"valid gtc", "gtc", "gtc", false},
+		{"valid pre", "pre", "pre", false},
+		{"valid post", "post", "post", false},
 
 		// Case normalization
 		{"uppercase day", "DAY", "day", false},
 		{"mixed case gtc", "Gtc", "gtc", false},
+		{"uppercase pre", "PRE", "pre", false},
+		{"mixed case post", "PoSt", "post", false},
 
 		// Whitespace trimming
 		{"leading spaces", " day", "day", false},
 		{"trailing spaces", "day ", "day", false},
 		{"both spaces", " gtc ", "gtc", false},
+		{"leading spaces pre", " pre", "pre", false},
+		{"trailing spaces post", "post ", "post", false},
+		{"both spaces pre", " pre ", "pre", false},
+		{"both spaces post", " post ", "post", false},
 
 		// Common variants mapping
 		{"good-til-cancelled", "good-til-cancelled", "gtc", false},
 		{"goodtilcancelled", "goodtilcancelled", "gtc", false},
 		{"GOOD-TIL-CANCELLED", "GOOD-TIL-CANCELLED", "gtc", false},
+		{"pre-market", "pre-market", "pre", false},
+		{"premarket", "premarket", "pre", false},
+		{"extended-hours-pre", "extended-hours-pre", "pre", false},
+		{"prehours", "prehours", "pre", false},
+		{"post-market", "post-market", "post", false},
+		{"postmarket", "postmarket", "post", false},
+		{"extended-hours-post", "extended-hours-post", "post", false},
+		{"posthours", "posthours", "post", false},
 
 		// Invalid gtd variants (Tradier API doesn't support gtd)
 		{"valid gtd", "gtd", "", true},

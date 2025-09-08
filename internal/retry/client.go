@@ -4,6 +4,7 @@ package retry
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -187,6 +188,11 @@ func (c *Client) calculateNextBackoff(currentBackoff time.Duration) time.Duratio
 func (c *Client) isTransientError(err error) bool {
 	if err == nil {
 		return false
+	}
+
+	// Prefer semantic checks
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
 	}
 
 	errStr := strings.ToLower(err.Error())

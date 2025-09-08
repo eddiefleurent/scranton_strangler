@@ -48,6 +48,10 @@ const (
 	StateAdjusting PositionState = "adjusting"
 	// StateRolling indicates rolling to new expiration
 	StateRolling PositionState = "rolling"
+
+	// Fourth Down option time limits (days)
+	fourthDownOptionAMaxDays = 5
+	fourthDownOptionBMaxDays = 3
 )
 
 // StateTransition defines valid state transitions
@@ -285,11 +289,17 @@ func (sm *StateMachine) CanRoll() bool {
 
 // SetMaxAdjustments sets the maximum number of adjustments allowed
 func (sm *StateMachine) SetMaxAdjustments(max int) {
+	if max < 0 {
+		max = 0
+	}
 	sm.maxAdjustments = max
 }
 
 // SetMaxTimeRolls sets the maximum number of time rolls allowed
 func (sm *StateMachine) SetMaxTimeRolls(max int) {
+	if max < 0 {
+		max = 0
+	}
 	sm.maxTimeRolls = max
 }
 
@@ -393,12 +403,12 @@ func (sm *StateMachine) ShouldEmergencyExit(
 
 		switch sm.fourthDownOption {
 		case OptionA:
-			if elapsedDays >= 5 {
-				return true, "emergency exit: Option A exceeded 5-day limit"
+			if elapsedDays >= fourthDownOptionAMaxDays {
+				return true, fmt.Sprintf("emergency exit: Option A exceeded %d-day limit", fourthDownOptionAMaxDays)
 			}
 		case OptionB:
-			if elapsedDays >= 3 {
-				return true, "emergency exit: Option B exceeded 3-day limit"
+			if elapsedDays >= fourthDownOptionBMaxDays {
+				return true, fmt.Sprintf("emergency exit: Option B exceeded %d-day limit", fourthDownOptionBMaxDays)
 			}
 		case OptionC:
 			if dte <= float64(maxDTE) {
