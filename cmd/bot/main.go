@@ -365,12 +365,13 @@ func (b *Bot) executeEntry() {
 	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
 
 	// Generate deterministic client-order ID for potential deduplication
-	canonicalString := fmt.Sprintf("entry-%s-%s-%.2f-%.2f-%d",
+	canonicalString := fmt.Sprintf("entry-%s-%s-%.2f-%.2f-%d-%.2f",
 		order.Symbol,
 		order.Expiration,
 		order.PutStrike,
 		order.CallStrike,
-		order.Quantity)
+		order.Quantity,
+		px)
 
 	hash := sha256.Sum256([]byte(canonicalString))
 	clientOrderID := "entry-" + hex.EncodeToString(hash[:])[:8]

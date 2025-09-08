@@ -426,7 +426,7 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 
 // ShouldEmergencyExit checks emergency exit conditions.
 // creditBasis MUST use the same unit basis as currentPnL (e.g., total $ P&L incl. qty×100).
-// escalateLossPct is a decimal (e.g., 2.5 = 250%).
+// escalateLossPct is a ratio (e.g., 2.5 means 250%).
 func (sm *StateMachine) ShouldEmergencyExit(
 	creditBasis, currentPnL, dte float64, maxDTE int, escalateLossPct float64) (bool, string) {
 	if creditBasis == 0 {

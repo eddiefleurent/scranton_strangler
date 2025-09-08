@@ -895,6 +895,9 @@ func CalculateStrangleCredit(options []Option, putStrike, callStrike float64) (f
 			callCredit = (opt.Bid + opt.Ask) / 2
 			callFound = true
 		}
+		if putFound && callFound {
+			break
+		}
 	}
 
 	if !putFound || !callFound {
