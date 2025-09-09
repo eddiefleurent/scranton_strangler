@@ -357,3 +357,28 @@ func (m *Manager) timeoutTransitionReason(currentState models.PositionState) str
 		return models.ConditionForceClose // Default fallback for any other states
 	}
 }
+
+// IsOrderTerminal checks if an order has reached a terminal state (filled, canceled, rejected)
+func (m *Manager) IsOrderTerminal(ctx context.Context, orderID int) (bool, error) {
+	// Create a child context with short timeout for the order status check
+	statusCtx, cancel := context.WithTimeout(ctx, m.config.CallTimeout)
+	defer cancel()
+
+	orderStatus, err := m.broker.GetOrderStatusCtx(statusCtx, orderID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get order status: %w", err)
+	}
+
+	if orderStatus == nil || orderStatus.Order.ID == 0 {
+		return false, fmt.Errorf("invalid order status response")
+	}
+
+	status := strings.ToLower(orderStatus.Order.Status)
+	// Terminal states: filled, canceled, cancelled, rejected, expired
+	switch status {
+	case "filled", "canceled", "cancelled", "rejected", "expired":
+		return true, nil
+	default:
+		return false, nil
+	}
+}

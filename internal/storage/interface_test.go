@@ -136,6 +136,11 @@ func testInterface(t *testing.T, storage Interface) {
 	if history[0].GetCurrentState() != models.StateClosed {
 		t.Errorf("Expected closed state in history, got %s", history[0].GetCurrentState())
 	}
+	// Verify deep copy (mutating caller's copy must not affect storage)
+	history[0].CurrentPnL = 9999
+	if storage.GetHistory()[0].CurrentPnL == 9999 {
+		t.Errorf("GetHistory leaked internal state (mutation visible)")
+	}
 
 	// Test statistics
 	stats := storage.GetStatistics()

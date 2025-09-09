@@ -215,32 +215,23 @@ func (m *MockStorage) updateStatistics(pnl float64) {
 			m.statistics.AverageWin = (m.statistics.AverageWin*float64(m.statistics.WinningTrades-1) + pnl) /
 				float64(m.statistics.WinningTrades)
 		}
-	} else {
-		// Treat pnl <= 0 as losses (including breakeven pnl == 0) - consistent with JSONStorage
+	} else if pnl < 0 {
 		m.statistics.LosingTrades++
 		if m.statistics.LosingTrades == 1 {
-			if pnl == 0 {
-				// For breakeven, include zero loss in AverageLoss calculation
-				m.statistics.AverageLoss = 0
-			} else {
-				m.statistics.AverageLoss = -pnl
-			}
+			m.statistics.AverageLoss = -pnl
 		} else {
-			var loss float64
-			if pnl == 0 {
-				// For breakeven, use zero loss
-				loss = 0
-			} else {
-				loss = -pnl
-			}
-			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + loss) /
+			m.statistics.AverageLoss = (m.statistics.AverageLoss*float64(m.statistics.LosingTrades-1) + (-pnl)) /
 				float64(m.statistics.LosingTrades)
 		}
+	} else {
+		// breakeven: do not change win/loss counts or streak
+		m.statistics.BreakEvenTrades++
 	}
 
-	// Calculate win rate as ratio (consistent with JSONStorage, not percentage)
-	if m.statistics.TotalTrades > 0 {
-		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(m.statistics.TotalTrades)
+	// Calculate win rate over decided trades (excluding breakevens)
+	decided := m.statistics.WinningTrades + m.statistics.LosingTrades
+	if decided > 0 {
+		m.statistics.WinRate = float64(m.statistics.WinningTrades) / float64(decided)
 	}
 }
 

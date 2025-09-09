@@ -1,14 +1,525 @@
 package orders
 
 import (
+	"context"
+	"errors"
 	"log"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 )
+
+// mockBrokerForOrders implements broker.Broker for testing
+type mockBrokerForOrders struct {
+	orderStatus *broker.OrderResponse
+	orderError  error
+	callCount   int
+}
+
+func (m *mockBrokerForOrders) GetAccountBalance() (float64, error) {
+	return 10000.0, nil
+}
+
+func (m *mockBrokerForOrders) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	return 10000.0, nil
+}
+
+func (m *mockBrokerForOrders) GetOptionBuyingPower() (float64, error) {
+	return 5000.0, nil
+}
+
+func (m *mockBrokerForOrders) GetPositions() ([]broker.PositionItem, error) {
+	return []broker.PositionItem{}, nil
+}
+
+func (m *mockBrokerForOrders) GetQuote(symbol string) (*broker.QuoteItem, error) {
+	return &broker.QuoteItem{Symbol: symbol, Last: 100.0}, nil
+}
+
+func (m *mockBrokerForOrders) GetExpirations(symbol string) ([]string, error) {
+	return []string{"2024-12-20"}, nil
+}
+
+func (m *mockBrokerForOrders) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return []broker.Option{}, nil
+}
+
+func (m *mockBrokerForOrders) GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return []broker.Option{}, nil
+}
+
+func (m *mockBrokerForOrders) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
+	m.callCount++
+	return m.orderStatus, m.orderError
+}
+
+func (m *mockBrokerForOrders) GetOrderStatusCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	m.callCount++
+	return m.orderStatus, m.orderError
+}
+
+func (m *mockBrokerForOrders) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
+	return &broker.MarketClockResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) IsTradingDay(delayed bool) (bool, error) {
+	return true, nil
+}
+
+func (m *mockBrokerForOrders) GetTickSize(symbol string) (float64, error) {
+	return 0.01, nil
+}
+
+func (m *mockBrokerForOrders) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]broker.HistoricalDataPoint, error) {
+	return []broker.HistoricalDataPoint{}, nil
+}
+
+func (m *mockBrokerForOrders) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
+func TestNewManager_DefaultConfig(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockBroker := &mockBrokerForOrders{}
+	mockStorage := storage.NewMockStorage()
+
+	// Test with nil config (should use defaults)
+	m := NewManager(mockBroker, mockStorage, logger, nil)
+
+	if m.broker != mockBroker {
+		t.Error("broker not set correctly")
+	}
+	if m.storage != mockStorage {
+		t.Error("storage not set correctly")
+	}
+	if m.logger == nil {
+		t.Error("logger should not be nil")
+	}
+	if m.config.PollInterval != DefaultConfig.PollInterval {
+		t.Errorf("expected PollInterval %v, got %v", DefaultConfig.PollInterval, m.config.PollInterval)
+	}
+	if m.config.Timeout != DefaultConfig.Timeout {
+		t.Errorf("expected Timeout %v, got %v", DefaultConfig.Timeout, m.config.Timeout)
+	}
+	if m.config.CallTimeout != DefaultConfig.CallTimeout {
+		t.Errorf("expected CallTimeout %v, got %v", DefaultConfig.CallTimeout, m.config.CallTimeout)
+	}
+}
+
+func TestNewManager_CustomConfig(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockBroker := &mockBrokerForOrders{}
+	mockStorage := storage.NewMockStorage()
+
+	customConfig := Config{
+		PollInterval: 10 * time.Second,
+		Timeout:      10 * time.Minute,
+		CallTimeout:  10 * time.Second,
+	}
+
+	m := NewManager(mockBroker, mockStorage, logger, nil, customConfig)
+
+	if m.config.PollInterval != customConfig.PollInterval {
+		t.Errorf("expected PollInterval %v, got %v", customConfig.PollInterval, m.config.PollInterval)
+	}
+	if m.config.Timeout != customConfig.Timeout {
+		t.Errorf("expected Timeout %v, got %v", customConfig.Timeout, m.config.Timeout)
+	}
+	if m.config.CallTimeout != customConfig.CallTimeout {
+		t.Errorf("expected CallTimeout %v, got %v", customConfig.CallTimeout, m.config.CallTimeout)
+	}
+}
+
+func TestNewManager_ConfigValidation(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockBroker := &mockBrokerForOrders{}
+	mockStorage := storage.NewMockStorage()
+
+	// Test with invalid config values (should be clamped to defaults)
+	invalidConfig := Config{
+		PollInterval: 0,
+		Timeout:      0,
+		CallTimeout:  0,
+	}
+
+	m := NewManager(mockBroker, mockStorage, logger, nil, invalidConfig)
+
+	if m.config.PollInterval != DefaultConfig.PollInterval {
+		t.Errorf("expected PollInterval to be clamped to %v, got %v", DefaultConfig.PollInterval, m.config.PollInterval)
+	}
+	if m.config.Timeout != DefaultConfig.Timeout {
+		t.Errorf("expected Timeout to be clamped to %v, got %v", DefaultConfig.Timeout, m.config.Timeout)
+	}
+	if m.config.CallTimeout != DefaultConfig.CallTimeout {
+		t.Errorf("expected CallTimeout to be clamped to %v, got %v", DefaultConfig.CallTimeout, m.config.CallTimeout)
+	}
+}
+
+func TestNewManager_NilLogger(t *testing.T) {
+	mockBroker := &mockBrokerForOrders{}
+	mockStorage := storage.NewMockStorage()
+
+	// Test with nil logger (should create a default logger)
+	m := NewManager(mockBroker, mockStorage, nil, nil)
+
+	if m.logger == nil {
+		t.Error("logger should not be nil even when passed nil")
+	}
+}
+
+func TestManager_IsOrderTerminal(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockStorage := storage.NewMockStorage()
+	ctx := context.Background()
+
+	tests := []struct {
+		name         string
+		orderStatus  string
+		orderID      int
+		expectError  bool
+		expectResult bool
+	}{
+		{"filled order", "filled", 123, false, true},
+		{"canceled order", "canceled", 123, false, true},
+		{"cancelled order", "cancelled", 123, false, true},
+		{"rejected order", "rejected", 123, false, true},
+		{"expired order", "expired", 123, false, true},
+		{"pending order", "pending", 123, false, false},
+		{"open order", "open", 123, false, false},
+		{"partial order", "partial", 123, false, false},
+		{"unknown status", "unknown", 123, false, false},
+		{"nil response", "", 123, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var orderResp *broker.OrderResponse
+			if tt.orderStatus != "" {
+				orderResp = &broker.OrderResponse{
+					Order: struct {
+						CreateDate        string  `json:"create_date"`
+						Type              string  `json:"type"`
+						Symbol            string  `json:"symbol"`
+						Side              string  `json:"side"`
+						Class             string  `json:"class"`
+						Status            string  `json:"status"`
+						Duration          string  `json:"duration"`
+						TransactionDate   string  `json:"transaction_date"`
+						AvgFillPrice      float64 `json:"avg_fill_price"`
+						ExecQuantity      float64 `json:"exec_quantity"`
+						LastFillPrice     float64 `json:"last_fill_price"`
+						LastFillQuantity  float64 `json:"last_fill_quantity"`
+						RemainingQuantity float64 `json:"remaining_quantity"`
+						ID                int     `json:"id"`
+						Price             float64 `json:"price"`
+						Quantity          float64 `json:"quantity"`
+					}{
+						ID:     tt.orderID,
+						Status: tt.orderStatus,
+					},
+				}
+			}
+
+			mockBroker := &mockBrokerForOrders{
+				orderStatus: orderResp,
+				orderError:  nil,
+			}
+
+			m := NewManager(mockBroker, mockStorage, logger, nil)
+
+			result, err := m.IsOrderTerminal(ctx, tt.orderID)
+
+			if tt.expectError {
+				if err == nil {
+					t.Errorf("expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result != tt.expectResult {
+					t.Errorf("expected result %v, got %v", tt.expectResult, result)
+				}
+			}
+		})
+	}
+}
+
+func TestManager_IsOrderTerminal_BrokerError(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockStorage := storage.NewMockStorage()
+	ctx := context.Background()
+
+	mockBroker := &mockBrokerForOrders{
+		orderStatus: nil,
+		orderError:  errors.New("broker error"),
+	}
+
+	m := NewManager(mockBroker, mockStorage, logger, nil)
+
+	_, err := m.IsOrderTerminal(ctx, 123)
+	if err == nil {
+		t.Error("expected error from broker, got none")
+	}
+	if !strings.Contains(err.Error(), "failed to get order status") {
+		t.Errorf("expected error to contain 'failed to get order status', got: %v", err)
+	}
+}
+
+func TestManager_PollOrderStatus_OrderFilled(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockStorage := storage.NewMockStorage()
+
+	// Create a position in StateSubmitted (entry order)
+	position := models.NewPosition("test-pos", "SPY", 400, 410, time.Now().AddDate(0, 0, 45), 1)
+	err := position.TransitionState(models.StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to set up test position: %v", err)
+	}
+
+	if err := mockStorage.SetCurrentPosition(position); err != nil {
+		t.Fatalf("Failed to set up test position in storage: %v", err)
+	}
+
+	// Mock broker that returns "filled" status immediately
+	orderResp := &broker.OrderResponse{
+		Order: struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		}{
+			ID:     123,
+			Status: "filled",
+		},
+	}
+
+	mockBroker := &mockBrokerForOrders{
+		orderStatus: orderResp,
+		orderError:  nil,
+	}
+
+	m := NewManager(mockBroker, mockStorage, logger, nil, Config{
+		PollInterval: 1 * time.Millisecond, // Very fast polling for test
+		Timeout:      1 * time.Second,
+		CallTimeout:  100 * time.Millisecond,
+	})
+
+	// Start polling in a goroutine
+	done := make(chan bool)
+	go func() {
+		m.PollOrderStatus("test-pos", 123, true) // true = entry order
+		done <- true
+	}()
+
+	// Wait for polling to complete
+	select {
+	case <-done:
+		// Success - polling completed
+	case <-time.After(2 * time.Second):
+		t.Fatal("PollOrderStatus did not complete within timeout")
+	}
+
+	// Verify position was transitioned to StateOpen
+	updatedPosition := mockStorage.GetCurrentPosition()
+	if updatedPosition.GetCurrentState() != models.StateOpen {
+		t.Errorf("Expected position state to be %s, got %s", models.StateOpen, updatedPosition.GetCurrentState())
+	}
+}
+
+func TestManager_PollOrderStatus_OrderCanceled(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockStorage := storage.NewMockStorage()
+
+	// Create a position in StateSubmitted (entry order)
+	position := models.NewPosition("test-pos", "SPY", 400, 410, time.Now().AddDate(0, 0, 45), 1)
+	err := position.TransitionState(models.StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to set up test position: %v", err)
+	}
+
+	if err := mockStorage.SetCurrentPosition(position); err != nil {
+		t.Fatalf("Failed to set up test position in storage: %v", err)
+	}
+
+	// Mock broker that returns "canceled" status
+	orderResp := &broker.OrderResponse{
+		Order: struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		}{
+			ID:     123,
+			Status: "canceled",
+		},
+	}
+
+	mockBroker := &mockBrokerForOrders{
+		orderStatus: orderResp,
+		orderError:  nil,
+	}
+
+	m := NewManager(mockBroker, mockStorage, logger, nil, Config{
+		PollInterval: 1 * time.Millisecond,
+		Timeout:      1 * time.Second,
+		CallTimeout:  100 * time.Millisecond,
+	})
+
+	// Start polling
+	done := make(chan bool)
+	go func() {
+		m.PollOrderStatus("test-pos", 123, true)
+		done <- true
+	}()
+
+	// Wait for polling to complete
+	select {
+	case <-done:
+		// Success
+	case <-time.After(2 * time.Second):
+		t.Fatal("PollOrderStatus did not complete within timeout")
+	}
+
+	// Verify position was transitioned to StateError
+	updatedPosition := mockStorage.GetCurrentPosition()
+	if updatedPosition.GetCurrentState() != models.StateError {
+		t.Errorf("Expected position state to be %s, got %s", models.StateError, updatedPosition.GetCurrentState())
+	}
+}
+
+func TestManager_PollOrderStatus_Timeout(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockStorage := storage.NewMockStorage()
+
+	// Create a position in StateSubmitted
+	position := models.NewPosition("test-pos", "SPY", 400, 410, time.Now().AddDate(0, 0, 45), 1)
+	err := position.TransitionState(models.StateSubmitted, "order_placed")
+	if err != nil {
+		t.Fatalf("Failed to set up test position: %v", err)
+	}
+
+	if err := mockStorage.SetCurrentPosition(position); err != nil {
+		t.Fatalf("Failed to set up test position in storage: %v", err)
+	}
+
+	// Mock broker that always returns pending status
+	orderResp := &broker.OrderResponse{
+		Order: struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		}{
+			ID:     123,
+			Status: "pending",
+		},
+	}
+
+	mockBroker := &mockBrokerForOrders{
+		orderStatus: orderResp,
+		orderError:  nil,
+	}
+
+	m := NewManager(mockBroker, mockStorage, logger, nil, Config{
+		PollInterval: 1 * time.Millisecond,
+		Timeout:      10 * time.Millisecond, // Very short timeout
+		CallTimeout:  5 * time.Millisecond,
+	})
+
+	// Start polling
+	done := make(chan bool)
+	go func() {
+		m.PollOrderStatus("test-pos", 123, true)
+		done <- true
+	}()
+
+	// Wait for polling to complete due to timeout
+	select {
+	case <-done:
+		// Success
+	case <-time.After(1 * time.Second):
+		t.Fatal("PollOrderStatus did not complete within timeout")
+	}
+
+	// Verify position was closed due to timeout
+	currentPosition := mockStorage.GetCurrentPosition()
+	if currentPosition != nil {
+		t.Error("Expected current position to be nil after timeout close")
+	}
+
+	// Verify position exists in history
+	history := mockStorage.GetHistory()
+	if len(history) != 1 {
+		t.Errorf("Expected 1 position in history, got %d", len(history))
+		return
+	}
+
+	if history[0].GetCurrentState() != models.StateClosed {
+		t.Errorf("Expected historical position to be closed, got %s", history[0].GetCurrentState())
+	}
+}
 
 func TestManager_TimeoutTransitionReasons(t *testing.T) {
 	// Test the timeoutTransitionReason function for different states

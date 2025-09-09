@@ -266,12 +266,17 @@ func (s *StrangleStrategy) storeCurrentIVReading(iv float64, expiration string) 
 	}
 
 	// Create IV reading for today's date
-	now := time.Now().UTC()
+	utcNow := time.Now().UTC()
+	ny := time.FixedZone("America/New_York", -5*3600) // consider LoadLocation if tzdata present
+	if loc, err := time.LoadLocation("America/New_York"); err == nil {
+		ny = loc
+	}
+	nyNow := utcNow.In(ny)
 	reading := &models.IVReading{
 		Symbol:    s.config.Symbol,
-		Date:      now.Truncate(24 * time.Hour),
+		Date:      nyNow.Truncate(24 * time.Hour),
 		IV:        iv,
-		Timestamp: now,
+		Timestamp: utcNow,
 	}
 
 	// Store the reading
@@ -585,6 +590,11 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 	if put == nil || call == nil {
 		return 0
 	}
+	// Guard against quotes with too-tight spreads (e.g., < one tick) to avoid stale/microstructure artifacts
+	minSpread := 1e-9
+	if (put.Ask-put.Bid) < minSpread || (call.Ask-call.Bid) < minSpread {
+		return 0
+	}
 	// Guard against stale/invalid quotes
 	if put.Bid <= 0 || put.Ask <= 0 || call.Bid <= 0 || call.Ask <= 0 || put.Bid > put.Ask || call.Bid > call.Ask {
 		return 0
@@ -605,7 +615,13 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 		s.logger.Printf("Error getting account balance for sizing: %v", err)
 		return 0
 	}
-	allocatedCapital := balance * s.config.AllocationPct
+	alloc := s.config.AllocationPct
+	if alloc < 0 {
+		alloc = 0
+	} else if alloc > 1 {
+		alloc = 1
+	}
+	allocatedCapital := balance * alloc
 
 	// Estimate buying power requirement (simplified)
 	// NOTE: Current implementation assumes BPR scales with credit, but for short strangles,

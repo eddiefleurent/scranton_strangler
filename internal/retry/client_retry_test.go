@@ -37,6 +37,10 @@ func (f *fakeBroker) GetAccountBalance() (float64, error) {
 	return 10000.0, nil
 }
 
+func (f *fakeBroker) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	return 10000.0, nil
+}
+
 func (f *fakeBroker) GetOptionBuyingPower() (float64, error) {
 	return 5000.0, nil
 }

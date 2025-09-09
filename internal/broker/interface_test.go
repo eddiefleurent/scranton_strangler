@@ -823,6 +823,14 @@ func (m *MockBroker) GetAccountBalance() (float64, error) {
 	return 1000.0, nil
 }
 
+func (m *MockBroker) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return 0, errors.New("mock broker error")
+	}
+	return 1000.0, nil
+}
+
 func (m *MockBroker) GetOptionBuyingPower() (float64, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {

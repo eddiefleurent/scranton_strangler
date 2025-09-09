@@ -34,7 +34,6 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 		Broker: BrokerConfig{
 			Provider:    "tradier",
 			APIKey:      "test-key",
-			APIEndpoint: "https://sandbox.tradier.com/v1",
 			AccountID:   "test-account",
 			UseOTOCO:    true,
 		},
@@ -189,7 +188,7 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 func TestLoad_UnknownFields(t *testing.T) {
 	const badYAML = `
 environment: { mode: "paper", log_level: "info" }
-broker: { provider: "tradier", api_key: "k", api_endpoint: "x", account_id: "a" }
+broker: { provider: "tradier", api_key: "k", account_id: "a" }
 strategy:
   symbol: "SPY"
   allocation_pct: 0.3
@@ -327,7 +326,6 @@ func TestValidate_StoragePath(t *testing.T) {
 		Broker: BrokerConfig{
 			Provider:    "tradier",
 			APIKey:      "test-key",
-			APIEndpoint: "https://sandbox.tradier.com/v1",
 			AccountID:   "test-account",
 			UseOTOCO:    true,
 		},

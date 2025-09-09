@@ -667,3 +667,78 @@ func TestSaveUnsafe_WritesIndentedJSON(t *testing.T) {
 		t.Fatalf("LastUpdated not refreshed")
 	}
 }
+
+func TestUpdateStatistics_BreakEvenTrades(t *testing.T) {
+	dir := mustTempDir(t)
+	path := filepath.Join(dir, "store.json")
+	s, err := NewJSONStorage(path)
+	if err != nil {
+		t.Fatalf("NewJSONStorage: %v", err)
+	}
+
+	// Test breakeven trade (pnl == 0)
+	s.updateStatistics(0)
+	stats := s.GetStatistics()
+	if stats.TotalTrades != 1 {
+		t.Fatalf("expected TotalTrades=1, got %d", stats.TotalTrades)
+	}
+	if stats.BreakEvenTrades != 1 {
+		t.Fatalf("expected BreakEvenTrades=1, got %d", stats.BreakEvenTrades)
+	}
+	if stats.WinningTrades != 0 {
+		t.Fatalf("expected WinningTrades=0, got %d", stats.WinningTrades)
+	}
+	if stats.LosingTrades != 0 {
+		t.Fatalf("expected LosingTrades=0, got %d", stats.LosingTrades)
+	}
+	if stats.TotalPnL != 0 {
+		t.Fatalf("expected TotalPnL=0, got %v", stats.TotalPnL)
+	}
+	if stats.WinRate != 0 {
+		t.Fatalf("expected WinRate=0 (no decided trades), got %v", stats.WinRate)
+	}
+
+	// Test win after breakeven
+	s.updateStatistics(10)
+	stats = s.GetStatistics()
+	if stats.TotalTrades != 2 {
+		t.Fatalf("expected TotalTrades=2, got %d", stats.TotalTrades)
+	}
+	if stats.BreakEvenTrades != 1 {
+		t.Fatalf("expected BreakEvenTrades=1, got %d", stats.BreakEvenTrades)
+	}
+	if stats.WinningTrades != 1 {
+		t.Fatalf("expected WinningTrades=1, got %d", stats.WinningTrades)
+	}
+	if stats.LosingTrades != 0 {
+		t.Fatalf("expected LosingTrades=0, got %d", stats.LosingTrades)
+	}
+	if stats.TotalPnL != 10 {
+		t.Fatalf("expected TotalPnL=10, got %v", stats.TotalPnL)
+	}
+	if stats.WinRate != 1.0 {
+		t.Fatalf("expected WinRate=1.0 (1 win out of 1 decided trade), got %v", stats.WinRate)
+	}
+
+	// Test loss after breakeven
+	s.updateStatistics(-5)
+	stats = s.GetStatistics()
+	if stats.TotalTrades != 3 {
+		t.Fatalf("expected TotalTrades=3, got %d", stats.TotalTrades)
+	}
+	if stats.BreakEvenTrades != 1 {
+		t.Fatalf("expected BreakEvenTrades=1, got %d", stats.BreakEvenTrades)
+	}
+	if stats.WinningTrades != 1 {
+		t.Fatalf("expected WinningTrades=1, got %d", stats.WinningTrades)
+	}
+	if stats.LosingTrades != 1 {
+		t.Fatalf("expected LosingTrades=1, got %d", stats.LosingTrades)
+	}
+	if stats.TotalPnL != 5 {
+		t.Fatalf("expected TotalPnL=5, got %v", stats.TotalPnL)
+	}
+	if stats.WinRate != 0.5 {
+		t.Fatalf("expected WinRate=0.5 (1 win out of 2 decided trades), got %v", stats.WinRate)
+	}
+}

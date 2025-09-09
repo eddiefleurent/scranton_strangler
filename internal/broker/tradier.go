@@ -486,6 +486,18 @@ func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	return &response, nil
 }
 
+// GetBalanceCtx retrieves account balance information with context support.
+func (t *TradierAPI) GetBalanceCtx(ctx context.Context) (*BalanceResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/balances", t.baseURL, t.accountID)
+
+	var response BalanceResponse
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
 // GetMarketClock retrieves the current market clock status.
 func (t *TradierAPI) GetMarketClock(delayed bool) (*MarketClockResponse, error) {
 	endpoint := fmt.Sprintf("%s/markets/clock?delayed=%t", t.baseURL, delayed)

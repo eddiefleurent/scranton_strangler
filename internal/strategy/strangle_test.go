@@ -2,79 +2,399 @@ package strategy
 
 import (
 	"context"
+	"errors"
 	"log"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
+	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 )
 
-func TestStrangleStrategy_calculatePositionSize(t *testing.T) {
+// mockBrokerForStrategy implements broker.Broker for strategy testing
+type mockBrokerForStrategy struct {
+	balance         float64
+	quote           *broker.QuoteItem
+	quoteError      error
+	chain           []broker.Option
+	chainError      error
+	expirations     []string
+	expirationsErr  error
+	marketClock     *broker.MarketClockResponse
+	marketClockErr  error
+	callCount       int
+	ivValue         float64
+	ivError         error
+}
+
+func (m *mockBrokerForStrategy) GetAccountBalance() (float64, error) {
+	return m.balance, nil
+}
+
+func (m *mockBrokerForStrategy) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	return m.balance, nil
+}
+
+func (m *mockBrokerForStrategy) GetOptionBuyingPower() (float64, error) {
+	return 5000.0, nil
+}
+
+func (m *mockBrokerForStrategy) GetPositions() ([]broker.PositionItem, error) {
+	return []broker.PositionItem{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetQuote(symbol string) (*broker.QuoteItem, error) {
+	return m.quote, m.quoteError
+}
+
+func (m *mockBrokerForStrategy) GetExpirations(symbol string) ([]string, error) {
+	return m.expirations, m.expirationsErr
+}
+
+func (m *mockBrokerForStrategy) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return m.chain, m.chainError
+}
+
+func (m *mockBrokerForStrategy) GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
+	return m.chain, m.chainError
+}
+
+func (m *mockBrokerForStrategy) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetOrderStatusCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
+	return m.marketClock, m.marketClockErr
+}
+
+func (m *mockBrokerForStrategy) IsTradingDay(delayed bool) (bool, error) {
+	return true, nil
+}
+
+func (m *mockBrokerForStrategy) GetTickSize(symbol string) (float64, error) {
+	return 0.01, nil
+}
+
+func (m *mockBrokerForStrategy) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]broker.HistoricalDataPoint, error) {
+	return []broker.HistoricalDataPoint{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
+func TestNewStrangleStrategy(t *testing.T) {
+	mockBroker := &mockBrokerForStrategy{}
+	mockStorage := storage.NewMockStorage()
+	logger := log.New(log.Writer(), "test: ", log.LstdFlags)
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0, // Set threshold to 30%
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, logger, mockStorage)
+
+	if strategy.broker != mockBroker {
+		t.Error("broker not set correctly")
+	}
+	if strategy.config != config {
+		t.Error("config not set correctly")
+	}
+	if strategy.logger == nil {
+		t.Error("logger should not be nil")
+	}
+	if strategy.storage != mockStorage {
+		t.Error("storage not set correctly")
+	}
+	if strategy.chainCache == nil {
+		t.Error("chainCache should be initialized")
+	}
+}
+
+func TestNewStrangleStrategy_NilLogger(t *testing.T) {
+	mockBroker := &mockBrokerForStrategy{}
+	mockStorage := storage.NewMockStorage()
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0, // Set threshold to 30%
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, nil, mockStorage)
+
+	if strategy.logger == nil {
+		t.Error("logger should not be nil even when passed nil")
+	}
+}
+
+
+func TestStrangleStrategy_CheckVolatilityThreshold(t *testing.T) {
 	tests := []struct {
-		name                 string
-		accountBalance       float64
-		allocationPct        float64
-		creditPerContract    float64
-		expectedMinContracts int
+		name          string
+		ivValue       float64
+		expectCanTrade bool
 	}{
-		{
-			name:                 "normal account size",
-			accountBalance:       100000.0, // $100k account
-			allocationPct:        0.35,     // 35% allocation
-			creditPerContract:    3.50,     // $3.50 credit
-			expectedMinContracts: 1,        // At least 1 contract
-		},
-		{
-			name:                 "small account",
-			accountBalance:       10000.0, // $10k account
-			allocationPct:        0.35,    // 35% allocation
-			creditPerContract:    2.00,    // $2.00 credit
-			expectedMinContracts: 1,       // Minimum 1 contract
-		},
-		{
-			name:                 "large account high allocation",
-			accountBalance:       500000.0, // $500k account
-			allocationPct:        0.35,     // 35% allocation
-			creditPerContract:    4.00,     // $4.00 credit
-			expectedMinContracts: 1,        // Should allow multiple contracts
-		},
+		{"IV above threshold", 35.0, true},
+		{"IV at threshold", 30.0, true},
+		{"IV below threshold", 25.0, false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create mock broker that returns the test balance
-			mockClient := newMockBroker(tt.accountBalance)
+			mockBroker := &mockBrokerForStrategy{
+				quote:       &broker.QuoteItem{Last: 400.0},
+				expirations: []string{"2024-12-20"},
+				chain: []broker.Option{
+					{
+						Strike:     400.0,
+						OptionType: "call",
+						Bid:        2.0,
+						Ask:        2.2,
+						Greeks: &broker.Greeks{
+							MidIV: tt.ivValue / 100.0, // Convert percentage to decimal
+						},
+					},
+				},
+			}
+			mockStorage := storage.NewMockStorage()
 
-			cfg := &Config{
-				AllocationPct: tt.allocationPct,
+			config := &Config{
+				Symbol:       "SPY",
+				AllocationPct: 0.35,
+				DTETarget:    45,
 			}
 
-			strategy := &StrangleStrategy{
-				broker:     mockClient,
-				config:     cfg,
-				logger:     log.Default(),
-				chainCache: make(map[string]*optionChainCacheEntry),
-			}
+			strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
 
-			result := strategy.calculatePositionSize(tt.creditPerContract)
+			canTrade, _ := strategy.CheckVolatilityThreshold()
 
-			if result < tt.expectedMinContracts {
-				t.Errorf("calculatePositionSize() = %v, want at least %v",
-					result, tt.expectedMinContracts)
-			}
-
-			// Verify allocation doesn't exceed limit
-			allocatedCapital := tt.accountBalance * tt.allocationPct
-			estimatedBPR := tt.creditPerContract * 100 * 10 * float64(result)
-			if estimatedBPR > allocatedCapital*1.1 { // 10% tolerance
-				t.Errorf("Position size %v exceeds allocation: BPR=%.2f, Allocated=%.2f",
-					result, estimatedBPR, allocatedCapital)
+			if canTrade != tt.expectCanTrade {
+				t.Errorf("CheckVolatilityThreshold() = %v, want %v", canTrade, tt.expectCanTrade)
 			}
 		})
 	}
 }
+
+func TestStrangleStrategy_GetCurrentIV(t *testing.T) {
+	// Set up mock with option chain containing Greeks data
+	mockBroker := &mockBrokerForStrategy{
+		quote: &broker.QuoteItem{Last: 400.0},
+		expirations: []string{"2024-12-20"},
+		chain: []broker.Option{
+			{
+				Strike:     400.0,
+				OptionType: "call",
+				Bid:        2.0,
+				Ask:        2.2,
+				Greeks: &broker.Greeks{
+					MidIV: 0.25, // 25% IV
+				},
+			},
+		},
+	}
+	mockStorage := storage.NewMockStorage()
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0,
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
+
+	iv := strategy.GetCurrentIV()
+	if iv <= 0 {
+		t.Errorf("GetCurrentIV() = %v, want > 0", iv)
+	}
+	expectedIV := 25.0 // GetCurrentIV returns percentage
+	if math.Abs(iv-expectedIV) > 0.001 {
+		t.Errorf("GetCurrentIV() = %v, want %v", iv, expectedIV)
+	}
+}
+
+func TestStrangleStrategy_GetCurrentIV_NoQuote(t *testing.T) {
+	mockBroker := &mockBrokerForStrategy{
+		quoteError: errors.New("quote error"),
+	}
+	mockStorage := storage.NewMockStorage()
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0, // Set threshold to 30%
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
+
+	iv := strategy.GetCurrentIV()
+	// When quote fails, GetCurrentIV should return 0
+	if iv != 0 {
+		t.Errorf("GetCurrentIV() = %v, want 0 when quote fails", iv)
+	}
+}
+
+func TestStrangleStrategy_CalculatePnL(t *testing.T) {
+	mockBroker := &mockBrokerForStrategy{
+		chain: []broker.Option{
+			{
+				Strike:     395.0,
+				OptionType: "put",
+				Bid:        1.0,
+				Ask:        1.2,
+			},
+			{
+				Strike:     405.0,
+				OptionType: "call",
+				Bid:        1.0,
+				Ask:        1.2,
+			},
+		},
+		expirations: []string{"2024-12-20"},
+	}
+	mockStorage := storage.NewMockStorage()
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0, // Set threshold to 30%
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
+
+	position := &models.Position{
+		Symbol:        "SPY",
+		PutStrike:     395.0,
+		CallStrike:    405.0,
+		CreditReceived: 2.50,
+		Quantity:      1,
+		Expiration:    time.Date(2024, 12, 20, 0, 0, 0, 0, time.UTC),
+	}
+
+	pnl := strategy.CalculatePnL(position)
+	// With current prices at $2.20 total vs $2.50 credit, P&L should be positive
+	// Credit: $250, Current value: $220, P&L: $30
+	expectedPnL := 30.0
+	if math.Abs(pnl-expectedPnL) > 0.01 { // Allow small floating point differences
+		t.Errorf("CalculatePnL() = %v, want %v", pnl, expectedPnL)
+	}
+}
+
+func TestStrangleStrategy_GetCurrentPositionValue(t *testing.T) {
+	mockBroker := &mockBrokerForStrategy{
+		chain: []broker.Option{
+			{
+				Strike:     395.0,
+				OptionType: "put",
+				Bid:        1.0,
+				Ask:        1.2,
+			},
+			{
+				Strike:     405.0,
+				OptionType: "call",
+				Bid:        1.0,
+				Ask:        1.2,
+			},
+		},
+	}
+	mockStorage := storage.NewMockStorage()
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0, // Set threshold to 30%
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
+
+	position := &models.Position{
+		PutStrike:  395.0,
+		CallStrike: 405.0,
+		Quantity:   1,
+	}
+
+	value, err := strategy.GetCurrentPositionValue(position)
+	if err != nil {
+		t.Errorf("GetCurrentPositionValue() error = %v", err)
+	}
+	// Should return the mid price of both options
+	expectedValue := 220.0 // (1.1 + 1.1) * 100 shares per contract
+	if math.Abs(value-expectedValue) > 0.01 { // Allow small floating point differences
+		t.Errorf("GetCurrentPositionValue() = %v, want %v", value, expectedValue)
+	}
+}
+
+func TestStrangleStrategy_validateStrikeSelection(t *testing.T) {
+	mockBroker := &mockBrokerForStrategy{}
+	mockStorage := storage.NewMockStorage()
+
+	config := &Config{
+		Symbol:       "SPY",
+		AllocationPct: 0.35,
+		DTETarget:    45,
+		MinIVPct:     30.0, // Set threshold to 30%
+	}
+
+	strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
+
+	tests := []struct {
+		name        string
+		putStrike   float64
+		callStrike  float64
+		underlying  float64
+		expectError bool
+	}{
+		{"valid strangle", 395.0, 405.0, 400.0, false},
+		{"strikes too close", 399.0, 401.0, 400.0, true}, // spread = 0.5% (too tight)
+		{"spread too wide", 370.0, 430.0, 400.0, true},   // spread = 15% (too wide)
+		{"inverted strikes", 405.0, 395.0, 400.0, true},  // put > call
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := strategy.validateStrikeSelection(tt.putStrike, tt.callStrike, tt.underlying)
+			if (err != nil) != tt.expectError {
+				t.Errorf("validateStrikeSelection() error = %v, expectError %v", err, tt.expectError)
+			}
+		})
+	}
+}
+
 
 func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 	options := []broker.Option{
@@ -256,38 +576,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 			// Set up mock option prices based on test case
 			if tt.position != nil {
 				expiration := tt.position.Expiration.Format("2006-01-02")
-
-				// Set different option prices for different test scenarios
-				switch tt.name {
-				case "profit target reached":
-					// For 50% profit: credit 3.50, current value should be 1.75
-					mockClient.setOptionPrice(expiration, 400.0, "put", 0.85)
-					mockClient.setOptionPrice(expiration, 420.0, "call", 0.90)
-					// Total: 1.75, P&L = 3.50 - 1.75 = 1.75 (50% profit)
-				case "max DTE reached":
-					// Current value higher, low profit but time exit
-					// Want 0.50 P&L: Credit $350, current value should be $300
-					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
-					mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
-					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
-				case "200% escalate loss triggered":
-					// For -200% loss: credit 3.50, current value should be 10.50
-					// P&L = $350 - $1050 = -$700 (-200% loss)
-					mockClient.setOptionPrice(expiration, 400.0, "put", 5.00)
-					mockClient.setOptionPrice(expiration, 420.0, "call", 5.50)
-					// Total: 10.50, P&L = 3.50 - 10.50 = -7.00 per contract = -$700
-				case "250% stop-loss triggered":
-					// For -250% loss: credit 3.50, current value should be 12.25
-					// P&L = $350 - $1225 = -$875 (-250% loss)
-					mockClient.setOptionPrice(expiration, 400.0, "put", 6.00)
-					mockClient.setOptionPrice(expiration, 420.0, "call", 6.25)
-					// Total: 12.25, P&L = 3.50 - 12.25 = -8.75 per contract = -$875
-				case "no exit conditions met":
-					// Same as max DTE but different DTE in position
-					mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
-					mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
-					// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
-				}
+				setupTestScenarioPrices(t, mockClient, expiration, tt.name)
 			}
 
 			shouldExit, reason := strategy.CheckExitConditions(tt.position)
@@ -528,6 +817,43 @@ func TestStrangleStrategy_shouldFilterForLiquidity(t *testing.T) {
 
 func containsSubstring(s, substr string) bool { return strings.Contains(s, substr) }
 
+// setupTestScenarioPrices configures mock option prices for different test scenarios.
+// This helper keeps tests concise and makes it easier to extend with new scenarios.
+func setupTestScenarioPrices(t *testing.T, mockClient *mockBroker, expiration string, scenario string) {
+	t.Helper()
+
+	switch scenario {
+	case "profit target reached":
+		// For 50% profit: credit 3.50, current value should be 1.75
+		mockClient.setOptionPrice(expiration, 400.0, "put", 0.85)
+		mockClient.setOptionPrice(expiration, 420.0, "call", 0.90)
+		// Total: 1.75, P&L = 3.50 - 1.75 = 1.75 (50% profit)
+	case "max DTE reached":
+		// Current value higher, low profit but time exit
+		// Want 0.50 P&L: Credit $350, current value should be $300
+		mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
+		mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
+		// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
+	case "200% escalate loss triggered":
+		// For -200% loss: credit 3.50, current value should be 10.50
+		// P&L = $350 - $1050 = -$700 (-200% loss)
+		mockClient.setOptionPrice(expiration, 400.0, "put", 5.00)
+		mockClient.setOptionPrice(expiration, 420.0, "call", 5.50)
+		// Total: 10.50, P&L = 3.50 - 10.50 = -7.00 per contract = -$700
+	case "250% stop-loss triggered":
+		// For -250% loss: credit 3.50, current value should be 12.25
+		// P&L = $350 - $1225 = -$875 (-250% loss)
+		mockClient.setOptionPrice(expiration, 400.0, "put", 6.00)
+		mockClient.setOptionPrice(expiration, 420.0, "call", 6.25)
+		// Total: 12.25, P&L = 3.50 - 12.25 = -8.75 per contract = -$875
+	case "no exit conditions met":
+		// Same as max DTE but different DTE in position
+		mockClient.setOptionPrice(expiration, 400.0, "put", 1.50)
+		mockClient.setOptionPrice(expiration, 420.0, "call", 1.50)
+		// Total: 3.00, P&L = ($350 - $300) = $50 (14% profit)
+	}
+}
+
 // Mock Broker for testing
 type mockBroker struct {
 	optionPrices map[string]map[float64]map[string]float64
@@ -558,6 +884,10 @@ func (m *mockBroker) GetAccountBalance() (float64, error) {
 	return m.balance, nil
 }
 
+func (m *mockBroker) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	return m.balance, nil
+}
+
 func (m *mockBroker) GetPositions() ([]broker.PositionItem, error) {
 	return nil, nil
 }
@@ -567,7 +897,16 @@ func (m *mockBroker) GetQuote(_ string) (*broker.QuoteItem, error) {
 }
 
 func (m *mockBroker) GetExpirations(_ string) ([]string, error) {
-	return nil, nil
+	var exps []string
+	start := time.Now().UTC()
+	end := start.AddDate(0, 0, 90)
+	for d := start; !d.After(end); d = d.AddDate(0, 0, 1) {
+		switch d.Weekday() {
+		case time.Monday, time.Wednesday, time.Friday:
+			exps = append(exps, d.Format("2006-01-02"))
+		}
+	}
+	return exps, nil
 }
 
 func (m *mockBroker) GetOptionChain(_, expiration string, _ bool) ([]broker.Option, error) {

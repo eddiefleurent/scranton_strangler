@@ -40,6 +40,7 @@ type Statistics struct {
 	TotalTrades        int     `json:"total_trades"`
 	WinningTrades      int     `json:"winning_trades"`
 	LosingTrades       int     `json:"losing_trades"`
+	BreakEvenTrades    int     `json:"break_even_trades"`
 	WinRate            float64 `json:"win_rate"`
 	TotalPnL           float64 `json:"total_pnl"`
 	AverageWin         float64 `json:"average_win"`
@@ -58,14 +59,14 @@ func NewJSONStorage(filePath string) (*JSONStorage, error) {
 		},
 	}
 
-	// Cache the resolved storage root to reduce syscall overhead on frequent saves
-	if err := s.cacheStorageRoot(); err != nil {
-		return nil, fmt.Errorf("failed to cache storage root: %w", err)
-	}
-
 	// Create parent directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o700); err != nil {
 		return nil, fmt.Errorf("creating parent directory: %w", err)
+	}
+
+	// Cache the resolved storage root to reduce syscall overhead on frequent saves
+	if err := s.cacheStorageRoot(); err != nil {
+		return nil, fmt.Errorf("failed to cache storage root: %w", err)
 	}
 
 	// Load existing data if file exists; fail on unexpected errors
@@ -140,6 +141,44 @@ func (s *JSONStorage) Save() error {
 	return s.saveUnsafe()
 }
 
+// createDataSnapshot creates a deep copy of the current data for atomic saving
+func (s *JSONStorage) createDataSnapshot() *Data {
+	snapshot := &Data{
+		LastUpdated: s.data.LastUpdated, // Will be updated by caller
+		DailyPnL:    make(map[string]float64),
+		Statistics:  &Statistics{},
+		History:     make([]models.Position, len(s.data.History)),
+		IVReadings:  make([]models.IVReading, len(s.data.IVReadings)),
+	}
+
+	// Deep copy CurrentPosition if it exists
+	if s.data.CurrentPosition != nil {
+		snapshot.CurrentPosition = clonePosition(s.data.CurrentPosition)
+	}
+
+	// Deep copy DailyPnL
+	for k, v := range s.data.DailyPnL {
+		snapshot.DailyPnL[k] = v
+	}
+
+	// Deep copy Statistics
+	if s.data.Statistics != nil {
+		*snapshot.Statistics = *s.data.Statistics
+	}
+
+	// Deep copy History
+	for i := range s.data.History {
+		if cloned := clonePosition(&s.data.History[i]); cloned != nil {
+			snapshot.History[i] = *cloned
+		}
+	}
+
+	// Deep copy IVReadings
+	copy(snapshot.IVReadings, s.data.IVReadings)
+
+	return snapshot
+}
+
 // saveUnsafe performs the actual save operation without acquiring locks
 // Must be called with mutex already held
 func (s *JSONStorage) saveUnsafe() error {
@@ -147,7 +186,9 @@ func (s *JSONStorage) saveUnsafe() error {
 		return fmt.Errorf("invalid storage path: %w", err)
 	}
 
-	s.data.LastUpdated = time.Now().UTC()
+	// Create a snapshot of the current data to avoid mutation-on-failure risk
+	snapshot := s.createDataSnapshot()
+	snapshot.LastUpdated = time.Now().UTC()
 
 	// Create temp file in the same directory as the target file to avoid EXDEV
 	dir := filepath.Dir(s.filepath)
@@ -178,10 +219,10 @@ func (s *JSONStorage) saveUnsafe() error {
 		}
 	}()
 
-	// Encode directly to the temp file to reduce memory usage
+	// Encode snapshot to the temp file to reduce memory usage
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(s.data); err != nil {
+	if err := enc.Encode(snapshot); err != nil {
 		return err
 	}
 	if err := f.Sync(); err != nil {
@@ -220,6 +261,9 @@ func (s *JSONStorage) saveUnsafe() error {
 			return fmt.Errorf("failed to sync parent directory: %w", err)
 		}
 	}
+
+	// Only update in-memory state if write succeeded
+	s.data.LastUpdated = snapshot.LastUpdated
 
 	return nil
 }
@@ -506,7 +550,7 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 			totalWins := stats.AverageWin*float64(stats.WinningTrades-1) + pnl
 			stats.AverageWin = totalWins / float64(stats.WinningTrades)
 		}
-	} else {
+	} else if pnl < 0 {
 		stats.LosingTrades++
 		if stats.CurrentStreak <= 0 {
 			stats.CurrentStreak--
@@ -519,11 +563,15 @@ func (s *JSONStorage) updateStatistics(pnl float64) {
 			totalLosses := stats.AverageLoss*float64(stats.LosingTrades-1) + (-pnl) // Use absolute magnitude
 			stats.AverageLoss = totalLosses / float64(stats.LosingTrades)
 		}
+	} else {
+		// breakeven: do not change win/loss counts or streak
+		stats.BreakEvenTrades++
 	}
 
-	// Update win rate
-	if stats.TotalTrades > 0 {
-		stats.WinRate = float64(stats.WinningTrades) / float64(stats.TotalTrades)
+	// Update win rate over decided trades (excluding breakevens)
+	decided := stats.WinningTrades + stats.LosingTrades
+	if decided > 0 {
+		stats.WinRate = float64(stats.WinningTrades) / float64(decided)
 	}
 
 	// Update max single trade loss
@@ -554,9 +602,9 @@ func (s *JSONStorage) GetHistory() []models.Position {
 	defer s.mu.RUnlock()
 	// Return a deep copy to prevent external mutation of internal state
 	history := make([]models.Position, len(s.data.History))
-	for i, pos := range s.data.History {
+	for i := range s.data.History {
 		// Create a deep copy of each position
-		cloned := clonePosition(&pos)
+		cloned := clonePosition(&s.data.History[i])
 		if cloned != nil {
 			history[i] = *cloned
 		}

@@ -16,6 +16,7 @@ import (
 type Broker interface {
 	// Account operations
 	GetAccountBalance() (float64, error)
+	GetAccountBalanceCtx(ctx context.Context) (float64, error)
 	GetOptionBuyingPower() (float64, error)
 	GetPositions() ([]PositionItem, error)
 
@@ -128,6 +129,15 @@ func NewTradierClient(apiKey, accountID string, sandbox bool,
 // GetAccountBalance returns the total account equity
 func (t *TradierClient) GetAccountBalance() (float64, error) {
 	balance, err := t.GetBalance()
+	if err != nil {
+		return 0, err
+	}
+	return balance.Balances.TotalEquity, nil
+}
+
+// GetAccountBalanceCtx returns the total account equity with context support
+func (t *TradierClient) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	balance, err := t.GetBalanceCtx(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -410,6 +420,13 @@ func NewCircuitBreakerBrokerWithSettings(broker Broker, settings CircuitBreakerS
 // GetAccountBalance wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) GetAccountBalance() (float64, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) { return b.GetAccountBalance() })
+}
+
+// GetAccountBalanceCtx wraps the underlying broker call with circuit breaker and context
+func (c *CircuitBreakerBroker) GetAccountBalanceCtx(ctx context.Context) (float64, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) {
+		return b.GetAccountBalanceCtx(ctx)
+	})
 }
 
 // GetOptionBuyingPower wraps the underlying broker call with circuit breaker

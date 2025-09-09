@@ -43,7 +43,6 @@ type EnvironmentConfig struct {
 type BrokerConfig struct {
 	Provider    string `yaml:"provider"`
 	APIKey      string `yaml:"api_key"`
-	APIEndpoint string `yaml:"api_endpoint"`
 	AccountID   string `yaml:"account_id"`
 	UseOTOCO    bool   `yaml:"use_otoco"` // Use OTOCO orders for preset exits
 	// OTOCOPreview enables preview validation for OTOCO orders before placement
@@ -146,6 +145,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("environment.mode must be 'paper' or 'live'")
 	}
 
+	// Log level validation
+	switch strings.ToLower(c.Environment.LogLevel) {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("environment.log_level must be one of: debug, info, warn, error")
+	}
+
 	// OTOCO validation - reject OTOCO flags in live mode as they are unimplemented no-ops
 	if c.Environment.Mode == "live" && (c.Broker.UseOTOCO || c.Broker.OTOCOPreview || c.Broker.OTOCOFallback) {
 		return fmt.Errorf("OTOCO flags are not allowed in live mode; these features are unimplemented no-ops")
@@ -157,6 +163,13 @@ func (c *Config) Validate() error {
 	}
 	if c.Broker.AccountID == "" {
 		return fmt.Errorf("broker.account_id is required")
+	}
+
+	// Provider validation
+	switch strings.ToLower(c.Broker.Provider) {
+	case "tradier":
+	default:
+		return fmt.Errorf("broker.provider must be 'tradier'")
 	}
 
 	// Strategy validation
@@ -195,6 +208,12 @@ func (c *Config) Validate() error {
 	if c.Strategy.Entry.MinCredit <= 0 {
 		return fmt.Errorf("strategy.entry.min_credit must be > 0")
 	}
+	if c.Strategy.Entry.MinVolume < 0 {
+		return fmt.Errorf("strategy.entry.min_volume must be >= 0")
+	}
+	if c.Strategy.Entry.MinOpenInterest < 0 {
+		return fmt.Errorf("strategy.entry.min_open_interest must be >= 0")
+	}
 
 	// Exit configuration validation
 	if c.Strategy.Exit.ProfitTarget <= 0 || c.Strategy.Exit.ProfitTarget >= 1 {
@@ -209,8 +228,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("strategy.escalate_loss_pct (%.2f) must be < strategy.exit.stop_loss_pct (%.2f)",
 			c.Strategy.EscalateLossPct, c.Strategy.Exit.StopLossPct)
 	}
-	// Note: strategy.exit.stop_loss_pct takes precedence over risk.max_position_loss when both are configured
-	// This allows for different loss thresholds at strategy vs risk management levels
+	// Enforce: strategy.exit.stop_loss_pct must not exceed risk.max_position_loss
+	// This keeps strategy-level loss thresholds at or below global risk caps
 	if c.Strategy.Exit.StopLossPct > c.Risk.MaxPositionLoss {
 		return fmt.Errorf("strategy.exit.stop_loss_pct (%.2f) must be <= risk.max_position_loss (%.2f)",
 			c.Strategy.Exit.StopLossPct, c.Risk.MaxPositionLoss)
@@ -276,6 +295,9 @@ func (c *Config) GetCheckInterval() time.Duration {
 
 // IsWithinTradingHours checks if the given time falls within configured trading hours.
 func (c *Config) IsWithinTradingHours(now time.Time) bool {
+	if c.Schedule.AfterHoursCheck {
+		return true
+	}
 	tz := c.Schedule.Timezone
 	if tz == "" {
 		tz = "America/New_York"

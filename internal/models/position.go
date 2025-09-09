@@ -100,8 +100,8 @@ func (p *Position) GetTotalCredit() float64 {
 	return p.GetNetCredit()
 }
 
-// ProfitPercent returns P/L as a percentage of initial credit.
-// May be negative (loss) and can exceed 100% with adjustments.
+// ProfitPercent returns P/L as a percentage of net credit
+// (initial credit plus adjustments). May be negative and exceed 100%.
 func (p *Position) ProfitPercent() float64 {
 	denom := math.Abs(p.GetNetCredit() * float64(p.Quantity) * sharesPerContract)
 	if denom == 0 {

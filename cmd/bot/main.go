@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -175,7 +176,19 @@ func (b *Bot) Run(ctx context.Context) error {
 		err     error
 	}
 	resCh := make(chan balanceResult, 1)
+
+	// Add cancellation for balance fetch to avoid potential startup goroutine leak
+	ctxBal, cancelBal := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelBal()
 	go func() {
+		// Try context-aware method first, fallback to regular method if not available
+		type balFn interface{ GetAccountBalanceCtx(context.Context) (float64, error) }
+		if cb, ok := b.broker.(balFn); ok {
+			bal, err := cb.GetAccountBalanceCtx(ctxBal)
+			resCh <- balanceResult{balance: bal, err: err}
+			return
+		}
+		// Fallback: keep existing call (cannot cancel)
 		bal, err := b.broker.GetAccountBalance()
 		resCh <- balanceResult{balance: bal, err: err}
 	}()
@@ -409,7 +422,7 @@ func (b *Bot) executeEntry() {
 		tickSize = 0.01
 	}
 
-	px := util.FloorToTick(order.Credit, tickSize)
+	px := math.Max(util.FloorToTick(order.Credit, tickSize), tickSize)
 	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
 
 	// Generate deterministic client-order ID for potential deduplication
@@ -564,8 +577,7 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 		return true
 	}
 
-	// Allow controlled re-attempts from Adjusting state if there is no active ExitOrderID
-	// or the prior close order has terminal status (allowing idempotent retries)
+	// Enable idempotent re-attempts from Adjusting once prior close is terminal
 	if currentState == models.StateAdjusting {
 		// Check if there's no active exit order ID (order was never placed or was cleared)
 		if position.ExitOrderID == "" {
@@ -573,8 +585,33 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 			return true
 		}
 
-		// TODO: Add order status check here to allow re-attempts if prior order is terminal (cancelled, rejected, filled)
-		// For now, block Adjusting state exits to prevent duplicate orders
+		// Check if the prior close order has terminal status (filled/canceled/rejected)
+		if position.ExitOrderID != "" {
+			orderID, err := strconv.Atoi(position.ExitOrderID)
+			if err != nil {
+				b.logger.Printf("Position %s has invalid ExitOrderID %s: %v", position.ID, position.ExitOrderID, err)
+				return false
+			}
+
+			isTerminal, err := b.orderManager.IsOrderTerminal(b.ctx, orderID)
+			if err != nil {
+				b.logger.Printf("Failed to check order status for %s: %v, blocking re-attempt to be safe", position.ExitOrderID, err)
+				return false
+			}
+
+			if isTerminal {
+				b.logger.Printf("Position %s prior close order %s is terminal, allowing idempotent re-attempt", position.ID, position.ExitOrderID)
+				// Clear the terminal order ID to allow re-attempt
+				position.ExitOrderID = ""
+				position.ExitReason = ""
+				if err := b.storage.SetCurrentPosition(position); err != nil {
+					b.logger.Printf("Warning: Failed to clear terminal exit order ID: %v", err)
+				}
+				return true
+			}
+		}
+
+		// Prior order is still active, block duplicate attempts
 		b.logger.Printf("Position %s in Adjusting state with active exit order %s, blocking duplicate close attempt",
 			position.ID, position.ExitOrderID)
 		return false
@@ -719,7 +756,11 @@ func generatePositionID() string {
 // getMarketCalendar gets the market calendar for a given month/year, with caching
 func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
 	// Use current month/year if not specified
+	// Use NY timezone when defaulting month/year for calendar cache
 	now := time.Now()
+	if b.nyLocation != nil {
+		now = now.In(b.nyLocation)
+	}
 	if month == 0 {
 		month = int(now.Month())
 	}
