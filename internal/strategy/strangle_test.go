@@ -25,9 +25,6 @@ type mockBrokerForStrategy struct {
 	expirationsErr  error
 	marketClock     *broker.MarketClockResponse
 	marketClockErr  error
-	callCount       int
-	ivValue         float64
-	ivError         error
 }
 
 func (m *mockBrokerForStrategy) GetAccountBalance() (float64, error) {
@@ -194,6 +191,7 @@ func TestStrangleStrategy_CheckVolatilityThreshold(t *testing.T) {
 				Symbol:       "SPY",
 				AllocationPct: 0.35,
 				DTETarget:    45,
+				MinIVPct:     30.0, // Set threshold to 30%
 			}
 
 			strategy := NewStrangleStrategy(mockBroker, config, log.Default(), mockStorage)
