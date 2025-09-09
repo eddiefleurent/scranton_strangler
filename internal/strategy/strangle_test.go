@@ -298,13 +298,13 @@ func TestStrangleStrategy_CalculatePnL(t *testing.T) {
 		Symbol:        "SPY",
 		PutStrike:     395.0,
 		CallStrike:    405.0,
-		CreditReceived: 2.50,
+		CreditReceived: 250, // Now stored as total dollars, not per share
 		Quantity:      1,
 		Expiration:    time.Date(2024, 12, 20, 0, 0, 0, 0, time.UTC),
 	}
 
 	pnl := strategy.CalculatePnL(position)
-	// With current prices at $2.20 total vs $2.50 credit, P&L should be positive
+	// With current prices at $2.20 total ($220) vs $250 credit, P&L should be positive
 	// Credit: $250, Current value: $220, P&L: $30
 	expectedPnL := 30.0
 	if math.Abs(pnl-expectedPnL) > 0.01 { // Allow small floating point differences
@@ -492,7 +492,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50,
+				CreditReceived: 350, // Now stored as total dollars
 				CurrentPnL:     175.0, // 50% profit ($175 on $350 credit)
 				DTE:            35,
 			},
@@ -507,7 +507,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 21),
 				Quantity:       1,
-				CreditReceived: 3.50,
+				CreditReceived: 350, // Now stored as total dollars
 				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 credit)
 				DTE:            21,   // At max DTE
 			},
@@ -522,7 +522,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50,
+				CreditReceived: 350, // Now stored as total dollars
 				CurrentPnL:     -700.0, // -200% loss (-$700 on $350 credit)
 				DTE:            35,     // Still have time but need escalation
 			},
@@ -537,7 +537,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50,
+				CreditReceived: 350, // Now stored as total dollars
 				CurrentPnL:     -875.0, // -250% loss (-$875 on $350 credit)
 				DTE:            35,     // Still have time but losses are too high
 			},
@@ -552,7 +552,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50,
+				CreditReceived: 350, // Now stored as total dollars
 				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 credit)
 				DTE:            35,   // Still have time
 			},

@@ -386,7 +386,8 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 
 	// Calculate P&L: Credit received - Current value of sold options
 	// (Positive when options lose value, negative when they gain value)
-	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity) * 100)
+	// GetNetCredit() already returns the total dollar amount, no need to multiply by 100
+	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity))
 	pnl := totalCreditReceived - currentTotalValue
 
 	return pnl, nil
@@ -671,7 +672,8 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 
 	// Check profit target
 	// Calculate profit percentage against abs(net credit) received (in dollars)
-	absTotalNetCredit := math.Abs(position.GetNetCredit()) * float64(position.Quantity) * 100
+	// GetNetCredit() already returns the total dollar amount, no need to multiply by 100
+	absTotalNetCredit := math.Abs(position.GetNetCredit()) * float64(position.Quantity)
 	if absTotalNetCredit == 0 {
 		return true, ExitReasonError
 	}
