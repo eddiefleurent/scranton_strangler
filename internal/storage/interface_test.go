@@ -47,7 +47,7 @@ func testInterface(t *testing.T, storage Interface) {
 		1,                            // quantity
 	)
 	testPos.CreditReceived = 3.50
-	testPos.EntryIVR = 45.0
+	testPos.EntryIV = 45.0
 	testPos.EntrySpot = 450.0
 
 	// Transition to open state

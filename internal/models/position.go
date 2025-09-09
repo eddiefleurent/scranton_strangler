@@ -32,7 +32,7 @@ type Position struct {
 	ExitDate       time.Time     `json:"exit_date,omitempty"`
 	CreditReceived   float64       `json:"credit_received"`
 	EntryLimitPrice float64       `json:"entry_limit_price"`
-	EntryIVR        float64       `json:"entry_ivr"`
+	EntryIV         float64       `json:"entry_iv"`
 	EntrySpot       float64       `json:"entry_spot"`
 	CurrentPnL     float64       `json:"current_pnl"`
 	CallStrike     float64       `json:"call_strike"`

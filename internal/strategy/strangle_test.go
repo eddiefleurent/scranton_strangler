@@ -630,3 +630,14 @@ func (m *mockBroker) GetOptionBuyingPower() (float64, error) {
 	// Return a mock option buying power (typically less than account balance)
 	return m.balance * 0.8, nil
 }
+
+func (m *mockBroker) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]broker.HistoricalDataPoint, error) {
+	return []broker.HistoricalDataPoint{
+		{Date: time.Now().AddDate(0, 0, -1), Close: 35.0},
+		{Date: time.Now().AddDate(0, 0, -2), Close: 36.0},
+	}, nil
+}
+
+func (m *mockBroker) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}

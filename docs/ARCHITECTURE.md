@@ -96,11 +96,11 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 #### 1. Market Data Service
 - Fetches real-time quotes from Tradier
 - Retrieves option chains with Greeks
-- Calculates IV Rank (or fetches if available)
+- Extracts SPY ATM implied volatility from option chain
 - Caches data to minimize API calls
 
 #### 2. Strategy Engine
-- **Entry Logic**: IVR > 30, 45 DTE, 16Δ strikes
+- **Entry Logic**: SPY ATM IV ≥ 15% (configurable), 45 DTE, 16Δ strikes
 - **Exit Logic**: 50% profit or 21 DTE remaining
 - **Adjustment Logic**: Progressive management system
 - Returns actionable signals, not orders
@@ -180,7 +180,7 @@ Signal {
 ### Dependency Analysis
 
 #### Current Issues
-```
+```text
 cmd/bot/main.go
 ├── internal/broker (Concrete TradierClient)
 ├── internal/config (Concrete Config)
@@ -311,7 +311,7 @@ type RiskManager interface {
 - Manual monitoring required
 
 ### Automated Order Flow Decision Tree
-```
+```text
 Position Entry:
   use_otoco=true? → OTOCO (entry + 50% exit) [UNSUPPORTED/IGNORED]
   use_bracket=true? → Bracket (entry + profit + stop) [PLANNED/IGNORED]
@@ -360,7 +360,7 @@ Next Trade:
 - **OUT**: Adjustments, multiple tickers, production database, UI
 
 #### Enhanced MVP Architecture
-```
+```text
 spy-strangle-bot/
 ├── cmd/bot/main.go           # Entry point with dependency injection
 ├── internal/
@@ -1021,7 +1021,7 @@ Continue monitoring
 ```
 
 ### State Transition Rules
-```
+```text
 IDLE → SCANNING: Market open & no position
 SCANNING → ENTERING: Valid entry signal
 ENTERING → POSITIONED: Order filled

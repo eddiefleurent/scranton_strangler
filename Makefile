@@ -1,17 +1,17 @@
 # SPY Strangle Bot - Makefile
 
 .PHONY: all help build build-prod test test-coverage lint run clean \
-        docker-build docker-run deploy-staging deploy-prod logs stop \
-        dev-setup test-api security-scan build-test-helper tools
+        deploy-unraid unraid-logs unraid-status unraid-restart \
+        dev-setup test-api test-paper security-scan build-test-helper tools
 
 all: build
 
 # Default target
 help:
-	@printf "Targets:\n  build/test/lint/run/clean\n  docker-build/docker-run/logs/stop\n  deploy-staging/deploy-prod\n  test-coverage/security-scan/build-test-helper\n  dev-setup\n"
+	@printf "Targets:\n  build/test/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  test-coverage/security-scan/build-test-helper\n  dev-setup\n"
 
 # Go binary name and paths
-BINARY_NAME=strangle-bot
+BINARY_NAME=scranton-strangler
 BIN_DIR=bin
 BINARY_PATH=./$(BIN_DIR)/$(BINARY_NAME)
 
@@ -24,8 +24,7 @@ build:
 # Build for production (optimized)
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
-	@mkdir -p $(BIN_DIR)
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BIN_DIR)/$(BINARY_NAME) cmd/bot/main.go
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) cmd/bot/main.go
 
 # Run tests
 test:
@@ -57,32 +56,10 @@ clean:
 	go clean -testcache
 	rm -rf $(BIN_DIR) coverage.out coverage.html *.test *.prof
 
-# Docker commands
-docker-build:
-	@echo "Building Docker image..."
-	docker build -t strangle-bot:latest .
-
-docker-run:
-	@echo "Starting services with Docker Compose..."
-	docker compose up -d
-
-# Deployment commands
-deploy-staging:
-	@echo "Deploying to staging..."
-	./scripts/deploy.sh staging
-
-deploy-prod:
-	@echo "Deploying to production..."
-	./scripts/deploy.sh production
-
-# Utility commands
-logs:
-	@echo "Showing container logs..."
-	docker compose logs -f strangle-bot
-
-stop:
-	@echo "Stopping all containers..."
-	docker compose down
+# Unraid deployment
+deploy-unraid:
+	@echo "Deploying binary to Unraid..."
+	./deploy.sh
 
 # Development helpers
 dev-setup:
@@ -97,6 +74,11 @@ dev-setup:
 test-api:
 	@echo "Testing Tradier API connection..."
 	cd scripts/test_tradier && go run test_tradier.go
+
+# Paper trading integration test
+test-paper:
+	@echo "Running end-to-end paper trading test..."
+	cd scripts/test_paper_trading && go run main.go
 
 # Build test helper
 build-test-helper:
@@ -116,3 +98,16 @@ tools:
 	@go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@go install golang.org/x/vuln/cmd/govulncheck@latest
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+unraid-logs:
+	@echo "Showing Unraid bot logs..."
+	ssh unraid 'tail -f /mnt/user/appdata/scranton-strangler/logs/bot.log'
+
+unraid-status:
+	@echo "Checking Unraid bot status..."
+	ssh unraid 'pgrep -f scranton-strangler && echo "✅ Bot is running" || echo "❌ Bot not running"'
+	ssh unraid 'test -f /mnt/user/appdata/scranton-strangler/data/positions.json && echo "✅ Positions file exists" || echo "❌ Positions file missing"'
+
+unraid-restart:
+	@echo "Restarting Unraid bot..."
+	ssh unraid '/mnt/user/appdata/scranton-strangler/stop-service.sh && /mnt/user/appdata/scranton-strangler/start-service.sh'

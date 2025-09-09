@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -42,14 +41,12 @@ type Config struct {
 	ProfitTarget        float64 // 0.50 for 50%
 	MaxDTE              int     // 21 days to exit
 	AllocationPct       float64 // 0.35 for 35%
-	MinIVR              float64 // 30
+	MinIVPct            float64 // 15.0 for 15% SPY ATM IV threshold
 	MinCredit           float64 // $2.00
 	EscalateLossPct     float64 // e.g., 2.0 (200% loss triggers escalation)
 	StopLossPct         float64 // e.g., 2.5 (250% loss triggers hard stop)
 	MaxPositionLoss     float64 // Maximum position loss percentage from risk config
 	MaxContracts        int     // Maximum number of contracts per position
-	UseMockHistoricalIV bool    // Whether to use mock historical IV data
-	FailOpenOnIVError   bool    // If true, allow entries when IV data is unavailable (dev/test only)
 	BPRMultiplier       float64 // Buying power requirement multiplier (default: 10.0)
 }
 
@@ -91,10 +88,10 @@ func NewStrangleStrategy(b broker.Broker, config *Config, logger *log.Logger, st
 func (s *StrangleStrategy) CheckEntryConditions() (bool, string) {
 	// Position existence is enforced by storage layer
 
-	// Check IVR (simplified - would need historical IV data)
-	ivr := s.calculateIVR()
-	if ivr < s.config.MinIVR {
-		return false, fmt.Sprintf("IVR too low: %.1f < %.1f", ivr, s.config.MinIVR)
+	// Check volatility threshold using absolute SPY IV level
+	canTrade, reason := s.CheckVolatilityThreshold()
+	if !canTrade {
+		return false, reason
 	}
 
 	// Check for major events (simplified)
@@ -166,42 +163,31 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	}, nil
 }
 
-// GetCurrentIVR returns the current IV rank for the configured symbol
-func (s *StrangleStrategy) GetCurrentIVR() float64 {
-	return s.calculateIVR()
-}
-
-func (s *StrangleStrategy) calculateIVR() float64 {
-	// Get current IV from option chain
+// GetCurrentIV returns the current SPY ATM implied volatility as a percentage
+func (s *StrangleStrategy) GetCurrentIV() float64 {
 	currentIV, err := s.getCurrentImpliedVolatility()
 	if err != nil {
-		// Fallback to 0.0 for fail-closed behavior - block entries on IV errors
-		s.logger.Printf("Warning: Using 0.0 IVR due to error: %v", err)
+		s.logger.Printf("Warning: Could not get current SPY IV: %v", err)
 		return 0.0
 	}
+	return currentIV * 100 // Convert to percentage
+}
 
-	// Get historical IV data (20-day lookback for MVP)
-	historicalIVs, err := s.getHistoricalImpliedVolatility(20)
-	if err != nil || len(historicalIVs) == 0 {
-		if s.config.FailOpenOnIVError {
-			// Fail-open: Use mock data for dev/test when historical data unavailable
-			s.logger.Printf("Warning: Using mock historical IV data for IVR calculation (fail-open mode)")
-			historicalIVs = s.generateMockHistoricalIV(20)
-		} else {
-			// Fail-closed: Block entries when historical data unavailable (conservative approach)
-			s.logger.Printf("Warning: Using 0.0 IVR due to insufficient historical data (fail-closed mode)")
-			return 0.0
-		}
+// CheckVolatilityThreshold checks if current SPY IV exceeds the minimum threshold for selling
+func (s *StrangleStrategy) CheckVolatilityThreshold() (bool, string) {
+	currentIV, err := s.getCurrentImpliedVolatility()
+	if err != nil {
+		return false, fmt.Sprintf("SPY IV unavailable: %v", err)
 	}
-
-	// Calculate IVR using the standard formula
-	ivr := broker.CalculateIVR(currentIV, historicalIVs)
-
-	// Log IV calculation details
-	s.logger.Printf("IV Rank Calculation: Current IV=%.2f%%, Historical Range=[%.2f%%-%.2f%%], IVR=%.1f%%",
-		currentIV*100, getMinIV(historicalIVs)*100, getMaxIV(historicalIVs)*100, ivr)
-
-	return ivr
+	
+	ivPercent := currentIV * 100
+	threshold := s.config.MinIVPct // Configurable threshold from config.yaml
+	
+	if ivPercent >= threshold {
+		return true, fmt.Sprintf("SPY IV elevated: %.1f%% >= %.1f%%", ivPercent, threshold)
+	}
+	
+	return false, fmt.Sprintf("SPY IV too low: %.1f%% < %.1f%%", ivPercent, threshold)
 }
 
 // getCurrentImpliedVolatility gets current ATM implied volatility for SPY
@@ -292,106 +278,8 @@ func (s *StrangleStrategy) storeCurrentIVReading(iv float64, expiration string) 
 	}
 }
 
-// getHistoricalImpliedVolatility retrieves historical IV data
-//
-// IVR (Implied Volatility Rank) calculation requires historical IV data to compare
-// current IV against past levels. When historical data is unavailable:
-//
-//   - Default behavior (FailOpenOnIVError=false): Returns error, causing IVR=0.0
-//     This blocks new position entries as a conservative "fail-closed" approach
-//     to prevent trading without proper volatility context.
-//
-//   - Dev/Test behavior (FailOpenOnIVError=true): Returns mock data to allow
-//     testing and development when real historical data is unavailable.
-//
-// This implementation uses storage-backed IV readings for production use.
-func (s *StrangleStrategy) getHistoricalImpliedVolatility(days int) ([]float64, error) {
-	// Option 1: Use mock historical data for testing
-	if s.shouldUseMockHistoricalData() {
-		return s.generateMockHistoricalIV(days), nil
-	}
 
-	// Option 2: Retrieve historical IV from storage
-	endDate := time.Now().UTC().Truncate(24 * time.Hour)
-	startDate := endDate.AddDate(0, 0, -days)
 
-	// Check if storage is available
-	if s.storage == nil {
-		if s.config.FailOpenOnIVError {
-			// Fail-open: Use mock data for dev/test when storage is unset
-			s.logger.Printf("Warning: Storage is unset, using mock historical IV data (fail-open mode)")
-			return s.generateMockHistoricalIV(days), nil
-		} else {
-			// Fail-closed: Block entries when storage unavailable (conservative approach)
-			s.logger.Printf("Warning: Storage is unset, using 0.0 IVR (fail-closed mode)")
-			return nil, fmt.Errorf("storage interface is unset")
-		}
-	}
-
-	readings, err := s.storage.GetIVReadings(s.config.Symbol, startDate, endDate)
-	if err != nil {
-		if s.config.FailOpenOnIVError {
-			// Fail-open: Use mock data for dev/test when storage fails
-			s.logger.Printf("Warning: Storage query failed, using mock historical IV data (fail-open mode): %v", err)
-			return s.generateMockHistoricalIV(days), nil
-		} else {
-			// Fail-closed: Block entries when storage unavailable (conservative approach)
-			s.logger.Printf("Warning: Storage query failed, using 0.0 IVR (fail-closed mode): %v", err)
-			return nil, fmt.Errorf("historical IV data unavailable from storage: %w", err)
-		}
-	}
-
-	if len(readings) == 0 {
-		if s.config.FailOpenOnIVError {
-			// Fail-open: Use mock data when no historical readings exist
-			s.logger.Printf("Warning: No historical IV readings found, using mock data (fail-open mode)")
-			return s.generateMockHistoricalIV(days), nil
-		} else {
-			// Fail-closed: Block entries when no historical data exists
-			s.logger.Printf("Warning: No historical IV readings found, using 0.0 IVR (fail-closed mode)")
-			return nil, fmt.Errorf("no historical IV readings available for symbol %s", s.config.Symbol)
-		}
-	}
-
-	// Extract IV values (sorted by reading.Date asc for determinism)
-	sort.Slice(readings, func(i, j int) bool { return readings[i].Date.Before(readings[j].Date) })
-	ivs := make([]float64, len(readings))
-	for i, reading := range readings {
-		ivs[i] = reading.IV
-	}
-
-	return ivs, nil
-}
-
-// generateMockHistoricalIV creates realistic mock IV data for testing
-func (s *StrangleStrategy) generateMockHistoricalIV(days int) []float64 {
-	// Generate realistic IV range for SPY (typically 10-40%)
-	historicalIVs := make([]float64, days)
-
-	// Base IV around 20% with some variation
-	baseIV := 0.20
-	for i := 0; i < days; i++ {
-		// Add some realistic variation (±5%)
-		variation := (float64(i%10) - 5) * 0.01
-		historicalIVs[i] = baseIV + variation
-
-		// Ensure realistic bounds (8% to 35%)
-		if historicalIVs[i] < 0.08 {
-			historicalIVs[i] = 0.08
-		}
-		if historicalIVs[i] > 0.35 {
-			historicalIVs[i] = 0.35
-		}
-	}
-
-	return historicalIVs
-}
-
-// shouldUseMockHistoricalData determines if we should use mock data
-func (s *StrangleStrategy) shouldUseMockHistoricalData() bool {
-	// Use config toggle for mock historical IV data
-	return s.config.UseMockHistoricalIV
-}
 
 // findNearestStrike finds the strike closest to the current price
 func (s *StrangleStrategy) findNearestStrike(chain []broker.Option, price float64) float64 {
@@ -413,33 +301,6 @@ func (s *StrangleStrategy) findNearestStrike(chain []broker.Option, price float6
 	return nearestStrike
 }
 
-// getMinIV finds the minimum IV in historical data
-func getMinIV(historicalIVs []float64) float64 {
-	if len(historicalIVs) == 0 {
-		return 0
-	}
-	minIV := historicalIVs[0]
-	for _, iv := range historicalIVs {
-		if iv < minIV {
-			minIV = iv
-		}
-	}
-	return minIV
-}
-
-// getMaxIV finds the maximum IV in historical data
-func getMaxIV(historicalIVs []float64) float64 {
-	if len(historicalIVs) == 0 {
-		return 0
-	}
-	maxIV := historicalIVs[0]
-	for _, iv := range historicalIVs {
-		if iv > maxIV {
-			maxIV = iv
-		}
-	}
-	return maxIV
-}
 
 // getCachedOptionChainWithFetcher is a helper function that handles the common caching logic
 func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration string, withGreeks bool, fetcher func() ([]broker.Option, error)) ([]broker.Option, error) {

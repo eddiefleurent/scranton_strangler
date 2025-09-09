@@ -232,9 +232,22 @@ type Greeks struct {
 
 // PositionsResponse represents the positions response from the Tradier API.
 type PositionsResponse struct {
-	Positions struct {
-		Position singleOrArray[PositionItem] `json:"position"`
-	} `json:"positions"`
+	Positions PositionsWrapper `json:"positions"`
+}
+
+// PositionsWrapper handles the case where positions can be "null" string or an object
+type PositionsWrapper struct {
+	Position singleOrArray[PositionItem] `json:"position"`
+}
+
+func (pw *PositionsWrapper) UnmarshalJSON(b []byte) error {
+	// Handle "null" string case
+	if bytes.Equal(b, []byte(`"null"`)) {
+		return nil
+	}
+	// Handle normal object case
+	type normalWrapper PositionsWrapper
+	return json.Unmarshal(b, (*normalWrapper)(pw))
 }
 
 // PositionItem represents a single position item from the Tradier API.
@@ -312,6 +325,36 @@ type MarketClockResponse struct {
 	} `json:"clock"`
 }
 
+// MarketCalendarResponse represents the market calendar response from the Tradier API.
+type MarketCalendarResponse struct {
+	Calendar struct {
+		Month int `json:"month"`
+		Year  int `json:"year"`
+		Days  struct {
+			Day []MarketDay `json:"day"`
+		} `json:"days"`
+	} `json:"calendar"`
+}
+
+// MarketDay represents a single day in the market calendar.
+type MarketDay struct {
+	Date        string `json:"date"`
+	Status      string `json:"status"`
+	Description string `json:"description"`
+	PreMarket   *struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	} `json:"premarket,omitempty"`
+	Open *struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	} `json:"open,omitempty"`
+	PostMarket *struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	} `json:"postmarket,omitempty"`
+}
+
 // OrderResponse represents the order response from the Tradier API.
 type OrderResponse struct {
 	Order struct {
@@ -332,6 +375,30 @@ type OrderResponse struct {
 		Price             float64 `json:"price"`
 		Quantity          float64 `json:"quantity"`
 	} `json:"order"`
+}
+
+// HistoricalDataPoint represents a single historical data point
+type HistoricalDataPoint struct {
+	Date   time.Time `json:"date"`
+	Open   float64   `json:"open"`
+	High   float64   `json:"high"`
+	Low    float64   `json:"low"`
+	Close  float64   `json:"close"`
+	Volume int64     `json:"volume"`
+}
+
+// HistoricalDataResponse represents the response from historical data API
+type HistoricalDataResponse struct {
+	History struct {
+		Day []struct {
+			Date   string  `json:"date"`
+			Open   float64 `json:"open"`
+			High   float64 `json:"high"`
+			Low    float64 `json:"low"`
+			Close  float64 `json:"close"`
+			Volume int64   `json:"volume"`
+		} `json:"day"`
+	} `json:"history"`
 }
 
 // ============ API Methods ============
@@ -429,6 +496,75 @@ func (t *TradierAPI) GetMarketClock(delayed bool) (*MarketClockResponse, error) 
 	}
 
 	return &response, nil
+}
+
+// GetMarketCalendar retrieves the market calendar for a specific month/year.
+// If month/year are 0, uses current month/year.
+func (t *TradierAPI) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
+	endpoint := fmt.Sprintf("%s/markets/calendar", t.baseURL)
+	
+	params := url.Values{}
+	if month > 0 {
+		params.Add("month", fmt.Sprintf("%02d", month))
+	}
+	if year > 0 {
+		params.Add("year", fmt.Sprintf("%04d", year))
+	}
+	
+	// Build URL with query parameters
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+
+	var response MarketCalendarResponse
+	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
+// GetHistoricalData retrieves historical price data for a symbol
+func (t *TradierAPI) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]HistoricalDataPoint, error) {
+	endpoint := fmt.Sprintf("%s/markets/history", t.baseURL)
+	
+	params := url.Values{}
+	params.Add("symbol", symbol)
+	if interval != "" {
+		params.Add("interval", interval)
+	} else {
+		params.Add("interval", "daily") // Default to daily
+	}
+	params.Add("start", startDate.Format("2006-01-02"))
+	params.Add("end", endDate.Format("2006-01-02"))
+	
+	// Build URL with query parameters
+	endpoint += "?" + params.Encode()
+
+	var response HistoricalDataResponse
+	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, fmt.Errorf("failed to get historical data for %s: %w", symbol, err)
+	}
+
+	// Convert response to HistoricalDataPoint slice
+	dataPoints := make([]HistoricalDataPoint, len(response.History.Day))
+	for i, day := range response.History.Day {
+		date, err := time.Parse("2006-01-02", day.Date)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse date %s: %w", day.Date, err)
+		}
+		
+		dataPoints[i] = HistoricalDataPoint{
+			Date:   date,
+			Open:   day.Open,
+			High:   day.High,
+			Low:    day.Low,
+			Close:  day.Close,
+			Volume: day.Volume,
+		}
+	}
+
+	return dataPoints, nil
 }
 
 // IsTradingDay returns true on a trading session day (open, premarket, or postmarket).
@@ -746,7 +882,9 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	// in a way that can be verified by tests (e.g., in the tag or as a custom parameter)
 
 	// Use profitTarget to modify the tag or include it in the order somehow for verification
-	tag := fmt.Sprintf("otoco-profit-%.3f", profitTarget)
+	// Tradier API doesn't allow periods/decimals in tag, so convert to integer cents
+	profitCents := int(profitTarget * 1000) // Convert to thousandths to avoid decimals
+	tag := fmt.Sprintf("otoco-profit-%d", profitCents)
 
 	// Place the strangle order with the modified tag that includes profitTarget
 	return t.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration,

@@ -294,14 +294,9 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 		t.Errorf("Expected POST request, got %s", capturedRequestMethod)
 	}
 
-	// Verify profitTarget is included in the request body
-	expectedProfitTarget := "0.500"
-	if !strings.Contains(capturedRequestBody, expectedProfitTarget) {
-		t.Errorf("Expected request body to contain profitTarget %s, got: %s", expectedProfitTarget, capturedRequestBody)
-	}
-
-	// Verify the tag contains the profit target for OTOCO orders
-	if !strings.Contains(capturedRequestBody, "otoco-profit-0.500") {
+	// Verify the tag contains the profit target for OTOCO orders (converted to cents)
+	// 0.5 profit target becomes otoco-profit-500 (500 thousandths)
+	if !strings.Contains(capturedRequestBody, "otoco-profit-500") {
 		t.Errorf("Expected request body to contain OTOCO tag with profit target, got: %s", capturedRequestBody)
 	}
 }
@@ -989,6 +984,26 @@ func (m *MockBroker) GetTickSize(_ string) (float64, error) {
 		return 0, errors.New("mock broker error")
 	}
 	return 0.01, nil
+}
+
+func (m *MockBroker) GetHistoricalData(_ string, _ string, _, _ time.Time) ([]HistoricalDataPoint, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	// Return some mock historical data
+	return []HistoricalDataPoint{
+		{Date: time.Now().AddDate(0, 0, -1), Close: 35.0},
+		{Date: time.Now().AddDate(0, 0, -2), Close: 36.0},
+	}, nil
+}
+
+func (m *MockBroker) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return &MarketCalendarResponse{}, nil
 }
 
 func TestNewCircuitBreakerBroker(t *testing.T) {

@@ -27,11 +27,11 @@ make test-api          # Test Tradier API connection
 make lint              # Run golangci-lint
 make security-scan     # Run security scans (gosec, govulncheck)
 
-# Docker operations
-make docker-build      # Build Docker image
-make docker-run        # Run with Docker Compose
-make logs             # Show container logs
-make stop             # Stop all containers
+# Unraid deployment
+make deploy-unraid     # Deploy binary to Unraid
+make unraid-logs       # Show bot logs on Unraid
+make unraid-status     # Check bot status on Unraid
+make unraid-restart    # Restart bot on Unraid
 
 # Development setup
 > **SECURITY WARNING**: Add config.yaml to .gitignore and NEVER commit it. Populate secrets from environment variables or CI secrets using `envsubst < config.yaml.template > config.yaml` or similar secure injection methods.
@@ -81,6 +81,89 @@ The bot follows a component-based architecture with clear separation of concerns
 - **Entry**: IVR > 30, 45 DTE (±5), 16Δ strikes, minimum $2 credit
 - **Exit**: 50% profit target or 21 DTE remaining
 - **Risk**: Maximum 35% account allocation
+
+## Unraid Deployment
+
+The bot is designed for simple binary deployment to Unraid servers. Since Go produces static binaries, no Docker containers or runtime dependencies are required.
+
+### Prerequisites
+
+1. **SSH Key Authentication**: Ensure passwordless SSH access to your Unraid server:
+   ```bash
+   ssh unraid "echo 'Connection successful'"
+   ```
+
+2. **Configuration**: Create your trading configuration:
+   ```bash
+   make dev-setup  # Creates config.yaml from example
+   # Edit config.yaml with your Tradier API credentials
+   ```
+
+### Deployment Process
+
+The deployment script fully automates the process:
+
+```bash
+make deploy-unraid
+```
+
+**What happens automatically:**
+1. **Build**: Compiles Go binary for Linux (`make build-prod`)
+2. **Directory Setup**: Creates `/mnt/user/appdata/scranton-strangler/{data,logs}` on Unraid
+3. **File Transfer**: Copies binary and config to Unraid via rsync
+4. **Service Scripts**: Creates start/stop scripts on Unraid
+5. **Auto-Start**: Adds to Unraid's boot sequence (`/boot/config/go`)
+6. **Initialization**: Starts the bot and creates empty `positions.json` if needed
+
+### File Structure on Unraid
+
+```
+/mnt/user/appdata/scranton-strangler/
+├── scranton-strangler     # The Go binary
+├── config.yaml           # Your Tradier API configuration  
+├── start-service.sh      # Auto-generated service start script
+├── stop-service.sh       # Auto-generated service stop script
+├── scranton-strangler.pid # Process ID file (when running)
+├── data/
+│   └── positions.json    # Position tracking (auto-created)
+└── logs/
+    └── bot.log          # Application logs
+```
+
+### Management Commands
+
+```bash
+make unraid-logs          # View bot logs (tail -f)
+make unraid-status        # Check if bot is running + positions file exists
+make unraid-restart       # Stop and restart the bot service
+```
+
+### Manual Management (if needed)
+
+```bash
+# SSH to Unraid for direct control
+ssh unraid
+
+# Start the bot
+/mnt/user/appdata/scranton-strangler/start-service.sh
+
+# Stop the bot  
+/mnt/user/appdata/scranton-strangler/stop-service.sh
+
+# View logs
+tail -f /mnt/user/appdata/scranton-strangler/logs/bot.log
+
+# Check positions
+cat /mnt/user/appdata/scranton-strangler/data/positions.json
+```
+
+### Auto-Start Behavior
+
+The deployment automatically adds the bot to Unraid's startup sequence by appending to `/boot/config/go`. The bot will:
+- Start automatically when Unraid boots
+- Run in the background as a daemon process
+- Create log files in the logs directory
+- Initialize an empty positions file if none exists
 
 ## Project Structure
 

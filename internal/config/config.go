@@ -60,14 +60,12 @@ type StrategyConfig struct {
 	Adjustments         AdjustmentConfig `yaml:"adjustments"`
 	AllocationPct       float64          `yaml:"allocation_pct"`
 	EscalateLossPct     float64          `yaml:"escalate_loss_pct"`
-	UseMockHistoricalIV bool             `yaml:"use_mock_historical_iv"`
-	FailOpenOnIVError   bool             `yaml:"fail_open_on_iv_error"` // If true, allow entries when IV data is unavailable (dev/test only)
 }
 
 // EntryConfig defines entry criteria for opening new positions.
 type EntryConfig struct {
+	MinIVPct  float64 `yaml:"min_iv_pct"`  // Minimum SPY ATM IV percentage to enter
 	DTERange  []int   `yaml:"dte_range"`
-	MinIVR    float64 `yaml:"min_ivr"`
 	TargetDTE int     `yaml:"target_dte"`
 	Delta     float64 `yaml:"delta"`
 	MinCredit float64 `yaml:"min_credit"`
@@ -169,8 +167,8 @@ func (c *Config) Validate() error {
 	if c.Strategy.EscalateLossPct <= 0 {
 		return fmt.Errorf("strategy.escalate_loss_pct must be > 0")
 	}
-	if c.Strategy.Entry.MinIVR < 0 || c.Strategy.Entry.MinIVR > 100 {
-		return fmt.Errorf("strategy.entry.min_ivr must be between 0 and 100")
+	if c.Strategy.Entry.MinIVPct <= 0 || c.Strategy.Entry.MinIVPct > 100 {
+		return fmt.Errorf("strategy.entry.min_iv_pct must be between 0 and 100")
 	}
 	if c.Strategy.Entry.Delta <= 0 || c.Strategy.Entry.Delta > 50 {
 		return fmt.Errorf("strategy.entry.delta must be between 0 and 50")

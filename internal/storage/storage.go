@@ -603,7 +603,7 @@ func clonePosition(pos *models.Position) *models.Position {
 		Quantity:       pos.Quantity,
 		CreditReceived: pos.CreditReceived,
 		EntryDate:      pos.EntryDate,
-		EntryIVR:       pos.EntryIVR,
+		EntryIV:        pos.EntryIV,
 		EntrySpot:      pos.EntrySpot,
 		CurrentPnL:     pos.CurrentPnL,
 		DTE:            pos.DTE,

@@ -25,8 +25,10 @@ type Broker interface {
 	GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
 	GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]Option, error)
 	GetMarketClock(delayed bool) (*MarketClockResponse, error)
+	GetMarketCalendar(month, year int) (*MarketCalendarResponse, error)
 	IsTradingDay(delayed bool) (bool, error)
 	GetTickSize(symbol string) (float64, error) // Get appropriate tick size for symbol
+	GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]HistoricalDataPoint, error)
 
 	// Order placement
 	// PlaceStrangleOrder: limitPrice is the total credit/debit limit for the entire strangle (per spread)
@@ -212,9 +214,19 @@ func (t *TradierClient) GetMarketClock(delayed bool) (*MarketClockResponse, erro
 	return t.TradierAPI.GetMarketClock(delayed)
 }
 
+// GetMarketCalendar retrieves the market calendar for a specific month/year
+func (t *TradierClient) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
+	return t.TradierAPI.GetMarketCalendar(month, year)
+}
+
 // IsTradingDay checks if the market is currently open for trading
 func (t *TradierClient) IsTradingDay(delayed bool) (bool, error) {
 	return t.TradierAPI.IsTradingDay(delayed)
+}
+
+// GetHistoricalData retrieves historical price data for a symbol
+func (t *TradierClient) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]HistoricalDataPoint, error) {
+	return t.TradierAPI.GetHistoricalData(symbol, interval, startDate, endDate)
 }
 
 // GetTickSize returns the appropriate tick size for the given symbol
@@ -267,6 +279,7 @@ func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
 		return 0
 	}
 	r := ((currentIV - minIV) / (maxIV - minIV)) * 100
+	// IVR should be bounded between 0-100
 	if r < 0 {
 		return 0
 	}
@@ -491,6 +504,20 @@ func (c *CircuitBreakerBroker) PlaceBuyToCloseOrder(optionSymbol string, quantit
 func (c *CircuitBreakerBroker) GetMarketClock(delayed bool) (*MarketClockResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*MarketClockResponse, error) {
 		return b.GetMarketClock(delayed)
+	})
+}
+
+// GetMarketCalendar wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*MarketCalendarResponse, error) {
+		return b.GetMarketCalendar(month, year)
+	})
+}
+
+// GetHistoricalData wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]HistoricalDataPoint, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]HistoricalDataPoint, error) {
+		return b.GetHistoricalData(symbol, interval, startDate, endDate)
 	})
 }
 

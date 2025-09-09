@@ -45,7 +45,7 @@ func TestFormatNumber_BasicAndRounding(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := formatNumber(tc.n)
-		if got \!= tc.want {
+		if got != tc.want {
 			t.Errorf("formatNumber(%d) = %q, want %q", tc.n, got, tc.want)
 		}
 	}
@@ -65,7 +65,7 @@ func TestAbsInt(t *testing.T) {
 	}
 	for _, tc := range tests {
 		got := absInt(tc.in)
-		if got \!= tc.want {
+		if got != tc.want {
 			t.Errorf("absInt(%d) = %d, want %d", tc.in, got, tc.want)
 		}
 	}
@@ -88,7 +88,7 @@ func TestEq_WithEpsilon(t *testing.T) {
 		{math.Inf(1), 1.0, 1.0, false, "Inf vs finite"},
 	}
 	for _, tc := range tests {
-		if got := eq(tc.a, tc.b, tc.eps); got \!= tc.want {
+		if got := eq(tc.a, tc.b, tc.eps); got != tc.want {
 			t.Errorf("eq(%v,%v,%v) [%s] = %v, want %v", tc.a, tc.b, tc.eps, tc.name, got, tc.want)
 		}
 	}
@@ -103,7 +103,7 @@ func TestIsOptionSymbol_ValidCases(t *testing.T) {
 		"ABCDEF240101P01234567",
 	}
 	for _, s := range valid {
-		if \!isOptionSymbol(s) {
+		if !isOptionSymbol(s) {
 			t.Errorf("isOptionSymbol(%q) = false, want true", s)
 		}
 	}
@@ -142,14 +142,13 @@ func TestMaskAPIKey(t *testing.T) {
 		{"abcdefghijklmnop", "abcd...mnop"},
 	}
 	for _, tc := range tests {
-		if got := maskAPIKey(tc.in); got \!= tc.want {
+		if got := maskAPIKey(tc.in); got != tc.want {
 			t.Errorf("maskAPIKey(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
 
 func TestPrettyPrint_SuccessAndError(t *testing.T) {
-	t.Parallel()
 
 	type payload struct {
 		A int    `json:"a"`
@@ -160,14 +159,14 @@ func TestPrettyPrint_SuccessAndError(t *testing.T) {
 		prettyPrint(payload{A: 1, B: "x"})
 	})
 	want := "{\n  \"a\": 1,\n  \"b\": \"x\"\n}\n"
-	if out \!= want {
+	if out != want {
 		t.Errorf("prettyPrint(payload) output mismatch.\nGot:\n%s\nWant:\n%s", out, want)
 	}
 
 	errOut := captureOutput(func() {
 		prettyPrint(make(chan int)) // not JSON-marshalable
 	})
-	if \!strings.Contains(errOut, "Error marshaling JSON:") {
+	if !strings.Contains(errOut, "Error marshaling JSON:") {
 		t.Errorf("prettyPrint(chan) expected error message; got: %q", errOut)
 	}
 }

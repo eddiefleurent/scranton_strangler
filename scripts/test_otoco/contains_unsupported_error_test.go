@@ -23,7 +23,7 @@ func TestContainsUnsupportedError_PositiveCases(t *testing.T) {
   }
 
   for i, msg := range cases {
-    if \!containsUnsupportedError(msg) {
+    if !containsUnsupportedError(msg) {
       t.Fatalf("case %d expected true for message: %q", i, msg)
     }
   }
@@ -64,7 +64,7 @@ func TestContainsUnsupportedError_CaseInsensitivityAndSpacing(t *testing.T) {
   }
   for msg, want := range cases {
     got := containsUnsupportedError(msg)
-    if got \!= want {
+    if got != want {
       t.Fatalf("message %q: want %v, got %v", msg, want, got)
     }
   }
@@ -73,7 +73,7 @@ func TestContainsUnsupportedError_CaseInsensitivityAndSpacing(t *testing.T) {
 func TestContainsUnsupportedError_LongMultiLine(t *testing.T) {
   t.Parallel()
   msg := "error placing order\nDetails:\nThe requested order type is Not Available for your account.\nPlease contact support."
-  if \!containsUnsupportedError(msg) {
+  if !containsUnsupportedError(msg) {
     t.Fatalf("expected true for multi-line message indicating not available")
   }
 }
@@ -86,7 +86,7 @@ func TestContainsUnsupportedError_Stability_Keywords(t *testing.T) {
   keywords := []string{"unsupported", "not supported", "not available", "invalid order type", "oto", "one-triggers", "oco"}
   for _, kw := range keywords {
     msg := "prefix ... " + kw + " ... suffix"
-    if \!containsUnsupportedError(msg) {
+    if !containsUnsupportedError(msg) {
       t.Fatalf("keyword %q should trigger true", kw)
     }
   }

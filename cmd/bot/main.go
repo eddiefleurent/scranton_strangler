@@ -40,6 +40,11 @@ type Bot struct {
 	nyLocation    *time.Location // Cached NY timezone location
 	lastPnLUpdate time.Time      // Last time P&L was persisted to reduce write amplification
 	pnlThrottle   time.Duration  // Minimum interval between P&L updates
+	
+	// Market calendar caching
+	marketCalendar     *broker.MarketCalendarResponse
+	calendarCacheMonth int
+	calendarCacheYear  int
 }
 
 func main() {
@@ -112,14 +117,12 @@ func main() {
 		ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
 		MaxDTE:              cfg.Strategy.Exit.MaxDTE,
 		AllocationPct:       cfg.Strategy.AllocationPct,
-		MinIVR:              cfg.Strategy.Entry.MinIVR,
+		MinIVPct:            cfg.Strategy.Entry.MinIVPct,
 		MinCredit:           cfg.Strategy.Entry.MinCredit,
 		EscalateLossPct:     cfg.Strategy.EscalateLossPct,
 		StopLossPct:         cfg.Strategy.Exit.StopLossPct,
 		MaxPositionLoss:     cfg.Risk.MaxPositionLoss,
 		MaxContracts:        cfg.Risk.MaxContracts,
-		UseMockHistoricalIV: cfg.Strategy.UseMockHistoricalIV,
-		FailOpenOnIVError:   cfg.Strategy.FailOpenOnIVError, // Configurable fail-open behavior
 	}
 	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger, bot.storage)
 
@@ -128,6 +131,13 @@ func main() {
 
 	// Initialize retry client
 	bot.retryClient = retry.NewClient(bot.broker, logger)
+
+	// Pre-fetch this month's market calendar for caching
+	logger.Println("Fetching market calendar for this month...")
+	_, calErr := bot.getMarketCalendar(0, 0) // Current month/year
+	if calErr != nil {
+		logger.Printf("Warning: Could not fetch market calendar: %v (will fallback to real-time checks)", calErr)
+	}
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -212,16 +222,52 @@ func (b *Bot) runTradingCycle() {
 		b.logger.Printf("Warning: NY timezone not cached, using system time")
 	}
 
-	// Check if within trading hours
-	isWithinHours := b.config.IsWithinTradingHours(now)
-	if !isWithinHours {
-		if !b.config.Schedule.AfterHoursCheck {
-			b.logger.Printf("Outside trading hours (%s - %s), skipping cycle",
-				b.config.Schedule.TradingStart, b.config.Schedule.TradingEnd)
+	// Get today's official market schedule (cached monthly)
+	todaySchedule, schedErr := b.getTodaysMarketSchedule()
+	if schedErr != nil {
+		b.logger.Printf("Warning: Could not get today's market schedule: %v", schedErr)
+	} else {
+		// Log today's official schedule
+		if todaySchedule.Status == "closed" {
+			b.logger.Printf("Market is officially CLOSED today: %s", todaySchedule.Description)
+			b.logger.Println("Trading cycle skipped - market holiday")
 			return
 		}
-		b.logger.Printf("Outside trading hours (%s - %s), running after-hours check",
-			b.config.Schedule.TradingStart, b.config.Schedule.TradingEnd)
+		if todaySchedule.Open != nil {
+			b.logger.Printf("Official market hours today: %s - %s", 
+				todaySchedule.Open.Start, todaySchedule.Open.End)
+		}
+	}
+
+	// Check real-time market status from Tradier
+	marketClock, err := b.broker.GetMarketClock(false)
+	if err != nil {
+		b.logger.Printf("Warning: Could not get market clock: %v, falling back to config-based hours", err)
+	}
+
+	// Determine market status
+	var isMarketOpen bool
+	var marketState string
+	
+	if marketClock != nil {
+		marketState = marketClock.Clock.State
+		// Tradier states: "open", "closed", "premarket", "postmarket"
+		isMarketOpen = marketState == "open"
+		b.logger.Printf("Real-time market status: %s", marketState)
+	} else {
+		// Fallback to config-based hours
+		isMarketOpen = b.config.IsWithinTradingHours(now)
+		marketState = "unknown"
+		b.logger.Printf("Using config-based market hours: open=%t", isMarketOpen)
+	}
+
+	// Handle non-trading hours
+	if !isMarketOpen {
+		if !b.config.Schedule.AfterHoursCheck {
+			b.logger.Printf("Market is %s, skipping cycle", marketState)
+			return
+		}
+		b.logger.Printf("Market is %s, running after-hours check for existing positions only", marketState)
 	}
 
 	b.logger.Println("Starting trading cycle...")
@@ -242,12 +288,12 @@ func (b *Bot) runTradingCycle() {
 		}
 
 		// Check for adjustments (Phase 2) - only during regular hours
-		if b.config.Strategy.Adjustments.Enabled && isWithinHours {
+		if b.config.Strategy.Adjustments.Enabled && isMarketOpen {
 			b.checkAdjustments()
 		}
 	} else {
 		// Check entry conditions - only during regular trading hours
-		if isWithinHours {
+		if isMarketOpen {
 			b.logger.Println("No position, checking entry conditions...")
 			canEnter, reason := b.strategy.CheckEntryConditions()
 			if canEnter {
@@ -257,7 +303,7 @@ func (b *Bot) runTradingCycle() {
 				b.logger.Printf("Entry conditions not met: %s", reason)
 			}
 		} else {
-			b.logger.Println("After-hours: Skipping entry checks, only monitoring existing positions")
+			b.logger.Printf("Market %s: Skipping entry checks, only monitoring existing positions", marketState)
 		}
 	}
 
@@ -414,8 +460,8 @@ func (b *Bot) executeEntry() {
 	position.EntrySpot = order.SpotPrice
 	position.DTE = position.CalculateDTE()
 
-	// Set real entry IVR
-	position.EntryIVR = b.strategy.GetCurrentIVR()
+	// Set real entry IV percentage
+	position.EntryIV = b.strategy.GetCurrentIV() // SPY ATM IV as percentage
 
 	// Set the broker order ID
 	position.EntryOrderID = fmt.Sprintf("%d", placedOrder.Order.ID)
@@ -669,4 +715,75 @@ func (b *Bot) checkAdjustments() {
 func generatePositionID() string {
 	// Use UUID for guaranteed uniqueness
 	return uuid.New().String()
+}
+
+// getMarketCalendar gets the market calendar for a given month/year, with caching
+func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	// Use current month/year if not specified
+	now := time.Now()
+	if month == 0 {
+		month = int(now.Month())
+	}
+	if year == 0 {
+		year = now.Year()
+	}
+
+	// Check if we have cached data for this month/year
+	if b.marketCalendar != nil && 
+		b.calendarCacheMonth == month && 
+		b.calendarCacheYear == year {
+		return b.marketCalendar, nil
+	}
+
+	// Fetch new calendar data
+	b.logger.Printf("Fetching market calendar for %d/%d", month, year)
+	calendar, err := b.broker.GetMarketCalendar(month, year)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get market calendar: %w", err)
+	}
+
+	// Cache the result
+	b.marketCalendar = calendar
+	b.calendarCacheMonth = month
+	b.calendarCacheYear = year
+
+	b.logger.Printf("Cached market calendar: %d days for %d/%d", 
+		len(calendar.Calendar.Days.Day), month, year)
+
+	return calendar, nil
+}
+
+// getTodaysMarketSchedule gets today's market schedule from the cached calendar
+func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
+	now := time.Now()
+	calendar, err := b.getMarketCalendar(int(now.Month()), now.Year())
+	if err != nil {
+		return nil, err
+	}
+
+	// Find today's schedule
+	today := now.Format("2006-01-02")
+	for _, day := range calendar.Calendar.Days.Day {
+		if day.Date == today {
+			return &day, nil
+		}
+	}
+
+	// Today's data not found in cache - force refresh and try again
+	b.logger.Printf("Today's date %s not found in cached calendar, forcing refresh", today)
+	b.marketCalendar = nil // Clear cache to force refresh
+	
+	calendar, err = b.getMarketCalendar(int(now.Month()), now.Year())
+	if err != nil {
+		return nil, fmt.Errorf("failed to refresh calendar: %w", err)
+	}
+
+	// Try again with fresh data
+	for _, day := range calendar.Calendar.Days.Day {
+		if day.Date == today {
+			return &day, nil
+		}
+	}
+
+	return nil, fmt.Errorf("today's date %s still not found after calendar refresh", today)
 }

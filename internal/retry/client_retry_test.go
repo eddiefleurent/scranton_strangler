@@ -73,6 +73,17 @@ func (f *fakeBroker) GetTickSize(symbol string) (float64, error) {
 	return 0.01, nil
 }
 
+func (f *fakeBroker) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]broker.HistoricalDataPoint, error) {
+	return []broker.HistoricalDataPoint{
+		{Date: time.Now().AddDate(0, 0, -1), Close: 35.0},
+		{Date: time.Now().AddDate(0, 0, -2), Close: 36.0},
+	}, nil
+}
+
+func (f *fakeBroker) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
 func (f *fakeBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }

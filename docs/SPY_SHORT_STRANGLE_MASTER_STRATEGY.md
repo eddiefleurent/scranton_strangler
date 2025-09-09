@@ -13,14 +13,14 @@
 ## Entry Checklist
 
 ### Pre-Entry Requirements
-1. **Check IV Rank (IVR)**
-   - IVR > 30: Proceed normally
-   - IVR > 40: High IV - consider shorter DTE (30 days)
-   - IVR < 30: Low IV - consider longer DTE (60 days) or skip
+1. **Check SPY Implied Volatility (IV) Level**
+   - SPY ATM IV ≥ 15%: Proceed with entry (MVP threshold)
+   - SPY ATM IV ≥ 20%: High IV - excellent entry conditions
+   - SPY ATM IV < 15%: Skip entry - insufficient premium
 
 2. **Market Conditions**
    - No major events in next 48 hours
-   - VIX ideally > 20 (higher premiums)
+   - SPY ATM IV reflects adequate volatility premium
    - SPY not at extreme technical levels
 
 ### Entry Parameters
@@ -228,20 +228,21 @@ $17,500 ÷ $15,000 BPR = 1 contract
 
 ---
 
-## IV Rank Strategy
+## SPY Implied Volatility Strategy (MVP)
 
-### Entry Timing by IVR
-| IVR Range | Action | DTE | Notes |
-|-----------|--------|-----|-------|
-| 0-20 | Skip or 60 DTE | 60 | Very low premium environment |
-| 20-30 | Proceed cautiously | 60 | Below average opportunity |
-| 30-50 | Standard entry | 45 | Normal conditions |
-| 50-70 | Excellent entry | 45 | Above average opportunity |
-| 70+ | Premium entry | 30 | High IV, shorten DTE |
+### Entry Timing by SPY ATM IV
+| SPY IV Range | Action | DTE | Notes |
+|--------------|--------|-----|-------|
+| < 12% | Skip | - | Very low premium environment |
+| 12-15% | Proceed cautiously | 45 | Below threshold, consider waiting |
+| ≥ 15% | **ENTRY SIGNAL** | 45 | MVP threshold met |
+| ≥ 20% | Excellent entry | 45 | Above average opportunity |
+| ≥ 25% | Premium entry | 30-45 | High IV, consider shorter DTE |
 
-### Finding IVR
-- TastyWorks platform
-- ThinkOrSwim
+### Finding SPY ATM IV
+- **Bot Method**: Automated from SPY option chain (ATM call/put)
+- **Manual Verification**: TastyWorks, ThinkOrSwim, or Barchart
+- **Current Implementation**: Real-time from Tradier API
 
 ---
 
@@ -269,7 +270,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 2. **Holding past MaxDTE (21)** - Gamma risk increases exponentially
 3. **Not taking 50% profits** - Greed kills returns
 4. **Using on single stocks** - Stick to ETFs for stability
-5. **Ignoring IVR** - Trade when premium is worth it
+5. **Ignoring SPY IV levels** - Trade when premium is worth it
 6. **Aggressive rolling** - Don't chase, defend systematically
 7. **Setting stop losses** - Roll and manage instead
 8. **Trading around events** - Avoid FOMC, CPI releases
@@ -282,7 +283,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 1. Check SPY price vs strikes
 2. Calculate current P&L
 3. Check days remaining
-4. Review IVR for new entries
+4. Review SPY IV level for new entries
 
 ### Midday Check
 1. Assess if management needed
@@ -347,7 +348,7 @@ Track for each trade:
 - Entry date and DTE
 - Strikes and deltas at entry
 - Initial credit collected
-- IVR at entry
+- SPY ATM IV at entry
 - All adjustments made
 - Exit date and profit/loss
 - Days held
@@ -359,8 +360,8 @@ Track for each trade:
 ## Quick Decision Tree
 
 ```
-Is IVR > 30?
-  No → Wait or use 60 DTE
+Is SPY ATM IV ≥ 15%?
+  No → Wait for higher IV
   Yes ↓
   
 Sell 45 DTE strangle at 16Δ
@@ -384,7 +385,7 @@ Strike being tested?
 
 ## Final Rules for Success
 
-1. **Patience**: Wait for good IVR setups
+1. **Patience**: Wait for SPY IV ≥ 15% setups
 2. **Discipline**: Take 50% profits religiously
 3. **Defense**: Manage early and often
 4. **Size**: Never over-allocate

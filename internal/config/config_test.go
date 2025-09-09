@@ -42,9 +42,8 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 			Symbol:              "SPY",
 			AllocationPct:       0.35,
 			EscalateLossPct:     2.0,
-			UseMockHistoricalIV: false,
 			Entry: EntryConfig{
-				MinIVR:    30,
+				MinIVPct:  15.0,
 				TargetDTE: 45,
 				DTERange:  []int{40, 50},
 				Delta:     16,
@@ -336,9 +335,8 @@ func TestValidate_StoragePath(t *testing.T) {
 			Symbol:              "SPY",
 			AllocationPct:       0.35,
 			EscalateLossPct:     2.0,
-			UseMockHistoricalIV: false,
 			Entry: EntryConfig{
-				MinIVR:    30,
+				MinIVPct:  15.0,
 				TargetDTE: 45,
 				DTERange:  []int{40, 50},
 				Delta:     16,

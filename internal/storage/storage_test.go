@@ -111,7 +111,7 @@ func TestSaveAndLoad_RoundTrip_WithPermissionsAndAtomicity(t *testing.T) {
 		Quantity:       1,
 		CreditReceived: 2.5,
 		EntryDate:      time.Now().Add(-24 * time.Hour).UTC(),
-		EntryIVR:       33.3,
+		EntryIV:        33.3,
 		EntrySpot:      450.12,
 		CurrentPnL:     0,
 		DTE:            30,
@@ -457,7 +457,7 @@ func TestClosePosition_UpdatesHistoryStatsDailyPnLAndClearsCurrent(t *testing.T)
 	pos := models.NewPosition("p1", "SPY", 420, 480, time.Now().Add(30*24*time.Hour).UTC(), 1)
 	pos.CreditReceived = 2.5
 	pos.EntryDate = time.Now().Add(-24 * time.Hour).UTC()
-	pos.EntryIVR = 33.3
+	pos.EntryIV = 33.3
 	pos.EntrySpot = 450.12
 
 	// Transition through proper states: idle -> submitted -> open
@@ -517,7 +517,7 @@ func TestUpdateStatistics_LossPathsViaClosePosition(t *testing.T) {
 		pos := models.NewPosition("p", "SPY", 420, 480, time.Now().Add(30*24*time.Hour).UTC(), 1)
 		pos.CreditReceived = 2.5
 		pos.EntryDate = time.Now().Add(-24 * time.Hour).UTC()
-		pos.EntryIVR = 33.3
+		pos.EntryIV = 33.3
 		pos.EntrySpot = 450.12
 
 		// Transition through proper states: idle -> submitted -> open

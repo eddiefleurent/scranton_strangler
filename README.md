@@ -44,11 +44,12 @@ Key settings to update:
 ### 4. Run the Bot
 
 ```bash
-# Build the bot
-go build -o strangle-bot cmd/bot/main.go
+# Build and run locally
+make build
+make run
 
-# Run in paper trading mode
-./strangle-bot --config=config.yaml
+# Or deploy to Unraid server
+make deploy-unraid
 ```
 
 ## Project Structure
@@ -104,10 +105,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
 
 ## Development Phases
 
-- **Phase 1 (Current)**: Basic entry/exit, paper trading
-- **Phase 2**: Full adjustment system
-- **Phase 3**: Multi-asset portfolio
-- **Phase 4**: Production deployment
+- **Phase 1 (MVP)**: Basic entry/exit logic with paper trading ✅
+- **Phase 2**: Full adjustment system ("Football System")
+- **Phase 3**: Multi-asset portfolio support
+- **Phase 4**: Production hardening and monitoring
 
 ## Safety First
 
@@ -117,45 +118,44 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
 - Verify all trades match expected behavior
 - Never trade with money you can't afford to lose
 
-## Production Deployment
+## Unraid Deployment
 
-### Docker Compose vs Docker Swarm
+The bot is designed for simple binary deployment to Unraid servers. No Docker containers or runtime dependencies required.
 
-The production configuration (`docker-compose.prod.yml`) includes resource limits that are **only honored by Docker Swarm**, not by regular Docker Compose:
+### Prerequisites
 
-```yaml
-deploy:
-  resources:
-    limits:
-      memory: 512M
-      cpus: '0.5'
-    reservations:
-      memory: 256M
-      cpus: '0.25'
-```
+1. **SSH Key Authentication**: Ensure passwordless SSH access to your Unraid server:
+   ```bash
+   ssh unraid "echo 'Connection successful'"
+   ```
 
-### For Production Use
+2. **Configuration**: Create your trading configuration:
+   ```bash
+   make dev-setup  # Creates config.yaml from example
+   # Edit config.yaml with your Tradier API credentials
+   ```
 
-**Option A: Use Docker Swarm** (Recommended)
+### Deploy to Unraid
+
 ```bash
-# Initialize swarm (one-time)
-docker swarm init
-
-# Deploy using stack
-docker stack deploy -c docker-compose.yml -c docker-compose.prod.yml strangle-bot
-
-# Check status
-docker stack services strangle-bot
+make deploy-unraid
 ```
 
-**Option B: Use Docker Run with explicit limits**
+**What happens automatically:**
+- Builds Go binary for Linux
+- Creates `/mnt/user/appdata/scranton-strangler/` directory structure
+- Copies binary and config to Unraid
+- Creates start/stop service scripts
+- Adds to Unraid's boot sequence for auto-start
+- Starts the bot immediately
+
+### Management Commands
+
 ```bash
-# Remove deploy.* sections from docker-compose.prod.yml
-docker run --memory=512m --cpus=0.5 --memory-reservation=256m \
-  --name strangle-bot your-image:tag
+make unraid-logs      # View bot logs
+make unraid-status    # Check if bot is running
+make unraid-restart   # Restart the bot service
 ```
-
-The repository currently uses Option A - production deployment requires Docker Swarm to honor the resource limits defined in `docker-compose.prod.yml`.
 
 ## Monitoring
 
@@ -183,16 +183,22 @@ The bot logs all activity to `bot.log`:
 - Check minimum credit requirement ($2)
 - Ensure market hours (9:30 AM - 4:00 PM ET)
 
-## Next Steps
+## Implementation Status
 
-1. [x] Test Tradier API connection
-2. [ ] Implement IVR calculation
-3. [ ] Build entry scanner
-4. [ ] Create position monitor
-5. [ ] Add exit logic
-6. [ ] Start paper trading
-7. [ ] Run for 30 days
-8. [ ] Evaluate results
+**Current Implementation** (Phase 1 MVP):
+- ✅ Tradier API integration with rate limiting
+- ✅ IVR calculation using VXX proxy
+- ✅ Complete option chain processing
+- ✅ Entry signal generation (IVR > 30%, 45 DTE, 16Δ)
+- ✅ Order execution via Tradier API
+- ✅ Position state machine with comprehensive tracking
+- ✅ Paper trading mode for safe testing
+- ✅ Unraid deployment with auto-start
+
+**Next Steps** (Phase 2):
+- [ ] Advanced adjustment logic ("Football System")
+- [ ] Production hardening and monitoring
+- [ ] Multi-asset portfolio support
 
 ## Resources
 

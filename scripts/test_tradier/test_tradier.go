@@ -320,9 +320,15 @@ func main() {
 
 func formatNumber(n int64) string {
 	if n >= 1000000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+		// Round to nearest 0.1M
+		millions := float64(n) / 1000000
+		rounded := math.Round(millions*10) / 10
+		return fmt.Sprintf("%.1fM", rounded)
 	} else if n >= 1000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1000)
+		// Round to nearest 0.1K
+		thousands := float64(n) / 1000
+		rounded := math.Round(thousands*10) / 10
+		return fmt.Sprintf("%.1fK", rounded)
 	}
 	return fmt.Sprintf("%d", n)
 }
