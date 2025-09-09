@@ -59,15 +59,15 @@ clean:
 # Unraid deployment
 deploy-unraid:
 	@echo "Deploying binary to Unraid..."
-	@if [ ! -f scripts/deploy.sh ]; then \
-		echo "Error: scripts/deploy.sh not found. Please ensure the deployment script exists."; \
+	@if [ ! -f deploy.sh ]; then \
+		echo "Error: deploy.sh not found. Please ensure the deployment script exists."; \
 		exit 1; \
 	fi
-	@if [ ! -x scripts/deploy.sh ]; then \
-		echo "Error: scripts/deploy.sh is not executable. Please run 'chmod +x scripts/deploy.sh'."; \
+	@if [ ! -x deploy.sh ]; then \
+		echo "Error: deploy.sh is not executable. Please run 'chmod +x deploy.sh'."; \
 		exit 1; \
 	fi
-	./scripts/deploy.sh
+	./deploy.sh
 
 # Development helpers
 dev-setup:
