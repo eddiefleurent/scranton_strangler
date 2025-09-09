@@ -46,9 +46,6 @@ func testInterface(t *testing.T, storage Interface) {
 		time.Now().AddDate(0, 0, 30), // 30 DTE
 		1,                            // quantity
 	)
-	testPos.CreditReceived = 3.50
-	testPos.EntryIV = 45.0
-	testPos.EntrySpot = 450.0
 
 	// Transition to open state
 	err := testPos.TransitionState(models.StateSubmitted, "order_placed")
@@ -59,6 +56,12 @@ func testInterface(t *testing.T, storage Interface) {
 	if err != nil {
 		t.Fatalf("Failed to transition position to open: %v", err)
 	}
+
+	// Set position data after transitions (when position is Open)
+	testPos.CreditReceived = 3.50
+	testPos.EntryIV = 45.0
+	testPos.EntrySpot = 450.0
+	testPos.Quantity = 1 // Ensure Quantity is set to positive value for Open invariants
 
 	// Test setting current position
 	err = storage.SetCurrentPosition(testPos)
@@ -86,7 +89,7 @@ func testInterface(t *testing.T, storage Interface) {
 	// Test adding adjustment
 	adjustment := models.Adjustment{
 		Date:        time.Now(),
-		Type:        "roll_call",
+		Type:        models.AdjustmentRoll,
 		OldStrike:   455.0,
 		NewStrike:   460.0,
 		Credit:      1.25,
@@ -103,8 +106,8 @@ func testInterface(t *testing.T, storage Interface) {
 	if len(currentPos.Adjustments) != 1 {
 		t.Errorf("Expected 1 adjustment, got %d", len(currentPos.Adjustments))
 	}
-	if currentPos.Adjustments[0].Type != "roll_call" {
-		t.Errorf("Expected adjustment type 'roll_call', got %s", currentPos.Adjustments[0].Type)
+	if currentPos.Adjustments[0].Type != models.AdjustmentRoll {
+		t.Errorf("Expected adjustment type '%s', got %s", models.AdjustmentRoll, currentPos.Adjustments[0].Type)
 	}
 
 	// Test closing position
@@ -214,7 +217,6 @@ func TestExitMetadataBackup(t *testing.T) {
 		time.Now().AddDate(0, 0, 30),
 		1,
 	)
-	testPos.CreditReceived = 3.50
 
 	// Transition to open state (must go through submitted first)
 	err = testPos.TransitionState(models.StateSubmitted, "order_placed")
@@ -225,6 +227,10 @@ func TestExitMetadataBackup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to transition position to open: %v", err)
 	}
+
+	// Post-fill details (persisted once open)
+	testPos.CreditReceived = 3.50
+	testPos.Quantity = 1
 
 	err = storage.SetCurrentPosition(testPos)
 	if err != nil {

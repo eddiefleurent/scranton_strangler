@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -Eeuo pipefail
 
 echo "🚀 Deploying Scranton Strangler Binary to Unraid..."
 echo "=================================================="
@@ -57,15 +57,15 @@ ssh "$UNRAID_HOST" "mkdir -p $UNRAID_APP_PATH/{data,logs}"
 
 # Stop existing service if running
 echo "🛑 Stopping existing service..."
-ssh "$UNRAID_HOST" "if [ -f $UNRAID_APP_PATH/stop-service.sh ]; then $UNRAID_APP_PATH/stop-service.sh; else killall scranton-strangler 2>/dev/null || echo 'Service not running'; fi"
+ssh "$UNRAID_HOST" "if [ -f $UNRAID_APP_PATH/stop-service.sh ]; then $UNRAID_APP_PATH/stop-service.sh; else killall \"$SERVICE_NAME\" 2>/dev/null || echo 'Service not running'; fi"
 
 # Copy binary and config to Unraid
 echo "📦 Copying files to Unraid..."
 scp scranton-strangler "$UNRAID_HOST:$UNRAID_APP_PATH/"
 scp config.yaml "$UNRAID_HOST:$UNRAID_APP_PATH/"
 
-# Make binary executable
-ssh "$UNRAID_HOST" "chmod +x $UNRAID_APP_PATH/scranton-strangler"
+# Make binary executable and secure config
+ssh "$UNRAID_HOST" "chmod +x $UNRAID_APP_PATH/scranton-strangler && chmod 600 $UNRAID_APP_PATH/config.yaml"
 
 # Create systemd-style service script for Unraid
 echo "⚙️  Creating service script..."
@@ -94,19 +94,36 @@ EOF"
 ssh "$UNRAID_HOST" "chmod +x $UNRAID_APP_PATH/start-service.sh"
 
 # Create stop script
-ssh "$UNRAID_HOST" "cat > $UNRAID_APP_PATH/stop-service.sh << 'EOF'
+ssh "$UNRAID_HOST" "cat > $UNRAID_APP_PATH/stop-service.sh << \"EOF\"
 #!/bin/bash
-cd $UNRAID_APP_PATH
-if [ -f scranton-strangler.pid ]; then
+APP_PATH=\"$UNRAID_APP_PATH\"
+cd \"\$APP_PATH\"
+
+if [ -f scranton-strangler.pid ] && [ -s scranton-strangler.pid ]; then
     PID=\$(cat scranton-strangler.pid)
-    if kill \$PID 2>/dev/null; then
-        echo \"Stopped Scranton Strangler (PID \$PID)\"
+    # Validate PID is numeric
+    if ! [[ \"\$PID\" =~ ^[0-9]+\$ ]]; then
+        echo \"Error: Invalid PID format in scranton-strangler.pid\"
+        rm -f scranton-strangler.pid
+        exit 1
+    fi
+
+    # Check if process is running using kill -0
+    if kill -0 \"\$PID\" 2>/dev/null; then
+        if kill \"\$PID\" 2>/dev/null; then
+            echo \"Successfully stopped Scranton Strangler (PID \$PID)\"
+        else
+            echo \"Failed to stop process \$PID\"
+            exit 1
+        fi
     else
-        echo \"Process \$PID not found\"
+        echo \"Process \$PID not found or already stopped\"
     fi
     rm -f scranton-strangler.pid
 else
-    echo \"PID file not found\"
+    echo \"PID file not found or empty\"
+    # Clean up empty PID file if it exists
+    rm -f scranton-strangler.pid
 fi
 EOF"
 
@@ -124,8 +141,8 @@ ssh "$UNRAID_HOST" "$UNRAID_APP_PATH/start-service.sh"
 echo "⏳ Waiting for service to start..."
 sleep 3
 
-# Check if service is running
-if ssh "$UNRAID_HOST" "pgrep -f scranton-strangler" >/dev/null; then
+# Check if service is running using PID file
+if ssh "$UNRAID_HOST" "[ -f $UNRAID_APP_PATH/scranton-strangler.pid ] && kill -0 \$(cat $UNRAID_APP_PATH/scranton-strangler.pid) 2>/dev/null"; then
     log_info "Service started successfully!"
     
     # Show service status

@@ -338,6 +338,10 @@ func TestStrangleStrategy_findStrikeByDelta(t *testing.T) {
 	}
 
 	strategy := &StrangleStrategy{
+		config: &Config{
+			MinVolume:       0, // Disable liquidity filtering in tests
+			MinOpenInterest: 0,
+		},
 		logger:     log.Default(),
 		chainCache: make(map[string]*optionChainCacheEntry),
 	}
@@ -420,6 +424,105 @@ func TestStrangleStrategy_findTargetExpiration(t *testing.T) {
 	daysDiff := int(expDate.Sub(now).Hours() / 24)
 	if daysDiff < 40 || daysDiff > 50 {
 		t.Errorf("findTargetExpiration(45) is %d days away, want ~45 days", daysDiff)
+	}
+}
+
+func TestStrangleStrategy_shouldFilterForLiquidity(t *testing.T) {
+	tests := []struct {
+		name            string
+		minVolume       int64
+		minOpenInterest int64
+		option          broker.Option
+		expected        bool
+	}{
+		{
+			name:            "both thresholds disabled - no filtering",
+			minVolume:       0,
+			minOpenInterest: 0,
+			option: broker.Option{
+				Volume:       5,
+				OpenInterest: 50,
+			},
+			expected: false,
+		},
+		{
+			name:            "sufficient volume and OI - no filtering",
+			minVolume:       100,
+			minOpenInterest: 1000,
+			option: broker.Option{
+				Volume:       150,
+				OpenInterest: 1500,
+			},
+			expected: false,
+		},
+		{
+			name:            "insufficient volume - should filter",
+			minVolume:       100,
+			minOpenInterest: 1000,
+			option: broker.Option{
+				Volume:       50,  // Below threshold
+				OpenInterest: 1500,
+			},
+			expected: true,
+		},
+		{
+			name:            "insufficient open interest - should filter",
+			minVolume:       100,
+			minOpenInterest: 1000,
+			option: broker.Option{
+				Volume:       150,
+				OpenInterest: 500, // Below threshold
+			},
+			expected: true,
+		},
+		{
+			name:            "no data available (test scenario) - no filtering",
+			minVolume:       100,
+			minOpenInterest: 1000,
+			option: broker.Option{
+				Volume:       0,
+				OpenInterest: 0,
+			},
+			expected: false,
+		},
+		{
+			name:            "volume only configured - filters based on volume",
+			minVolume:       100,
+			minOpenInterest: 0,
+			option: broker.Option{
+				Volume:       50, // Below threshold
+				OpenInterest: 500,
+			},
+			expected: true,
+		},
+		{
+			name:            "OI only configured - filters based on OI",
+			minVolume:       0,
+			minOpenInterest: 1000,
+			option: broker.Option{
+				Volume:       150,
+				OpenInterest: 500, // Below threshold
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			strategy := &StrangleStrategy{
+				config: &Config{
+					MinVolume:       tt.minVolume,
+					MinOpenInterest: tt.minOpenInterest,
+				},
+				logger:     log.Default(),
+				chainCache: make(map[string]*optionChainCacheEntry),
+			}
+
+			result := strategy.shouldFilterForLiquidity(&tt.option)
+			if result != tt.expected {
+				t.Errorf("shouldFilterForLiquidity() = %v, want %v", result, tt.expected)
+			}
+		})
 	}
 }
 

@@ -123,6 +123,8 @@ func main() {
 		StopLossPct:         cfg.Strategy.Exit.StopLossPct,
 		MaxPositionLoss:     cfg.Risk.MaxPositionLoss,
 		MaxContracts:        cfg.Risk.MaxContracts,
+		MinVolume:           cfg.Strategy.Entry.MinVolume,
+		MinOpenInterest:     cfg.Strategy.Entry.MinOpenInterest,
 	}
 	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger, bot.storage)
 
@@ -535,9 +537,6 @@ func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
 		b.logger.Printf("Failed to save position with close order ID: %v", err)
 		return
 	}
-	if err := b.storage.Save(); err != nil {
-		b.logger.Printf("Warning: Failed to persist position update: %v", err)
-	}
 
 	b.logger.Printf("Position %s transitioned to adjusting state, monitoring close order %d", position.ID, closeOrder.Order.ID)
 
@@ -670,7 +669,7 @@ func (b *Bot) completePositionClose(
 
 	stats := b.storage.GetStatistics()
 	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
-		stats.TotalTrades, stats.WinRate, stats.TotalPnL)
+		stats.TotalTrades, stats.WinRate*100, stats.TotalPnL)
 }
 
 func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.ExitReason) float64 {
@@ -755,7 +754,7 @@ func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse
 
 // getTodaysMarketSchedule gets today's market schedule from the cached calendar
 func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
-	now := time.Now()
+	now := time.Now().In(b.nyLocation)
 	calendar, err := b.getMarketCalendar(int(now.Month()), now.Year())
 	if err != nil {
 		return nil, err
@@ -772,7 +771,7 @@ func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
 	// Today's data not found in cache - force refresh and try again
 	b.logger.Printf("Today's date %s not found in cached calendar, forcing refresh", today)
 	b.marketCalendar = nil // Clear cache to force refresh
-	
+
 	calendar, err = b.getMarketCalendar(int(now.Month()), now.Year())
 	if err != nil {
 		return nil, fmt.Errorf("failed to refresh calendar: %w", err)

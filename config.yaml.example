@@ -23,6 +23,8 @@ strategy:
     dte_range: [40, 50]  # Acceptable DTE range
     delta: 16  # Target delta (16 = 0.16)
     min_credit: 2.00  # Minimum credit to receive
+    min_volume: 100  # Minimum daily volume for liquidity (0 to disable, default: 100)
+    min_open_interest: 1000  # Minimum open interest for liquidity (0 to disable, default: 1000)
     
   exit:
     profit_target: 0.50  # Exit at 50% profit

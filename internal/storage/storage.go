@@ -422,10 +422,14 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	var condition string
 	// Prefer explicit reason when provided
 	switch reason {
-	case "manual":
+	case "manual", "force_close":
 		condition = models.ConditionForceClose
-	case "hard_stop":
+	case "hard_stop", "stop_loss":
 		condition = models.ConditionHardStop
+	case "profit_target", "time":
+		condition = models.ConditionExitConditions
+	case "emergency_exit", "escalate":
+		condition = models.ConditionEmergencyExit
 	}
 	if condition == "" {
 		currentState := s.data.CurrentPosition.GetCurrentState()
@@ -602,6 +606,7 @@ func clonePosition(pos *models.Position) *models.Position {
 		Expiration:     pos.Expiration,
 		Quantity:       pos.Quantity,
 		CreditReceived: pos.CreditReceived,
+		EntryLimitPrice: pos.EntryLimitPrice,
 		EntryDate:      pos.EntryDate,
 		EntryIV:        pos.EntryIV,
 		EntrySpot:      pos.EntrySpot,

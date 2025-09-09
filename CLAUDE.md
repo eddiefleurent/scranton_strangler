@@ -117,10 +117,10 @@ make deploy-unraid
 
 ### File Structure on Unraid
 
-```
+```text
 /mnt/user/appdata/scranton-strangler/
 ├── scranton-strangler     # The Go binary
-├── config.yaml           # Your Tradier API configuration  
+├── config.yaml           # Your Tradier API configuration
 ├── start-service.sh      # Auto-generated service start script
 ├── stop-service.sh       # Auto-generated service stop script
 ├── scranton-strangler.pid # Process ID file (when running)
@@ -167,7 +167,7 @@ The deployment automatically adds the bot to Unraid's startup sequence by append
 
 ## Project Structure
 
-```
+```text
 internal/
 ├── broker/
 │   ├── interface.go          # Broker interface definition

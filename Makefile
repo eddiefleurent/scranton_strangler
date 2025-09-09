@@ -29,7 +29,7 @@ build-prod:
 # Run tests
 test:
 	@echo "Running tests..."
-	go test -v ./...
+	go test -race -v ./...
 
 # Run tests with coverage
 test-coverage:
@@ -59,7 +59,15 @@ clean:
 # Unraid deployment
 deploy-unraid:
 	@echo "Deploying binary to Unraid..."
-	./deploy.sh
+	@if [ ! -f scripts/deploy.sh ]; then \
+		echo "Error: scripts/deploy.sh not found. Please ensure the deployment script exists."; \
+		exit 1; \
+	fi
+	@if [ ! -x scripts/deploy.sh ]; then \
+		echo "Error: scripts/deploy.sh is not executable. Please run 'chmod +x scripts/deploy.sh'."; \
+		exit 1; \
+	fi
+	./scripts/deploy.sh
 
 # Development helpers
 dev-setup:
@@ -89,8 +97,8 @@ build-test-helper:
 # Security scan
 security-scan: tools
 	@echo "Running security scan..."
-	gosec ./...
-	govulncheck ./...
+	@PATH="$(shell go env GOPATH)/bin:$$PATH" gosec ./...
+	@PATH="$(shell go env GOPATH)/bin:$$PATH" govulncheck ./...
 
 # Install security tools
 tools:

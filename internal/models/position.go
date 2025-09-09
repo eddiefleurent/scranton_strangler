@@ -54,6 +54,16 @@ const (
 	AdjustmentHedge AdjustmentType = "hedge"
 )
 
+// Valid returns true if the AdjustmentType is one of the defined constants
+func (t AdjustmentType) Valid() bool {
+	switch t {
+	case AdjustmentRoll, AdjustmentDelta, AdjustmentHedge:
+		return true
+	default:
+		return false
+	}
+}
+
 // Adjustment represents a modification made to an existing position.
 type Adjustment struct {
 	Date        time.Time      `json:"date"`
@@ -283,7 +293,10 @@ func (p *Position) ValidateState() error {
 				p.ID, currentState, p.EntryDate, p.ExitDate)
 		}
 	case StateSubmitted:
-		// Submitted state invariants: order submitted but not yet filled
+		// Submitted-state invariants are strict (credit=0, qty=0):
+		// StateSubmitted represents "order placed but not yet filled".
+		// Credit and quantity should remain zero until order fills and position becomes Open.
+		// This maintains clear separation between order placement and position activation.
 		if !p.EntryDate.IsZero() {
 			return fmt.Errorf("position %s in state %s: EntryDate must be zero for submitted positions (current: %v)",
 				p.ID, currentState, p.EntryDate)

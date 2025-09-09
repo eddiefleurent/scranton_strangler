@@ -114,21 +114,22 @@ func main() {
 				continue
 			}
 
-			// Load market timezone (ET) for accurate DTE calculation
+			// Load market timezone (ET) for accurate DTE calculation at market close (4 PM ET)
 			etLoc, err := time.LoadLocation("America/New_York")
 			if err != nil {
 				fmt.Printf("Error loading ET timezone: %v\n", err)
 				continue
 			}
 
-			// Convert expiration date to ET midnight
-			expDateET := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, etLoc)
-
-			// Get current time in ET and create today at ET midnight
+			// Define market-close-aligned times
+			expDateET := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 16, 0, 0, 0, etLoc)
 			nowET := time.Now().In(etLoc)
-			todayET := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 0, 0, 0, 0, etLoc)
-
-			// Calculate DTE as whole days difference
+			if nowET.Hour() >= 16 {
+				// After close, advance to next trading day for DTE baseline
+				nowET = nowET.AddDate(0, 0, 1)
+			}
+			todayET := time.Date(nowET.Year(), nowET.Month(), nowET.Day(), 16, 0, 0, 0, etLoc)
+			// Whole-day difference
 			dte := int(expDateET.Sub(todayET).Hours() / 24)
 
 			// Skip past or negative DTE expirations
@@ -391,7 +392,7 @@ func readConfigCredentials() (apiKey, accountID string, err error) {
 		return "", "", fmt.Errorf("config.yaml not found in current or parent directories")
 	}
 
-	data, err := os.ReadFile(configFile)
+	data, err := os.ReadFile(configFile) // #nosec G304
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read config file: %v", err)
 	}
