@@ -100,9 +100,9 @@ security-scan: tools
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" gosec ./...
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" govulncheck ./...
 
-# Check: lint, test, and build
-check: lint test build
-	@echo "✅ All checks passed: lint, test, and build completed successfully"
+# Check: lint, test, security scan, and build
+check: lint test security-scan build
+	@echo "✅ All checks passed: lint, test, security scan, and build completed successfully"
 
 # Install security tools
 tools:

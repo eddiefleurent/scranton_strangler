@@ -16,11 +16,14 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
-// ErrNoIVReadings is returned when no IV readings are found for a symbol
-var ErrNoIVReadings = errors.New("no IV readings found")
-
 // nyLocation caches the America/New_York timezone location
 var nyLocation *time.Location
+
+// nyOnce ensures nyLocation is initialized only once
+var nyOnce sync.Once
+
+// nyLocationErr stores any error from loading the New York timezone
+var nyLocationErr error
 
 
 // JSONStorage implements Interface using JSON file persistence
@@ -57,15 +60,15 @@ type Statistics struct {
 
 // getNYLocation returns the cached America/New_York timezone location
 func getNYLocation() (*time.Location, error) {
-	if nyLocation != nil {
-		return nyLocation, nil
-	}
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		return nil, fmt.Errorf("failed to load America/New_York timezone: %w", err)
-	}
-	nyLocation = loc
-	return loc, nil
+	nyOnce.Do(func() {
+		loc, err := time.LoadLocation("America/New_York")
+		if err != nil {
+			nyLocationErr = fmt.Errorf("failed to load America/New_York timezone: %w", err)
+			return
+		}
+		nyLocation = loc
+	})
+	return nyLocation, nyLocationErr
 }
 
 // NewJSONStorage creates a new JSON-based storage implementation
@@ -381,6 +384,12 @@ func (s *JSONStorage) copyFile(src, dst string) error {
 func (s *JSONStorage) validateFilePath(path string) error {
 	// Use cached resolved storage root to reduce syscall overhead
 	storageRootResolved := s.storageRoot
+	if storageRootResolved == "" {
+		if err := s.cacheStorageRoot(); err != nil {
+			return fmt.Errorf("failed to cache storage root: %w", err)
+		}
+		storageRootResolved = s.storageRoot
+	}
 
 	// Clean and resolve the target path to absolute path
 	targetClean := filepath.Clean(path)
@@ -723,10 +732,15 @@ func (s *JSONStorage) StoreIVReading(reading *models.IVReading) error {
 	}
 
 	// Check if reading already exists for this symbol and date
+	loc, err := getNYLocation()
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		loc = time.UTC
+	}
 	for i, existing := range s.data.IVReadings {
-		sameDay := existing.Date.UTC().Truncate(24 * time.Hour).Equal(
-			reading.Date.UTC().Truncate(24 * time.Hour),
-		)
+		e := existing.Date.In(loc)
+		r := reading.Date.In(loc)
+		sameDay := e.Year() == r.Year() && e.YearDay() == r.YearDay()
 		if existing.Symbol == reading.Symbol && sameDay {
 			// Update existing reading
 			s.data.IVReadings[i] = *reading

@@ -169,7 +169,7 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 func (s *StrangleStrategy) GetCurrentIV() float64 {
 	currentIV, err := s.getCurrentImpliedVolatility()
 	if err != nil {
-		s.logger.Printf("Warning: Could not get current SPY IV: %v", err)
+		s.logger.Printf("Warning: Could not get current %s IV: %v", s.config.Symbol, err)
 		return 0.0
 	}
 	return currentIV * 100 // Convert to percentage
@@ -179,17 +179,17 @@ func (s *StrangleStrategy) GetCurrentIV() float64 {
 func (s *StrangleStrategy) CheckVolatilityThreshold() (bool, string) {
 	currentIV, err := s.getCurrentImpliedVolatility()
 	if err != nil {
-		return false, fmt.Sprintf("SPY IV unavailable: %v", err)
+		return false, fmt.Sprintf("%s IV unavailable: %v", s.config.Symbol, err)
 	}
 	
 	ivPercent := currentIV * 100
 	threshold := s.config.MinIVPct // Configurable threshold from config.yaml
 	
 	if ivPercent >= threshold {
-		return true, fmt.Sprintf("SPY IV elevated: %.1f%% >= %.1f%%", ivPercent, threshold)
+		return true, fmt.Sprintf("%s IV elevated: %.1f%% >= %.1f%%", s.config.Symbol, ivPercent, threshold)
 	}
 	
-	return false, fmt.Sprintf("SPY IV too low: %.1f%% < %.1f%%", ivPercent, threshold)
+	return false, fmt.Sprintf("%s IV too low: %.1f%% < %.1f%%", s.config.Symbol, ivPercent, threshold)
 }
 
 // getCurrentImpliedVolatility gets current ATM implied volatility for SPY
@@ -333,6 +333,9 @@ func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration st
 	}
 	s.cacheMutex.RUnlock()
 
+	// Clean up expired entries to prevent unbounded cache growth
+	s.cleanupExpiredCacheEntries()
+
 	// Fetch from broker using provided fetcher function
 	chain, err := fetcher()
 	if err != nil {
@@ -351,12 +354,32 @@ func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration st
 	return chain, nil
 }
 
-// getCachedOptionChain retrieves option chain from cache or fetches from broker if not cached or expired
-func (s *StrangleStrategy) getCachedOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
-	return s.getCachedOptionChainWithFetcher(symbol, expiration, withGreeks, func() ([]broker.Option, error) {
-		return s.broker.GetOptionChain(symbol, expiration, withGreeks)
-	})
+// cleanupExpiredCacheEntries removes expired entries from the cache to prevent unbounded growth
+func (s *StrangleStrategy) cleanupExpiredCacheEntries() {
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	now := time.Now()
+	expiredKeys := make([]string, 0)
+
+	// Find expired entries
+	for key, entry := range s.chainCache {
+		if now.Sub(entry.timestamp) >= optionChainCacheTTL {
+			expiredKeys = append(expiredKeys, key)
+		}
+	}
+
+	// Remove expired entries
+	for _, key := range expiredKeys {
+		delete(s.chainCache, key)
+	}
+
+	// Log cleanup if any entries were removed
+	if len(expiredKeys) > 0 {
+		s.logger.Printf("Cache cleanup: removed %d expired entries", len(expiredKeys))
+	}
 }
+
 
 // getCachedOptionChainWithContext retrieves option chain from cache or fetches from broker with context timeout
 func (s *StrangleStrategy) getCachedOptionChainWithContext(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
@@ -371,10 +394,15 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 		return 0, fmt.Errorf("position is nil")
 	}
 
-	// Get option chain for the position's expiration (cached)
+	// Get option chain for the position's expiration (cached, with timeout)
 	expiration := position.Expiration.Format("2006-01-02")
-	chain, err := s.getCachedOptionChain(position.Symbol, expiration, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	chain, err := s.getCachedOptionChainWithContext(ctx, position.Symbol, expiration, false)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("option chain request timed out: %w", ctx.Err())
+		}
 		return 0, fmt.Errorf("failed to get option chain: %w", err)
 	}
 
@@ -394,12 +422,8 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 
 	// Calculate P&L: Credit received - Current value of sold options
 	// (Positive when options lose value, negative when they gain value)
-	// NOTE: GetNetCredit() returns per-share credit, but our current implementation
-	// stores CreditReceived as total dollars (not per-share). This inconsistency
-	// is intentional for now to match our test data and actual bot behavior.
-	// Code review suggested multiplying by sharesPerContract (100) here, but
-	// that would double-count since our data is already in total dollars.
-	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity))
+	// GetNetCredit() returns per-share credit, multiply by quantity and shares per contract (100)
+	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity) * 100)
 	pnl := totalCreditReceived - currentTotalValue
 
 	return pnl, nil
@@ -411,10 +435,15 @@ func (s *StrangleStrategy) GetCurrentPositionValue(position *models.Position) (f
 		return 0, fmt.Errorf("position is nil")
 	}
 
-	// Get option chain for the position's expiration (cached)
+	// Get option chain for the position's expiration (cached, with timeout)
 	expiration := position.Expiration.Format("2006-01-02")
-	chain, err := s.getCachedOptionChain(position.Symbol, expiration, false)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	chain, err := s.getCachedOptionChainWithContext(ctx, position.Symbol, expiration, false)
 	if err != nil {
+		if ctx.Err() != nil {
+			return 0, fmt.Errorf("option chain request timed out: %w", ctx.Err())
+		}
 		return 0, fmt.Errorf("failed to get option chain: %w", err)
 	}
 
@@ -695,8 +724,8 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 
 	// Check profit target
 	// Calculate profit percentage against abs(net credit) received (in dollars)
-	// GetNetCredit() already returns the total dollar amount, no need to multiply by 100
-	absTotalNetCredit := math.Abs(position.GetNetCredit()) * float64(position.Quantity)
+	// GetNetCredit() returns per-share credit, multiply by quantity and shares per contract (100)
+	absTotalNetCredit := math.Abs(position.GetNetCredit()) * float64(position.Quantity) * 100
 	if absTotalNetCredit == 0 {
 		return true, ExitReasonError
 	}

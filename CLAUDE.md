@@ -26,7 +26,7 @@ make test-api          # Test Tradier API connection
 # Code quality
 make lint              # Run golangci-lint
 make security-scan     # Run security scans (gosec, govulncheck)
-make check             # Run lint, test, and build in sequence
+make check             # Run lint, test, security scan, and build in sequence
 
 # Unraid deployment
 make deploy-unraid     # Deploy binary to Unraid
@@ -35,7 +35,7 @@ make unraid-status     # Check bot status on Unraid
 make unraid-restart    # Restart bot on Unraid
 
 # Development setup
-> **SECURITY WARNING**: Add config.yaml to .gitignore and NEVER commit it. Populate secrets from environment variables or CI secrets using `envsubst < config.yaml.template > config.yaml` or similar secure injection methods.
+> **SECURITY WARNING**: Add config.yaml to .gitignore and NEVER commit it. Populate secrets from environment variables or CI secrets using `envsubst < config.yaml.template > config.yaml` or similar secure injection methods. Also protect `data/positions.json` and `logs/` as they may contain sensitive trading information.
 make dev-setup        # Create config.yaml from example
 
 # Cleanup
@@ -221,6 +221,7 @@ Uses `config.yaml` for all settings. Copy from `config.yaml.example` and update 
 - **Environment**: `mode` (paper/live), `log_level`
 - **Broker**: API credentials, endpoints, OTOCO order support
 - **Strategy**: Entry/exit rules, DTE targets, delta, credit requirements
+  - Note: profit_target is a ratio (0–1), whereas fields with "Pct" are percentage points (e.g., 30 for 30%).
 - **Risk**: Position sizing, loss limits, allocation limits
 - **Schedule**: Market hours, check intervals
 

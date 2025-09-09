@@ -138,6 +138,21 @@ func Load(configPath string) (*Config, error) {
 	return &config, nil
 }
 
+// resolveLocation returns the configured TZ or NY fallback.
+func (c *Config) resolveLocation() *time.Location {
+	tz := c.Schedule.Timezone
+	if strings.TrimSpace(tz) == "" {
+		tz = "America/New_York"
+	}
+	if loc, err := time.LoadLocation(tz); err == nil {
+		return loc
+	}
+	if loc, err := time.LoadLocation("America/New_York"); err == nil {
+		return loc
+	}
+	return time.FixedZone("ET", -5*60*60)
+}
+
 // Validate checks that all configuration values are valid and consistent.
 func (c *Config) Validate() error {
 	// Environment validation
@@ -248,23 +263,11 @@ func (c *Config) Validate() error {
 
 	// Schedule validation
 	if c.Schedule.MarketCheckInterval == "" {
-		c.Schedule.MarketCheckInterval = "15m"
+		return fmt.Errorf("schedule.market_check_interval is required (set in Normalize)")
 	} else if _, err := time.ParseDuration(c.Schedule.MarketCheckInterval); err != nil {
 		return fmt.Errorf("schedule.market_check_interval invalid: %w", err)
 	}
-	tz := c.Schedule.Timezone
-	if tz == "" {
-		tz = "America/New_York"
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		// Try NY TZ first; final fallback to fixed ET (no DST) for minimal images.
-		if fallbackLoc, err2 := time.LoadLocation("America/New_York"); err2 == nil {
-			loc = fallbackLoc
-		} else {
-			loc = time.FixedZone("ET", -5*60*60)
-		}
-	}
+	loc := c.resolveLocation()
 	s, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
 	e, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
 	if err1 != nil || err2 != nil || !s.Before(e) {
@@ -295,20 +298,7 @@ func (c *Config) GetCheckInterval() time.Duration {
 
 // IsWithinTradingHours checks if the given time falls within configured trading hours.
 func (c *Config) IsWithinTradingHours(now time.Time) bool {
-	tz := c.Schedule.Timezone
-	if tz == "" {
-		tz = "America/New_York"
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		// Try fallback to America/New_York
-		if fallbackLoc, err2 := time.LoadLocation("America/New_York"); err2 == nil {
-			loc = fallbackLoc
-		} else {
-			// Final fallback to DST-agnostic FixedZone
-			loc = time.FixedZone("ET", -5*60*60)
-		}
-	}
+	loc := c.resolveLocation()
 	today := now.In(loc)
 
 	// Only allow Monday–Friday trading
@@ -325,8 +315,8 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	endClock, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
 	if err1 != nil || err2 != nil {
 		// Safe defaults if misconfigured
-		startClock = time.Date(0, 1, 1, 9, 45, 0, 0, loc)
-		endClock = time.Date(0, 1, 1, 15, 45, 0, 0, loc)
+		startClock = time.Date(0, 1, 1, 9, 30, 0, 0, loc)
+		endClock = time.Date(0, 1, 1, 16, 0, 0, 0, loc)
 	}
 	start := time.Date(today.Year(), today.Month(), today.Day(),
 		startClock.Hour(), startClock.Minute(), 0, 0, loc)
@@ -339,6 +329,9 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 
 // Normalize sets default values for configuration fields
 func (c *Config) Normalize() {
+	if strings.TrimSpace(c.Schedule.MarketCheckInterval) == "" {
+		c.Schedule.MarketCheckInterval = "15m"
+	}
 	if c.Strategy.Exit.MaxDTE == 0 {
 		c.Strategy.Exit.MaxDTE = defaultMaxDTE
 	}
