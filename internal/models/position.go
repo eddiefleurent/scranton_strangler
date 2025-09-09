@@ -415,7 +415,8 @@ func (p *Position) GetStateDescription() string {
 func (p *Position) ShouldEmergencyExit(maxDTE int, escalateLossPct float64) (bool, string) {
 	dte := p.CalculateDTE()
 	// Convert total credit to total dollars for consistent units (includes adjustments)
-	totalCredit := p.GetNetCredit() * float64(p.Quantity) * sharesPerContract
+	// Use absolute value to avoid sign inversions after rolls/debits
+	totalCredit := math.Abs(p.GetNetCredit() * float64(p.Quantity) * sharesPerContract)
 	return p.ensureMachine().ShouldEmergencyExit(
 		totalCredit, p.CurrentPnL, float64(dte), maxDTE, escalateLossPct)
 }

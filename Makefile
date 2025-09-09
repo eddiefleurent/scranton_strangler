@@ -2,13 +2,13 @@
 
 .PHONY: all help build build-prod test test-coverage lint run clean \
         deploy-unraid unraid-logs unraid-status unraid-restart \
-        dev-setup test-api test-paper security-scan build-test-helper tools
+        dev-setup test-api test-paper security-scan build-test-helper tools check
 
 all: build
 
 # Default target
 help:
-	@printf "Targets:\n  build/test/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  test-coverage/security-scan/build-test-helper\n  dev-setup\n"
+	@printf "Targets:\n  build/test/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  test-coverage/security-scan/build-test-helper\n  dev-setup/check\n"
 
 # Go binary name and paths
 BINARY_NAME=scranton-strangler
@@ -99,6 +99,10 @@ security-scan: tools
 	@echo "Running security scan..."
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" gosec ./...
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" govulncheck ./...
+
+# Check: lint, test, and build
+check: lint test build
+	@echo "✅ All checks passed: lint, test, and build completed successfully"
 
 # Install security tools
 tools:

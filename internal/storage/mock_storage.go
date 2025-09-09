@@ -250,7 +250,7 @@ func (m *MockStorage) GetIVReadings(symbol string, startDate, endDate time.Time)
 // GetLatestIVReading retrieves the most recent IV reading (mock implementation)
 func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, error) {
 	// Return not-found error consistent with JSONStorage
-	return nil, fmt.Errorf("no IV readings found for symbol %s", symbol)
+	return nil, fmt.Errorf("%w for symbol %s", ErrNoIVReadings, symbol)
 }
 
 // Ensure MockStorage implements Interface

@@ -295,9 +295,6 @@ func (c *Config) GetCheckInterval() time.Duration {
 
 // IsWithinTradingHours checks if the given time falls within configured trading hours.
 func (c *Config) IsWithinTradingHours(now time.Time) bool {
-	if c.Schedule.AfterHoursCheck {
-		return true
-	}
 	tz := c.Schedule.Timezone
 	if tz == "" {
 		tz = "America/New_York"
@@ -317,6 +314,11 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 	// Only allow Monday–Friday trading
 	if today.Weekday() == time.Saturday || today.Weekday() == time.Sunday {
 		return false
+	}
+
+	// Allow early return for AfterHoursCheck only on weekdays
+	if c.Schedule.AfterHoursCheck {
+		return true
 	}
 
 	startClock, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)

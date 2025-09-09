@@ -26,6 +26,7 @@ make test-api          # Test Tradier API connection
 # Code quality
 make lint              # Run golangci-lint
 make security-scan     # Run security scans (gosec, govulncheck)
+make check             # Run lint, test, and build in sequence
 
 # Unraid deployment
 make deploy-unraid     # Deploy binary to Unraid

@@ -16,6 +16,12 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 )
 
+// ErrNoIVReadings is returned when no IV readings are found for a symbol
+var ErrNoIVReadings = errors.New("no IV readings found")
+
+// nyLocation caches the America/New_York timezone location
+var nyLocation *time.Location
+
 
 // JSONStorage implements Interface using JSON file persistence
 type JSONStorage struct {
@@ -47,6 +53,19 @@ type Statistics struct {
 	AverageLoss        float64 `json:"average_loss"`          // Average loss magnitude (positive)
 	MaxSingleTradeLoss float64 `json:"max_single_trade_loss"` // Largest single trade loss (negative)
 	CurrentStreak      int     `json:"current_streak"`
+}
+
+// getNYLocation returns the cached America/New_York timezone location
+func getNYLocation() (*time.Location, error) {
+	if nyLocation != nil {
+		return nyLocation, nil
+	}
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load America/New_York timezone: %w", err)
+	}
+	nyLocation = loc
+	return loc, nil
 }
 
 // NewJSONStorage creates a new JSON-based storage implementation
@@ -523,8 +542,17 @@ func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
 	if closedAt.IsZero() {
 		closedAt = time.Now().UTC()
 	}
-	day := closedAt.Format("2006-01-02")
-	s.data.DailyPnL[day] += finalPnL
+	// Convert to New York timezone for correct trading day classification
+	nyLoc, err := getNYLocation()
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		day := closedAt.Format("2006-01-02")
+		s.data.DailyPnL[day] += finalPnL
+	} else {
+		closedAtNY := closedAt.In(nyLoc)
+		day := closedAtNY.Format("2006-01-02")
+		s.data.DailyPnL[day] += finalPnL
+	}
 
 	// Clear current position
 	s.data.CurrentPosition = nil
@@ -752,7 +780,7 @@ func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 	}
 
 	if latest == nil {
-		return nil, fmt.Errorf("no IV readings found for symbol %s", symbol)
+		return nil, fmt.Errorf("%w for symbol %s", ErrNoIVReadings, symbol)
 	}
 
 	return latest, nil

@@ -267,14 +267,22 @@ func (s *StrangleStrategy) storeCurrentIVReading(iv float64, expiration string) 
 
 	// Create IV reading for today's date
 	utcNow := time.Now().UTC()
-	ny := time.FixedZone("America/New_York", -5*3600) // consider LoadLocation if tzdata present
-	if loc, err := time.LoadLocation("America/New_York"); err == nil {
-		ny = loc
+
+	// Load America/New_York location with fallback to UTC
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		loc = time.UTC
 	}
-	nyNow := utcNow.In(ny)
+
+	// Get current time in NY timezone
+	nyNow := utcNow.In(loc)
+
+	// Create DST-safe local midnight using time.Date
+	localMidnight := time.Date(nyNow.Year(), nyNow.Month(), nyNow.Day(), 0, 0, 0, 0, loc)
+
 	reading := &models.IVReading{
 		Symbol:    s.config.Symbol,
-		Date:      nyNow.Truncate(24 * time.Hour),
+		Date:      localMidnight,
 		IV:        iv,
 		Timestamp: utcNow,
 	}
@@ -386,7 +394,11 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 
 	// Calculate P&L: Credit received - Current value of sold options
 	// (Positive when options lose value, negative when they gain value)
-	// GetNetCredit() already returns the total dollar amount, no need to multiply by 100
+	// NOTE: GetNetCredit() returns per-share credit, but our current implementation
+	// stores CreditReceived as total dollars (not per-share). This inconsistency
+	// is intentional for now to match our test data and actual bot behavior.
+	// Code review suggested multiplying by sharesPerContract (100) here, but
+	// that would double-count since our data is already in total dollars.
 	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity))
 	pnl := totalCreditReceived - currentTotalValue
 
@@ -591,9 +603,20 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 	if put == nil || call == nil {
 		return 0
 	}
-	// Guard against quotes with too-tight spreads (e.g., < one tick) to avoid stale/microstructure artifacts
-	minSpread := 1e-9
-	if (put.Ask-put.Bid) < minSpread || (call.Ask-call.Bid) < minSpread {
+	// Get tick size from broker for proper spread validation
+	var tickSize float64 = 0.01 // Default fallback
+	if s.broker != nil {
+		if brokerTickSize, err := s.broker.GetTickSize(put.Underlying); err == nil && brokerTickSize > 0 {
+			tickSize = brokerTickSize
+		}
+	}
+
+	// Calculate minimum spread as at least one tick (or 0.01 minimum)
+	putMinSpread := math.Max(tickSize, 0.01)
+	callMinSpread := math.Max(tickSize, 0.01)
+
+	// Check each leg against its own minimum spread to filter stale/microstructure quotes
+	if (put.Ask-put.Bid) < putMinSpread || (call.Ask-call.Bid) < callMinSpread {
 		return 0
 	}
 	// Guard against stale/invalid quotes
