@@ -50,7 +50,7 @@ func main() {
 	
 	// Ensure the directory exists
 	testDir := filepath.Dir(testStoragePath)
-	if err := os.MkdirAll(testDir, 0o755); err != nil {
+	if err := os.MkdirAll(testDir, 0o750); err != nil {
 		log.Fatalf("Failed to create storage directory: %v", err)
 	}
 	
