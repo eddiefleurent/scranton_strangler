@@ -685,3 +685,194 @@ func TestManager_ExitConditionFromReason(t *testing.T) {
 		})
 	}
 }
+
+// TestManager_IsOrderCompletelyFilled tests the partial fill detection logic
+func TestManager_IsOrderCompletelyFilled(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+	mockBroker := &mockBrokerForOrders{}
+	mockStorage := storage.NewMockStorage()
+	stop := make(chan struct{})
+	defer close(stop)
+	
+	manager := NewManager(mockBroker, mockStorage, logger, stop)
+
+	tests := []struct {
+		name           string
+		orderResponse  *broker.OrderResponse
+		expectedResult bool
+		description    string
+	}{
+		{
+			name: "explicitly_filled_status",
+			orderResponse: &broker.OrderResponse{
+				Order: struct {
+					CreateDate        string  `json:"create_date"`
+					Type              string  `json:"type"`
+					Symbol            string  `json:"symbol"`
+					Side              string  `json:"side"`
+					Class             string  `json:"class"`
+					Status            string  `json:"status"`
+					Duration          string  `json:"duration"`
+					TransactionDate   string  `json:"transaction_date"`
+					AvgFillPrice      float64 `json:"avg_fill_price"`
+					ExecQuantity      float64 `json:"exec_quantity"`
+					LastFillPrice     float64 `json:"last_fill_price"`
+					LastFillQuantity  float64 `json:"last_fill_quantity"`
+					RemainingQuantity float64 `json:"remaining_quantity"`
+					ID                int     `json:"id"`
+					Price             float64 `json:"price"`
+					Quantity          float64 `json:"quantity"`
+				}{
+					Status:            "filled",
+					ExecQuantity:      3.0,
+					Quantity:          3.0,
+					RemainingQuantity: 0.0,
+				},
+			},
+			expectedResult: true,
+			description:    "Order with 'filled' status should be considered complete",
+		},
+		{
+			name: "partial_status_but_fully_executed",
+			orderResponse: &broker.OrderResponse{
+				Order: struct {
+					CreateDate        string  `json:"create_date"`
+					Type              string  `json:"type"`
+					Symbol            string  `json:"symbol"`
+					Side              string  `json:"side"`
+					Class             string  `json:"class"`
+					Status            string  `json:"status"`
+					Duration          string  `json:"duration"`
+					TransactionDate   string  `json:"transaction_date"`
+					AvgFillPrice      float64 `json:"avg_fill_price"`
+					ExecQuantity      float64 `json:"exec_quantity"`
+					LastFillPrice     float64 `json:"last_fill_price"`
+					LastFillQuantity  float64 `json:"last_fill_quantity"`
+					RemainingQuantity float64 `json:"remaining_quantity"`
+					ID                int     `json:"id"`
+					Price             float64 `json:"price"`
+					Quantity          float64 `json:"quantity"`
+				}{
+					Status:            "partial",
+					ExecQuantity:      3.0,
+					Quantity:          3.0,
+					RemainingQuantity: 0.0,
+				},
+			},
+			expectedResult: true,
+			description:    "Order with 'partial' status but exec_quantity == quantity should be complete",
+		},
+		{
+			name: "partially_filled_status_with_remaining",
+			orderResponse: &broker.OrderResponse{
+				Order: struct {
+					CreateDate        string  `json:"create_date"`
+					Type              string  `json:"type"`
+					Symbol            string  `json:"symbol"`
+					Side              string  `json:"side"`
+					Class             string  `json:"class"`
+					Status            string  `json:"status"`
+					Duration          string  `json:"duration"`
+					TransactionDate   string  `json:"transaction_date"`
+					AvgFillPrice      float64 `json:"avg_fill_price"`
+					ExecQuantity      float64 `json:"exec_quantity"`
+					LastFillPrice     float64 `json:"last_fill_price"`
+					LastFillQuantity  float64 `json:"last_fill_quantity"`
+					RemainingQuantity float64 `json:"remaining_quantity"`
+					ID                int     `json:"id"`
+					Price             float64 `json:"price"`
+					Quantity          float64 `json:"quantity"`
+				}{
+					Status:            "partially_filled",
+					ExecQuantity:      1.0,
+					Quantity:          3.0,
+					RemainingQuantity: 2.0,
+				},
+			},
+			expectedResult: false,
+			description:    "Truly partial order should not be considered complete",
+		},
+		{
+			name: "zero_remaining_quantity",
+			orderResponse: &broker.OrderResponse{
+				Order: struct {
+					CreateDate        string  `json:"create_date"`
+					Type              string  `json:"type"`
+					Symbol            string  `json:"symbol"`
+					Side              string  `json:"side"`
+					Class             string  `json:"class"`
+					Status            string  `json:"status"`
+					Duration          string  `json:"duration"`
+					TransactionDate   string  `json:"transaction_date"`
+					AvgFillPrice      float64 `json:"avg_fill_price"`
+					ExecQuantity      float64 `json:"exec_quantity"`
+					LastFillPrice     float64 `json:"last_fill_price"`
+					LastFillQuantity  float64 `json:"last_fill_quantity"`
+					RemainingQuantity float64 `json:"remaining_quantity"`
+					ID                int     `json:"id"`
+					Price             float64 `json:"price"`
+					Quantity          float64 `json:"quantity"`
+				}{
+					Status:            "open",
+					ExecQuantity:      2.999999, // slightly under due to precision
+					Quantity:          3.0,
+					RemainingQuantity: 0.000001, // essentially zero
+				},
+			},
+			expectedResult: true,
+			description:    "Order with zero remaining should be complete (handles floating point precision)",
+		},
+		{
+			name: "rejected_order_with_zero_remaining",
+			orderResponse: &broker.OrderResponse{
+				Order: struct {
+					CreateDate        string  `json:"create_date"`
+					Type              string  `json:"type"`
+					Symbol            string  `json:"symbol"`
+					Side              string  `json:"side"`
+					Class             string  `json:"class"`
+					Status            string  `json:"status"`
+					Duration          string  `json:"duration"`
+					TransactionDate   string  `json:"transaction_date"`
+					AvgFillPrice      float64 `json:"avg_fill_price"`
+					ExecQuantity      float64 `json:"exec_quantity"`
+					LastFillPrice     float64 `json:"last_fill_price"`
+					LastFillQuantity  float64 `json:"last_fill_quantity"`
+					RemainingQuantity float64 `json:"remaining_quantity"`
+					ID                int     `json:"id"`
+					Price             float64 `json:"price"`
+					Quantity          float64 `json:"quantity"`
+				}{
+					Status:            "rejected", // Order was rejected
+					ExecQuantity:      0.0,        // Nothing executed
+					Quantity:          6.0,        // Requested 6 contracts
+					RemainingQuantity: 0.0,        // Nothing remaining (because rejected)
+				},
+			},
+			expectedResult: false,
+			description:    "Rejected order with zero executed and zero remaining should NOT be considered complete",
+		},
+		{
+			name: "nil_order_response",
+			orderResponse: nil,
+			expectedResult: false,
+			description:   "Nil order response should return false",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := manager.isOrderCompletelyFilled(test.orderResponse)
+			if result != test.expectedResult {
+				t.Errorf("%s: Expected %t, got %t", test.description, test.expectedResult, result)
+				if test.orderResponse != nil {
+					t.Logf("Order details: Status=%s, ExecQty=%.6f, TotalQty=%.6f, Remaining=%.6f",
+						test.orderResponse.Order.Status,
+						test.orderResponse.Order.ExecQuantity,
+						test.orderResponse.Order.Quantity,
+						test.orderResponse.Order.RemainingQuantity)
+				}
+			}
+		})
+	}
+}

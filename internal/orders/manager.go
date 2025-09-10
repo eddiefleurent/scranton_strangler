@@ -136,18 +136,31 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 			}
 
 			status := strings.ToLower(orderStatus.Order.Status)
-			m.logger.Printf("Order %d status: %s", orderID, status)
+			
+			// Check if order is completely filled by comparing executed vs requested quantity
+			// This handles cases where status is "partial" but all contracts have actually filled
+			isCompletelyFilled := m.isOrderCompletelyFilled(orderStatus)
+			
+			m.logger.Printf("Order %d status: %s, exec_qty: %.0f, total_qty: %.0f, remaining: %.0f, completely_filled: %t", 
+				orderID, status, orderStatus.Order.ExecQuantity, orderStatus.Order.Quantity, 
+				orderStatus.Order.RemainingQuantity, isCompletelyFilled)
 
-			switch status {
-			case "filled":
-				m.logger.Printf("Order filled for position %s", positionID)
+			// Handle completely filled orders (regardless of status string)
+			if isCompletelyFilled {
+				m.logger.Printf("Order completely filled for position %s", positionID)
 				m.handleOrderFilled(positionID, isEntryOrder)
 				return
+			}
+
+			// Handle explicitly failed orders
+			switch status {
 			case "canceled", "cancelled", "rejected", "expired":
 				m.logger.Printf("Order failed for position %s: %s", positionID, orderStatus.Order.Status)
 				m.handleOrderFailed(positionID, orderID, orderStatus.Order.Status)
 				return
-			case "pending", "open", "partial", "partially_filled":
+			case "pending", "open", "partial", "partially_filled", "filled":
+				// Continue polling for non-terminal states
+				// Note: "filled" is included here because isCompletelyFilled check above handles true fills
 				continue
 			default:
 				m.logger.Printf("Unknown order status for position %s: %s", positionID, orderStatus.Order.Status)
@@ -378,4 +391,46 @@ func (m *Manager) IsOrderTerminal(ctx context.Context, orderID int) (bool, error
 	default:
 		return false, nil
 	}
+}
+
+// isOrderCompletelyFilled determines if an order is completely filled by checking
+// executed quantity against total quantity, accounting for floating point precision
+func (m *Manager) isOrderCompletelyFilled(orderStatus *broker.OrderResponse) bool {
+	if orderStatus == nil {
+		return false
+	}
+	
+	order := orderStatus.Order
+	
+	// If explicitly marked as filled, it's definitely complete
+	status := strings.ToLower(order.Status)
+	if status == "filled" {
+		return true
+	}
+	
+	// For other statuses, check if exec_quantity >= quantity
+	// Use small epsilon for floating point comparison
+	const epsilon = 1e-6
+	
+	// Handle zero quantity orders (shouldn't happen but be defensive)
+	if order.Quantity <= epsilon {
+		return false
+	}
+	
+	// Order is completely filled if executed quantity equals or exceeds requested quantity
+	isComplete := order.ExecQuantity >= (order.Quantity - epsilon)
+	
+	// Additional validation: remaining quantity should be zero (or very close to zero)
+	hasZeroRemaining := order.RemainingQuantity <= epsilon
+	
+	// Critical fix: Don't consider an order filled if nothing was executed (rejected orders)
+	nothingExecuted := order.ExecQuantity <= epsilon
+	
+	m.logger.Printf("Fill check - ExecQty: %.6f, TotalQty: %.6f, Remaining: %.6f, Complete: %t, ZeroRemaining: %t, NothingExecuted: %t",
+		order.ExecQuantity, order.Quantity, order.RemainingQuantity, isComplete, hasZeroRemaining, nothingExecuted)
+	
+	// Order is complete only if:
+	// 1. Executed quantity >= requested quantity, OR
+	// 2. Remaining quantity is zero AND something was actually executed (not a rejected order)
+	return isComplete || (hasZeroRemaining && !nothingExecuted)
 }
