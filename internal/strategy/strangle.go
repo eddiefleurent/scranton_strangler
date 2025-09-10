@@ -916,21 +916,29 @@ func (s *StrangleStrategy) validateStrikeSelection(putStrike, callStrike, spotPr
 		return fmt.Errorf("inverted strikes detected: put %.0f >= call %.0f", putStrike, callStrike)
 	}
 
-	// Calculate spread width as percentage of spot price
-	spreadWidth := (callStrike - putStrike) / spotPrice
-
-	// Reject excessively tight spreads (< 1% of spot price)
-	const minSpreadPct = 0.01
-	if spreadWidth < minSpreadPct {
-		return fmt.Errorf("spread too tight: %.2f%% < %.2f%% (put=%.0f, call=%.0f)",
-			spreadWidth*100, minSpreadPct*100, putStrike, callStrike)
+	// Ensure put < spot < call (basic OTM invariant)
+	if putStrike >= spotPrice {
+		return fmt.Errorf("put strike not OTM: %.0f >= spot %.0f", putStrike, spotPrice)
+	}
+	if callStrike <= spotPrice {
+		return fmt.Errorf("call strike not OTM: %.0f <= spot %.0f", callStrike, spotPrice)
 	}
 
-	// Reject excessively wide spreads (> 10% of spot price)
-	const maxSpreadPct = 0.10
-	if spreadWidth > maxSpreadPct {
-		return fmt.Errorf("spread too wide: %.2f%% > %.2f%% (put=%.0f, call=%.0f)",
-			spreadWidth*100, maxSpreadPct*100, putStrike, callStrike)
+	// Check for minimum and maximum spread width
+	// Require at least 1% spread relative to spot price, but not more than 12%
+	const minSpreadPct = 0.01
+	const maxSpreadPct = 0.12
+	spread := callStrike - putStrike
+	minSpread := spotPrice * minSpreadPct
+	maxSpread := spotPrice * maxSpreadPct
+	
+	if spread < minSpread {
+		return fmt.Errorf("spread too narrow: %.1f (minimum %.1f for %.0f spot)",
+			spread, minSpread, spotPrice)
+	}
+	if spread > maxSpread {
+		return fmt.Errorf("spread too wide: %.1f (maximum %.1f for %.0f spot)",
+			spread, maxSpread, spotPrice)
 	}
 
 	// Check that strikes are reasonably close to spot price
