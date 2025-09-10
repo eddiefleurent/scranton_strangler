@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -291,6 +292,9 @@ func (b *Bot) runTradingCycle() {
 	// Get all current positions (supports multiple positions)
 	positions := b.storage.GetCurrentPositions()
 	b.logger.Printf("Currently managing %d position(s)", len(positions))
+
+	// Reconcile positions with broker (detect manual closes)
+	positions = b.reconcilePositions(positions)
 
 	// Check exit conditions for each position
 	for _, position := range positions {
@@ -754,6 +758,98 @@ func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.
 
 	// Start order status polling in background
 	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)
+}
+
+// reconcilePositions detects manually closed positions and updates storage
+func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Position {
+	// Get current broker positions
+	brokerPositions, err := b.broker.GetPositions()
+	if err != nil {
+		b.logger.Printf("Failed to get broker positions for reconciliation: %v", err)
+		return storedPositions // Return unchanged on error
+	}
+
+	var activePositions []models.Position
+	
+	for _, position := range storedPositions {
+		// Skip already closed positions
+		if position.GetCurrentState() == models.StateClosed {
+			continue
+		}
+		
+		// Check if this position still exists in the broker
+		isOpenInBroker := b.isPositionOpenInBroker(&position, brokerPositions)
+		
+		if !isOpenInBroker {
+			b.logger.Printf("Position %s manually closed - updating storage", shortID(position.ID))
+			
+			// Calculate final P&L (use current P&L if available, otherwise use credit received)
+			finalPnL := position.CurrentPnL
+			if finalPnL == 0 {
+				finalPnL = position.CreditReceived * float64(position.Quantity) * 100
+			}
+			
+			// Close the position with manual close reason
+			if err := b.storage.ClosePositionByID(position.ID, finalPnL, "manual_close"); err != nil {
+				// Fallback to legacy API
+				if err := b.storage.ClosePosition(finalPnL, "manual_close"); err != nil {
+					b.logger.Printf("Failed to close manually detected position %s: %v", shortID(position.ID), err)
+					activePositions = append(activePositions, position) // Keep in list if can't close
+					continue
+				}
+			}
+			
+			b.logger.Printf("Position %s closed due to manual intervention. Final P&L: $%.2f", 
+				shortID(position.ID), finalPnL)
+		} else {
+			// Position is still active in broker
+			activePositions = append(activePositions, position)
+		}
+	}
+	
+	return activePositions
+}
+
+// isPositionOpenInBroker checks if a stored position still exists in broker positions
+func (b *Bot) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
+	for _, brokerPos := range brokerPositions {
+		// Match by symbol and quantity (simplified matching)
+		if brokerPos.Symbol == position.Symbol {
+			// For options positions, check if we have both legs still open
+			hasCallLeg := false
+			hasCallStrike := false
+			hasPutLeg := false  
+			hasPutStrike := false
+			
+			// Check if broker position matches our stored position strikes
+			for _, brokerPos2 := range brokerPositions {
+				if brokerPos2.Symbol == position.Symbol {
+					// Parse option symbol to get type and strike
+					// SPY option format: SPY240315C00610000 or SPY240315P00500000
+					if len(brokerPos2.Symbol) >= 15 && strings.Contains(brokerPos2.Symbol, "C") {
+						hasCallLeg = true
+						// Extract strike price from call option symbol
+						// This is a simplified check - in production you'd want more robust parsing
+						if strings.Contains(brokerPos2.Symbol, fmt.Sprintf("%05.0f", position.CallStrike*1000)) {
+							hasCallStrike = true
+						}
+					} else if len(brokerPos2.Symbol) >= 15 && strings.Contains(brokerPos2.Symbol, "P") {
+						hasPutLeg = true
+						// Extract strike price from put option symbol
+						if strings.Contains(brokerPos2.Symbol, fmt.Sprintf("%05.0f", position.PutStrike*1000)) {
+							hasPutStrike = true
+						}
+					}
+				}
+			}
+			
+			// Position is open if we have both call and put legs with matching strikes
+			if hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // checkAdjustmentsForPosition checks if adjustments are needed for a specific position
