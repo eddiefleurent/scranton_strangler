@@ -50,33 +50,33 @@
 ## Testing & Validation
 
 ### 4. Paper Trading Validation
-- [ ] **API Setup & Connection**
-  - [ ] Get Tradier sandbox API key
-  - [ ] Test basic API connectivity
-  - [ ] Verify account balance retrieval
-  - [ ] Test option chain data access
-- [ ] **Test Entry Conditions**
-  - [ ] Verify IVR calculation accuracy
-  - [ ] Confirm strike selection logic
-  - [ ] Test position sizing math
-  - [ ] Validate OTOCO order placement
-- [ ] **Test Exit Conditions**
-  - [ ] 50% profit target detection
-  - [ ] 21 DTE manual close
-  - [ ] Buy-to-close order execution
-  - [ ] Emergency stops trigger correctly
-- [ ] **End-to-End Testing**
+- [x] **API Setup & Connection**
+  - [x] Get Tradier sandbox API key
+  - [x] Test basic API connectivity
+  - [x] Verify account balance retrieval
+  - [x] Test option chain data access
+- [x] **Test Entry Conditions**
+  - [x] Verify IV calculation accuracy (uses absolute IV, not IVR)
+  - [x] Confirm strike selection logic
+  - [x] Test position sizing math
+  - [x] Validate OTOCO order placement
+- [x] **Test Exit Conditions**
+  - [x] 50% profit target detection
+  - [x] 21 DTE manual close
+  - [x] Buy-to-close order execution
+  - [x] Emergency stops trigger correctly
+- [ ] **End-to-End Testing** (NEEDS VALIDATION)
   - [ ] Complete 3 successful paper trades
   - [ ] No critical bugs in 1 week of running
   - [ ] All logs make sense and are useful
 
 ### 5. Critical Test Coverage (MVP Blocker)
 - [x] **Core Strategy Testing - 60% Coverage**
-  - [x] Test `CheckEntryConditions()` - validates IVR > 30, DTE, delta logic
+  - [x] Test `CheckEntryConditions()` - validates IV > 30%, DTE, delta logic
   - [x] Test `FindStrangleStrikes()` - strike selection and credit validation
   - [x] Test `CheckExitConditions()` - 50% profit, 21 DTE, 250% loss conditions
   - [x] Test `CalculatePnL()` - position value calculations with live quotes
-  - [x] Test `GetCurrentIVR()` - IV rank calculation with historical data
+  - [x] Test `GetCurrentIV()` - IV calculation with historical data (absolute IV, not IVR)
 - [x] **Broker API Integration Testing - 73.1% Coverage**
   - [x] Test `GetQuote()` - quote fetching with error handling
   - [x] Test `GetOptionChain()` - option data parsing and greeks
@@ -114,13 +114,6 @@
 
 ## Post-MVP Enhancements (Later)
 
-### Phase 1.5: Production Readiness
-- [ ] Fix main_test.go MockBroker interface compatibility
-- [ ] Add integration tests with sandbox environment  
-- [ ] Complete paper trading validation (3 trades)
-
-## Post-MVP Enhancements (Later)
-
 ### Phase 2: Reliability & Monitoring
 - [ ] Better error handling with retries
 - [ ] SQLite for position storage
@@ -139,50 +132,6 @@
 - [ ] Multi-ticker support (QQQ, IWM)
 - [ ] Backtesting framework
 
-## Implementation Priority (Week by Week)
-
-### Week 1: Critical Test Foundation (MVP Blocker - Current Coverage: 48.6%)
-- [x] **Strategy Function Tests (Currently 60% Coverage)**
-  - [x] Create test suite for `CheckEntryConditions()` with mock data
-  - [x] Create test suite for `FindStrangleStrikes()` with various market scenarios
-  - [x] Create test suite for `CheckExitConditions()` covering all exit triggers
-  - [x] Create test suite for `GetCurrentIVR()` with historical IV data
-- [x] **Broker Integration Tests (Currently 73.1% Coverage)**
-  - [x] Create mock broker tests for all API methods
-  - [x] Test error handling for API failures and timeouts
-  - [x] Test order placement validation and response parsing
-  - [x] Test quote and option chain data processing
-- [ ] **Main Bot Loop Tests (Currently 0% Coverage)**
-  - [ ] Create integration tests for complete trading cycle
-  - [ ] Test position monitoring and P&L calculation logic
-  - [ ] Test entry/exit execution with mocked broker responses
-
-### Week 2: Core Functionality with Test Coverage
-- [x] **Entry Logic (Test While Building)**
-  - [x] Check market hours with comprehensive test cases
-  - [x] Calculate IVR with unit tests for edge cases
-  - [x] Find DTE/strike logic with boundary condition tests
-  - [x] OTOCO order placement with mock broker verification
-- [x] **Exit Logic (Test While Building)**
-  - [x] Monitor existing positions with test scenarios
-  - [x] Test all exit condition triggers (profit, time, loss)
-  - [x] Test emergency exit scenarios and error recovery
-- [x] **Order Management (Currently 68% Coverage)**
-  - [x] Create tests for order polling and status checking
-  - [x] Test timeout handling and retry scenarios
-  - [x] Test partial fill detection and position updates
-
-### Week 3: Integration Testing & Polish
-- [x] **Error Handling (Test All Scenarios)**
-  - [x] Test retry client with various failure modes
-  - [x] Test API downtime recovery with circuit breaker
-  - [x] Test graceful shutdown with position preservation
-- [x] **End-to-End Testing**
-  - [x] Refactor main.go into testable components (TradingCycle, Reconciler)
-  - [x] Complete trade cycle component tests
-  - [x] Test bot restart/recovery scenarios
-  - [ ] Validate all error scenarios in sandbox environment
-
 ## Success Criteria for MVP
 
 ### MVP Definition: Working Paper Trading Bot
@@ -192,105 +141,3 @@ A bot that can automatically:
 3. Apply emergency stops (250% loss, 21 DTE)
 4. Run unattended for 1 week without issues
 5. Complete 3 successful trade cycles
-
-### Must Have for Launch
-- [x] **Minimum 60% Test Coverage** (Current Coverage: 65.6%)
-  - [x] Core strategy functions fully tested (63.0%)
-  - [x] Broker integration tested with mocks (67.2%)
-  - [x] Main bot loop tested via component architecture
-  - [x] Order management tested (56.7%)
-  - [x] Retry logic tested (91.5%)
-- [x] Tradier API integration working in sandbox
-- [x] IVR calculation (simple 20-day method)
-- [x] Entry logic: find strikes, check credit, place OTOCO
-- [x] Exit logic: 21 DTE monitor, emergency stops
-- [x] JSON position persistence
-- [x] Basic error handling with retries
-- [x] Market hours checking
-- [x] Position sizing (max 35% allocation)
-
-### Success Metrics
-- [ ] 3 completed paper trades (entry to exit)
-- [ ] No unhandled crashes for 1 week
-- [x] All trades respect risk limits
-- [x] Logs provide clear audit trail
-- [x] Can restart bot and resume correctly
-
----
-
-## Removed Complexity (Post-MVP)
-
-### Unnecessary for MVP
-- ❌ Advanced order types (OCO, Bracket orders)
-- ❌ Multiple position management
-- ❌ SQLite/PostgreSQL database
-- ❌ Comprehensive test coverage (>80%)
-- ❌ Circuit breakers and observability
-- ❌ Web dashboards and monitoring
-- ❌ Multi-asset support
-- ❌ Backtesting framework
-
-### Keep It Simple
-- ✅ Interface abstractions (Broker/Strategy/Storage) - implemented for MVP
-- ✅ Simple state machine (OPEN/CLOSED positions)
-- ✅ OTOCO orders (in-scope) vs OCO/Bracket (post-MVP)
-- ✅ One position at a time
-- ✅ JSON file storage
-- ✅ Basic tests for math functions
-- ✅ Simple retry logic with exponential backoff
-- ✅ Console logging with timestamps
-- ✅ SPY only
-- ✅ Forward testing only
-
-## CRITICAL TEST COVERAGE ANALYSIS (Current Coverage: See CI Report)
-
-### ✅ COMPLETED - Good Test Coverage:
-1. **Core Strategy Logic** (`internal/strategy/strangle.go`) - 60% Coverage
-   - `CheckEntryConditions()` - Entry signal validation
-   - `FindStrangleStrikes()` - Strike selection and credit validation
-   - `CheckExitConditions()` - All exit condition logic
-   - `GetCurrentIVR()` - IV rank calculation
-   - `CalculatePnL()` - Position value calculations
-
-2. **Broker API Integration** (`internal/broker/tradier.go`) - 73.1% Coverage
-   - `GetQuote()` - Quote fetching with error handling
-   - `GetOptionChain()` - Option data parsing and validation
-   - `PlaceStrangleOrder()` - OTOCO order creation
-   - `GetOrderStatus()` - Order fill verification
-
-3. **Main Bot Loop** (`cmd/bot/main.go`) - 0% Coverage
-   - `runTradingCycle()` - Complete trading workflow
-   - `executeEntry()` - Position opening logic
-   - `executeExit()` - Position closing logic
-   - `checkExistingPosition()` - Position monitoring
-
-4. **Order Management** (`internal/orders/manager.go`) - 68% Coverage
-   - `PollOrderStatus()` - Order status polling
-   - Order timeout and retry handling
-   - Partial fill scenarios
-
-5. **Retry Client** (`internal/retry/client.go`) - 91.5% Coverage
-   - Exponential backoff implementation
-   - Error classification and retry logic
-   - Timeout and circuit breaker behavior
-
-### ✅ Well-Tested Components (>70% Coverage):
-- State Machine (78.1%) - Position state transitions
-- Mock Data Provider (82.8%) - Testing infrastructure
-- Storage Interface (44.2%) - Position persistence
-
-### 🎯 Test Coverage Targets for MVP Launch:
-- **Overall Coverage**: 48.6% → **60%+** (minimum)
-- **Strategy Functions**: 60% → **80%+** (critical path)
-- **Broker Integration**: 73.1% → **70%+** (API reliability)
-- **Main Bot Loop**: 0% → **60%+** (core functionality)
-- **Orders & Retry**: 68%/91.5% → **70%+** (resilience)
-
-### 📋 Testing Priority Order:
-1. **✅ Week 1**: Strategy function unit tests (highest impact) - 60% coverage
-2. **✅ Week 2**: Broker integration tests with mocks - 73.1% coverage
-3. **Week 3**: Main bot loop integration tests - 0% coverage (REMAINING BLOCKER)
-4. **✅ Week 4**: Order management and retry logic tests - 68%/91.5% coverage
-5. **Week 5**: End-to-end testing in sandbox environment
-
-**Bottom Line**: Test coverage achieved at 65.6% (exceeds 60% MVP target). Main bot loop refactored into testable components (TradingCycle, Reconciler). Core trading logic fully tested and ready for production deployment.
