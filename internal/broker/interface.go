@@ -91,7 +91,7 @@ func WithHTTPClient(client *http.Client) TradierClientOption {
 func WithTransport(transport http.RoundTripper) TradierClientOption {
 	return func(config *TradierClientConfig) {
 		if config.httpClient == nil {
-			config.httpClient = &http.Client{Transport: transport}
+			config.httpClient = &http.Client{Transport: transport, Timeout: 10 * time.Second}
 		} else {
 			config.httpClient.Transport = transport
 		}
@@ -157,6 +157,12 @@ func (t *TradierClient) GetOptionBuyingPower() (float64, error) {
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
 func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error) {
+	if quantity <= 0 {
+		return nil, fmt.Errorf("quantity must be > 0")
+	}
+	if limitPrice < 0 {
+		return nil, fmt.Errorf("limitPrice must be >= 0")
+	}
 	if t.useOTOCO {
 		// Try OTOCO order with configurable profit target
 		orderResp, err := t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
@@ -183,6 +189,12 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders
 func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error) {
+	if quantity <= 0 {
+		return nil, fmt.Errorf("quantity must be > 0")
+	}
+	if credit < 0 {
+		return nil, fmt.Errorf("credit must be >= 0")
+	}
 	if profitTarget < 0 || profitTarget > 1 {
 		return nil, fmt.Errorf("profitTarget %.3f is outside valid range [0.0, 1.0]", profitTarget)
 	}
@@ -194,14 +206,14 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
-		expiration, quantity, maxDebit, "day", tag)
+		expiration, quantity, maxDebit, string(DurationDay), tag)
 }
 
 // CloseStranglePositionCtx closes an existing strangle position with a buy-to-close order with context support
 func (t *TradierClient) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToCloseCtx(ctx, symbol, putStrike, callStrike,
-		expiration, quantity, maxDebit, "day", tag)
+		expiration, quantity, maxDebit, string(DurationDay), tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order
@@ -328,6 +340,14 @@ const (
 	OptionTypeCall OptionType = "call"
 )
 
+// DurationType represents order duration types
+type DurationType string
+
+const (
+	// DurationDay represents a day order duration
+	DurationDay DurationType = "day"
+)
+
 // Use OptionTypePut/OptionTypeCall everywhere to avoid duplication.
 
 // AbsDaysBetween calculates the absolute number of days between two dates
@@ -379,6 +399,20 @@ func NewCircuitBreakerBroker(broker Broker) *CircuitBreakerBroker {
 	})
 }
 
+// stateName returns human-friendly name for circuit breaker state
+func stateName(s gobreaker.State) string {
+	switch s {
+	case gobreaker.StateClosed:
+		return "closed"
+	case gobreaker.StateOpen:
+		return "open"
+	case gobreaker.StateHalfOpen:
+		return "half-open"
+	default:
+		return fmt.Sprintf("%v", s)
+	}
+}
+
 // CircuitBreakerSettings configures circuit breaker behavior
 type CircuitBreakerSettings struct {
 	MaxRequests  uint32        // Max requests when half-open
@@ -386,7 +420,7 @@ type CircuitBreakerSettings struct {
 	Timeout      time.Duration // Open circuit duration
 	MinRequests  uint32        // Min requests before tripping
 	FailureRatio float64       // Failure ratio threshold
-	Logger       *log.Logger   // Optional logger for structured logging (uses log.DefaultLogger if nil)
+	Logger       *log.Logger   // Optional logger (uses log.Default() if nil)
 }
 
 // NewCircuitBreakerBrokerWithSettings creates a CircuitBreakerBroker with custom settings
@@ -408,7 +442,7 @@ func NewCircuitBreakerBrokerWithSettings(broker Broker, settings CircuitBreakerS
 			if logger == nil {
 				logger = log.Default()
 			}
-			logger.Printf("Circuit breaker %s state changed from %v to %v", name, from, to)
+			logger.Printf("Circuit breaker %s state changed from %s to %s", name, stateName(from), stateName(to))
 		},
 	}
 
