@@ -294,17 +294,17 @@ func (b *Bot) runTradingCycle() {
 
 	// Check exit conditions for each position
 	for _, position := range positions {
-		b.logger.Printf("Checking position %s (%.2f/%.2f, %s DTE)", 
-			position.ID[:8], position.PutStrike, position.CallStrike, position.Expiration.Format("2006-01-02"))
+		b.logger.Printf("Checking position %s (%.2f/%.2f, %s DTE)",
+			shortID(position.ID), position.PutStrike, position.CallStrike, position.Expiration.Format("2006-01-02"))
 		
 		// Create a copy to work with
 		posCopy := position
 		shouldExit, reason := b.strategy.CheckExitConditions(&posCopy)
 		if shouldExit {
-			b.logger.Printf("Exit signal for position %s: %s", position.ID[:8], reason)
+			b.logger.Printf("Exit signal for position %s: %s", shortID(position.ID), reason)
 			b.executeExitForPosition(&posCopy, reason)
 		} else {
-			b.logger.Printf("No exit conditions met for position %s", position.ID[:8])
+			b.logger.Printf("No exit conditions met for position %s", shortID(position.ID))
 		}
 
 		// Check for adjustments (Phase 2) - only during regular hours
@@ -460,7 +460,7 @@ func (b *Bot) executeEntry() {
 	position.EntryOrderID = fmt.Sprintf("%d", placedOrder.Order.ID)
 
 	// Initialize position state to submitted
-	if err := position.TransitionState(models.StateSubmitted, "order_placed"); err != nil {
+	if err := position.TransitionState(models.StateSubmitted, models.ConditionOrderPlaced); err != nil {
 		b.logger.Printf("Failed to set position state: %v", err)
 		return
 	}
@@ -617,6 +617,14 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 
 
 
+// shortID returns a truncated ID string, safely handling IDs shorter than 8 characters
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 // generatePositionID creates a unique ID for positions using UUID for guaranteed uniqueness
 func generatePositionID() string {
 	// Use UUID for guaranteed uniqueness
@@ -700,7 +708,7 @@ func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
 
 // executeExitForPosition executes exit for a specific position
 func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.ExitReason) {
-	b.logger.Printf("Executing exit for position %s: %s", position.ID[:8], reason)
+	b.logger.Printf("Executing exit for position %s: %s", shortID(position.ID), reason)
 
 	if !b.isPositionReadyForExit(position) {
 		return
@@ -711,7 +719,7 @@ func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.
 	maxDebit := b.calculateMaxDebit(position, reason)
 
 	if maxDebit <= 0 {
-		b.logger.Printf("Skipping close order for position %s: calculated maxDebit $%.2f is invalid (must be > 0)", position.ID[:8], maxDebit)
+		b.logger.Printf("Skipping close order for position %s: calculated maxDebit $%.2f is invalid (must be > 0)", shortID(position.ID), maxDebit)
 		return
 	}
 
@@ -731,18 +739,18 @@ func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.
 	)
 
 	if err != nil {
-		b.logger.Printf("Failed to place close order for position %s: %v", position.ID[:8], err)
+		b.logger.Printf("Failed to place close order for position %s: %v", shortID(position.ID), err)
 		return
 	}
 
 	// Update position with exit order ID
 	position.ExitOrderID = fmt.Sprintf("%d", closeOrder.Order.ID)
 	if err := b.storage.UpdatePosition(position); err != nil {
-		b.logger.Printf("Failed to update position %s with exit order ID: %v", position.ID[:8], err)
+		b.logger.Printf("Failed to update position %s with exit order ID: %v", shortID(position.ID), err)
 	}
 
 	b.logger.Printf("Close order placed for position %s: order_id=%d, max_debit=$%.2f",
-		position.ID[:8], closeOrder.Order.ID, maxDebit)
+		shortID(position.ID), closeOrder.Order.ID, maxDebit)
 
 	// Start order status polling in background
 	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)
@@ -753,5 +761,5 @@ func (b *Bot) checkAdjustmentsForPosition(position *models.Position) {
 	// Placeholder for adjustment logic (Phase 2)
 	// This would check if the position needs to be adjusted based on
 	// market movement and the football system rules
-	b.logger.Printf("Adjustment check for position %s not yet implemented", position.ID[:8])
+	b.logger.Printf("Adjustment check for position %s not yet implemented", shortID(position.ID))
 }
