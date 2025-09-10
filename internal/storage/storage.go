@@ -36,12 +36,13 @@ type JSONStorage struct {
 
 // Data represents the complete data structure stored in JSON files.
 type Data struct {
-	LastUpdated     time.Time          `json:"last_updated"`
-	CurrentPosition *models.Position   `json:"current_position"`
-	DailyPnL        map[string]float64 `json:"daily_pnl"`
-	Statistics      *Statistics        `json:"statistics"`
-	History         []models.Position  `json:"history"`
-	IVReadings      []models.IVReading `json:"iv_readings"` // Historical IV data
+	LastUpdated      time.Time          `json:"last_updated"`
+	CurrentPosition  *models.Position   `json:"current_position"` // Legacy single position support
+	CurrentPositions []models.Position  `json:"current_positions"` // Multiple positions support
+	DailyPnL         map[string]float64 `json:"daily_pnl"`
+	Statistics       *Statistics        `json:"statistics"`
+	History          []models.Position  `json:"history"`
+	IVReadings       []models.IVReading `json:"iv_readings"` // Historical IV data
 }
 
 // Statistics represents performance metrics and analytics data.
@@ -171,11 +172,19 @@ func (s *JSONStorage) createDataSnapshot() *Data {
 		Statistics:  &Statistics{},
 		History:     make([]models.Position, len(s.data.History)),
 		IVReadings:  make([]models.IVReading, len(s.data.IVReadings)),
+		CurrentPositions: make([]models.Position, len(s.data.CurrentPositions)),
 	}
 
 	// Deep copy CurrentPosition if it exists
 	if s.data.CurrentPosition != nil {
 		snapshot.CurrentPosition = clonePosition(s.data.CurrentPosition)
+	}
+	
+	// Deep copy CurrentPositions
+	for i := range s.data.CurrentPositions {
+		if cloned := clonePosition(&s.data.CurrentPositions[i]); cloned != nil {
+			snapshot.CurrentPositions[i] = *cloned
+		}
 	}
 
 	// Deep copy DailyPnL
@@ -798,4 +807,157 @@ func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 	}
 
 	return latest, nil
+}
+
+// GetCurrentPositions returns all current open positions
+func (s *JSONStorage) GetCurrentPositions() []models.Position {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	// Migrate legacy single position if needed
+	if s.data.CurrentPosition != nil && len(s.data.CurrentPositions) == 0 {
+		s.data.CurrentPositions = []models.Position{*s.data.CurrentPosition}
+	}
+	
+	// Return a deep copy to prevent external mutation
+	positions := make([]models.Position, len(s.data.CurrentPositions))
+	for i := range s.data.CurrentPositions {
+		cloned := clonePosition(&s.data.CurrentPositions[i])
+		if cloned != nil {
+			positions[i] = *cloned
+		}
+	}
+	return positions
+}
+
+// AddPosition adds a new position to the current positions list
+func (s *JSONStorage) AddPosition(pos *models.Position) error {
+	if pos == nil {
+		return errors.New("position cannot be nil")
+	}
+	
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	// Initialize if needed
+	if s.data.CurrentPositions == nil {
+		s.data.CurrentPositions = []models.Position{}
+	}
+	
+	// Check if position already exists
+	for _, existingPos := range s.data.CurrentPositions {
+		if existingPos.ID == pos.ID {
+			return fmt.Errorf("position with ID %s already exists", pos.ID)
+		}
+	}
+	
+	// Add the new position
+	s.data.CurrentPositions = append(s.data.CurrentPositions, *pos)
+	
+	// Also update legacy single position for compatibility
+	s.data.CurrentPosition = pos
+	
+	return s.saveUnsafe()
+}
+
+// UpdatePosition updates an existing position
+func (s *JSONStorage) UpdatePosition(pos *models.Position) error {
+	if pos == nil {
+		return errors.New("position cannot be nil")
+	}
+	
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	found := false
+	for i := range s.data.CurrentPositions {
+		if s.data.CurrentPositions[i].ID == pos.ID {
+			s.data.CurrentPositions[i] = *pos
+			found = true
+			// Update legacy single position if it matches
+			if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == pos.ID {
+				s.data.CurrentPosition = pos
+			}
+			break
+		}
+	}
+	
+	if !found {
+		return fmt.Errorf("position with ID %s not found", pos.ID)
+	}
+	
+	return s.saveUnsafe()
+}
+
+// GetPositionByID retrieves a specific position by ID
+func (s *JSONStorage) GetPositionByID(id string) *models.Position {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	
+	for i := range s.data.CurrentPositions {
+		if s.data.CurrentPositions[i].ID == id {
+			cloned := clonePosition(&s.data.CurrentPositions[i])
+			return cloned
+		}
+	}
+	
+	// Check legacy single position
+	if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
+		return clonePosition(s.data.CurrentPosition)
+	}
+	
+	return nil
+}
+
+// ClosePositionByID closes a specific position by ID
+func (s *JSONStorage) ClosePositionByID(id string, finalPnL float64, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	var posToClose *models.Position
+	var newPositions []models.Position
+	
+	// Find and remove the position from current positions
+	for i := range s.data.CurrentPositions {
+		if s.data.CurrentPositions[i].ID == id {
+			posToClose = &s.data.CurrentPositions[i]
+		} else {
+			newPositions = append(newPositions, s.data.CurrentPositions[i])
+		}
+	}
+	
+	if posToClose == nil {
+		// Check legacy single position
+		if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
+			posToClose = s.data.CurrentPosition
+			s.data.CurrentPosition = nil
+		} else {
+			return fmt.Errorf("position with ID %s not found", id)
+		}
+	}
+	
+	// Update position with closing details
+	posToClose.CurrentPnL = finalPnL
+	posToClose.ExitReason = reason
+	posToClose.ExitDate = time.Now()
+	
+	// Update positions list
+	s.data.CurrentPositions = newPositions
+	
+	// Clear legacy single position if it matches
+	if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
+		s.data.CurrentPosition = nil
+	}
+	
+	// Add to history
+	s.data.History = append(s.data.History, *posToClose)
+	
+	// Update statistics
+	s.updateStatistics(finalPnL)
+	
+	// Update daily P&L
+	dateStr := time.Now().Format("2006-01-02")
+	s.data.DailyPnL[dateStr] = s.data.DailyPnL[dateStr] + finalPnL
+	
+	return s.saveUnsafe()
 }

@@ -40,6 +40,7 @@ type StrangleStrategy struct {
 type Config struct {
 	Symbol              string
 	DTETarget           int     // 45 days
+	DTERange            []int   // Acceptable DTE range [min, max]
 	DeltaTarget         float64 // 0.16 for 16 delta
 	ProfitTarget        float64 // 0.50 for 50%
 	MaxDTE              int     // 21 days to exit
@@ -115,8 +116,11 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 		return nil, err
 	}
 
-	// Find expiration around 45 DTE
-	targetExp := s.findTargetExpiration(s.config.DTETarget)
+	// Vary DTE target to avoid identical positions
+	targetDTE := s.getVariedDTETarget()
+	
+	// Find expiration around target DTE
+	targetExp := s.findTargetExpiration(targetDTE)
 
 	// Get option chain with Greeks (cached, with timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -465,6 +469,47 @@ func (s *StrangleStrategy) hasMajorEventsNearby() bool {
 	return false
 }
 
+// getVariedDTETarget returns a DTE target that varies based on existing positions
+// to avoid opening identical trades
+func (s *StrangleStrategy) getVariedDTETarget() int {
+	// Get existing positions to check their DTEs
+	positions := s.storage.GetCurrentPositions()
+	
+	// If no positions, use the configured target
+	if len(positions) == 0 {
+		return s.config.DTETarget
+	}
+	
+	// Collect existing DTEs
+	existingDTEs := make(map[int]bool)
+	for _, pos := range positions {
+		dte := pos.CalculateDTE()
+		existingDTEs[dte] = true
+	}
+	
+	// Try different DTE values within the configured range
+	// Default range if not configured
+	minDTE := 40
+	maxDTE := 50
+	if len(s.config.DTERange) >= 2 {
+		minDTE = s.config.DTERange[0]
+		maxDTE = s.config.DTERange[1]
+	}
+	
+	// Try to find a DTE that's not already used
+	preferredDTEs := []int{45, 43, 47, 41, 49, 40, 50, 42, 48, 44, 46}
+	for _, dte := range preferredDTEs {
+		if dte >= minDTE && dte <= maxDTE && !existingDTEs[dte] {
+			s.logger.Printf("Using varied DTE target: %d (avoiding existing: %v)", dte, existingDTEs)
+			return dte
+		}
+	}
+	
+	// If all preferred DTEs are taken, just use the configured target
+	s.logger.Printf("All preferred DTEs taken, using default: %d", s.config.DTETarget)
+	return s.config.DTETarget
+}
+
 func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 	// Create a context with timeout to prevent blocking on slow APIs
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -680,39 +725,44 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 		return 0
 	}
 
-	balance, err := s.broker.GetAccountBalance()
+	// Try to use option buying power first (more accurate for options trading)
+	buyingPower, err := s.broker.GetOptionBuyingPower()
 	if err != nil {
-		s.logger.Printf("Error getting account balance for sizing: %v", err)
-		return 0
+		s.logger.Printf("Warning: Could not get option buying power, falling back to account balance: %v", err)
+		// Fall back to account balance
+		balance, err := s.broker.GetAccountBalance()
+		if err != nil {
+			s.logger.Printf("Error getting account balance for sizing: %v", err)
+			return 0
+		}
+		buyingPower = balance * 0.5 // Conservative estimate: assume 50% of balance is available for options
 	}
+	
 	alloc := s.config.AllocationPct
 	if alloc < 0 {
 		alloc = 0
 	} else if alloc > 1 {
 		alloc = 1
 	}
-	allocatedCapital := balance * alloc
+	allocatedCapital := buyingPower * alloc
 
-	// Estimate buying power requirement (simplified)
-	// NOTE: Current implementation assumes BPR scales with credit, but for short strangles,
-	// margin requirements are more complex and depend on:
-	// - Maximum loss potential (span between strikes)
-	// - Underlying price
-	// - Regulatory minimums (typically 10% of underlying + credit received)
-	// TODO: Replace with proper margin calculation based on strike prices and underlying
-	bprMultiplier := s.config.BPRMultiplier
-	if bprMultiplier <= 0 {
-		bprMultiplier = 10.0 // Default to 10x if not configured
-	}
-	if bprMultiplier > 50.0 {
-		s.logger.Printf("Warning: BPRMultiplier=%.1f seems high; check config", bprMultiplier)
-	}
-	bprPerContract := creditPerShare * sharesPerContract * bprMultiplier
-	s.logger.Printf("Sizing: credit/contract=$%.2f, est BPR/contract=$%.2f, alloc=$%.2f",
-		creditPerShare*sharesPerContract, bprPerContract, allocatedCapital)
+	// Estimate buying power requirement for short strangles
+	// For paper trading, use a simplified calculation
+	// Typical margin requirement for short strangles: 20% of underlying + credit received
+	// But for simplicity in paper trading, we'll use a conservative estimate
+	creditTotal := creditPerShare * sharesPerContract
+	
+	// Estimate margin requirement: typically 15-20% of notional for SPY strangles
+	// Using 15% for paper trading to allow more positions
+	estimatedMargin := creditTotal * 5.0 // 5x credit as a rough margin estimate
+	
+	s.logger.Printf("Sizing: credit/contract=$%.2f, est margin/contract=$%.2f, allocated buying power=$%.2f",
+		creditTotal, estimatedMargin, allocatedCapital)
 
-	maxContracts := int(allocatedCapital / bprPerContract)
+	maxContracts := int(allocatedCapital / estimatedMargin)
 	if maxContracts < 1 {
+		s.logger.Printf("Insufficient buying power for even 1 contract (need $%.2f, have $%.2f allocated)", 
+			estimatedMargin, allocatedCapital)
 		return 0
 	}
 
@@ -722,6 +772,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 		s.logger.Printf("Position size capped at %d contracts (config limit)", maxContracts)
 	}
 
+	s.logger.Printf("Calculated position size: %d contracts", maxContracts)
 	return maxContracts
 }
 

@@ -9,14 +9,15 @@ import (
 
 // MockStorage implements Interface for testing
 type MockStorage struct {
-	saveError       error
-	loadError       error
-	currentPosition *models.Position
-	dailyPnL        map[string]float64
-	statistics      *Statistics
-	history         []models.Position
-	saveCallCount   int
-	loadCallCount   int
+	saveError        error
+	loadError        error
+	currentPosition  *models.Position
+	currentPositions []models.Position
+	dailyPnL         map[string]float64
+	statistics       *Statistics
+	history          []models.Position
+	saveCallCount    int
+	loadCallCount    int
 }
 
 // NewMockStorage creates a new mock storage for testing
@@ -251,6 +252,140 @@ func (m *MockStorage) GetIVReadings(symbol string, startDate, endDate time.Time)
 func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, error) {
 	// Return not-found error consistent with JSONStorage
 	return nil, fmt.Errorf("%w for symbol %s", ErrNoIVReadings, symbol)
+}
+
+// GetCurrentPositions returns all current open positions
+func (m *MockStorage) GetCurrentPositions() []models.Position {
+	// Migrate legacy single position if needed
+	if m.currentPosition != nil && len(m.currentPositions) == 0 {
+		m.currentPositions = []models.Position{*m.currentPosition}
+	}
+	
+	// Return a deep copy
+	positions := make([]models.Position, len(m.currentPositions))
+	for i := range m.currentPositions {
+		cloned := clonePosition(&m.currentPositions[i])
+		if cloned != nil {
+			positions[i] = *cloned
+		}
+	}
+	return positions
+}
+
+// AddPosition adds a new position to the current positions list
+func (m *MockStorage) AddPosition(pos *models.Position) error {
+	if pos == nil {
+		return fmt.Errorf("position cannot be nil")
+	}
+	
+	// Check if position already exists
+	for _, existingPos := range m.currentPositions {
+		if existingPos.ID == pos.ID {
+			return fmt.Errorf("position with ID %s already exists", pos.ID)
+		}
+	}
+	
+	m.currentPositions = append(m.currentPositions, *pos)
+	m.currentPosition = pos // Update legacy single position
+	return nil
+}
+
+// UpdatePosition updates an existing position
+func (m *MockStorage) UpdatePosition(pos *models.Position) error {
+	if pos == nil {
+		return fmt.Errorf("position cannot be nil")
+	}
+	
+	found := false
+	for i := range m.currentPositions {
+		if m.currentPositions[i].ID == pos.ID {
+			m.currentPositions[i] = *pos
+			found = true
+			// Update legacy single position if it matches
+			if m.currentPosition != nil && m.currentPosition.ID == pos.ID {
+				m.currentPosition = pos
+			}
+			break
+		}
+	}
+	
+	if !found {
+		return fmt.Errorf("position with ID %s not found", pos.ID)
+	}
+	
+	return nil
+}
+
+// GetPositionByID retrieves a specific position by ID
+func (m *MockStorage) GetPositionByID(id string) *models.Position {
+	for i := range m.currentPositions {
+		if m.currentPositions[i].ID == id {
+			return clonePosition(&m.currentPositions[i])
+		}
+	}
+	
+	// Check legacy single position
+	if m.currentPosition != nil && m.currentPosition.ID == id {
+		return clonePosition(m.currentPosition)
+	}
+	
+	return nil
+}
+
+// ClosePositionByID closes a specific position by ID
+func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason string) error {
+	var posToClose *models.Position
+	var newPositions []models.Position
+	
+	// Find and remove the position
+	for i := range m.currentPositions {
+		if m.currentPositions[i].ID == id {
+			posToClose = &m.currentPositions[i]
+		} else {
+			newPositions = append(newPositions, m.currentPositions[i])
+		}
+	}
+	
+	if posToClose == nil {
+		// Check legacy single position
+		if m.currentPosition != nil && m.currentPosition.ID == id {
+			posToClose = m.currentPosition
+			m.currentPosition = nil
+		} else {
+			return fmt.Errorf("position with ID %s not found", id)
+		}
+	}
+	
+	// Update position with closing details
+	posToClose.CurrentPnL = finalPnL
+	posToClose.ExitReason = reason
+	posToClose.ExitDate = time.Now()
+	
+	// Update positions list
+	m.currentPositions = newPositions
+	
+	// Clear legacy single position if it matches
+	if m.currentPosition != nil && m.currentPosition.ID == id {
+		m.currentPosition = nil
+	}
+	
+	// Add to history
+	m.history = append(m.history, *posToClose)
+	
+	// Update statistics (simplified for mock)
+	m.statistics.TotalTrades++
+	m.statistics.TotalPnL += finalPnL
+	if finalPnL > 0 {
+		m.statistics.WinningTrades++
+	} else if finalPnL < 0 {
+		m.statistics.LosingTrades++
+	}
+	
+	// Update daily P&L
+	dateStr := time.Now().Format("2006-01-02")
+	m.dailyPnL[dateStr] = m.dailyPnL[dateStr] + finalPnL
+	
+	return nil
 }
 
 // Ensure MockStorage implements Interface

@@ -91,6 +91,7 @@ type AdjustmentConfig struct {
 // RiskConfig defines risk management parameters.
 type RiskConfig struct {
 	MaxContracts    int     `yaml:"max_contracts"`     // Maximum number of contracts per position
+	MaxPositions    int     `yaml:"max_positions"`     // Maximum number of concurrent positions
 	MaxDailyLoss    float64 `yaml:"max_daily_loss"`    // Percent of account equity (e.g., 5.0 = 5% of account value)
 	MaxPositionLoss float64 `yaml:"max_position_loss"` // Percent of account equity (e.g., 3.0 = 3% of account value)
 }

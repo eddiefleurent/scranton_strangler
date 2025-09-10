@@ -158,10 +158,15 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 }
 
 func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
-	position := m.storage.GetCurrentPosition()
-	if position == nil || position.ID != positionID {
-		m.logger.Printf("Position %s not found or mismatched", positionID)
-		return
+	// Try to get position by ID first (for multiple positions support)
+	position := m.storage.GetPositionByID(positionID)
+	if position == nil {
+		// Fallback to GetCurrentPosition for backward compatibility
+		position = m.storage.GetCurrentPosition()
+		if position == nil || position.ID != positionID {
+			m.logger.Printf("Position %s not found or mismatched", positionID)
+			return
+		}
 	}
 
 	var targetState models.PositionState
@@ -176,9 +181,13 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 			return
 		}
 
-		if err := m.storage.SetCurrentPosition(position); err != nil {
-			m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
-			return
+		// Try UpdatePosition first for multiple positions support
+		if err := m.storage.UpdatePosition(position); err != nil {
+			// Fallback to SetCurrentPosition for backward compatibility
+			if err := m.storage.SetCurrentPosition(position); err != nil {
+				m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
+				return
+			}
 		}
 
 		m.logger.Printf("Position %s successfully transitioned to %s state", positionID, targetState)
@@ -199,10 +208,13 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 			finalPnL = position.CreditReceived * float64(position.Quantity) * 100
 		}
 
-		// Use ClosePosition API to atomically set state to closed, persist P&L and reason
-		if err := m.storage.ClosePosition(finalPnL, transitionReason); err != nil {
-			m.logger.Printf("Failed to close position %s: %v", positionID, err)
-			return
+		// Use ClosePositionByID for multiple positions support
+		if err := m.storage.ClosePositionByID(positionID, finalPnL, transitionReason); err != nil {
+			// Fallback to ClosePosition for backward compatibility
+			if err := m.storage.ClosePosition(finalPnL, transitionReason); err != nil {
+				m.logger.Printf("Failed to close position %s: %v", positionID, err)
+				return
+			}
 		}
 
 		m.logger.Printf("Position %s successfully closed. Final P&L: $%.2f", positionID, finalPnL)
@@ -210,10 +222,15 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 }
 
 func (m *Manager) handleOrderFailed(positionID string, orderID int, reason string) {
-	position := m.storage.GetCurrentPosition()
-	if position == nil || position.ID != positionID {
-		m.logger.Printf("Position %s not found or mismatched", positionID)
-		return
+	// Try to get position by ID first (for multiple positions support)
+	position := m.storage.GetPositionByID(positionID)
+	if position == nil {
+		// Fallback to GetCurrentPosition for backward compatibility
+		position = m.storage.GetCurrentPosition()
+		if position == nil || position.ID != positionID {
+			m.logger.Printf("Position %s not found or mismatched", positionID)
+			return
+		}
 	}
 
 	// Check if this is an exit order failure - verify the orderID matches
@@ -235,9 +252,13 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		}
 	}
 
-	if err := m.storage.SetCurrentPosition(position); err != nil {
-		m.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
-		return
+	// Try UpdatePosition first for multiple positions support
+	if err := m.storage.UpdatePosition(position); err != nil {
+		// Fallback to SetCurrentPosition for backward compatibility
+		if err := m.storage.SetCurrentPosition(position); err != nil {
+			m.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
+			return
+		}
 	}
 
 	if isExitOrder {

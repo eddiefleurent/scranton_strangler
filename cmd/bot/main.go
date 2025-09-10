@@ -114,6 +114,7 @@ func main() {
 	strategyConfig := &strategy.Config{
 		Symbol:              cfg.Strategy.Symbol,
 		DTETarget:           cfg.Strategy.Entry.TargetDTE,
+		DTERange:            cfg.Strategy.Entry.DTERange,
 		DeltaTarget:         cfg.Strategy.Entry.Delta / 100, // Convert from percentage
 		ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
 		MaxDTE:              cfg.Strategy.Exit.MaxDTE,
@@ -287,38 +288,81 @@ func (b *Bot) runTradingCycle() {
 
 	b.logger.Println("Starting trading cycle...")
 
-	// Check for existing position
-	hasPosition := b.checkExistingPosition(now)
+	// Get all current positions (supports multiple positions)
+	positions := b.storage.GetCurrentPositions()
+	b.logger.Printf("Currently managing %d position(s)", len(positions))
 
-	if hasPosition {
-		// Check exit conditions
-		b.logger.Println("Position exists, checking exit conditions...")
-		position := b.storage.GetCurrentPosition()
-		shouldExit, reason := b.strategy.CheckExitConditions(position)
+	// Check exit conditions for each position
+	for _, position := range positions {
+		b.logger.Printf("Checking position %s (%.2f/%.2f, %s DTE)", 
+			position.ID[:8], position.PutStrike, position.CallStrike, position.Expiration.Format("2006-01-02"))
+		
+		// Create a copy to work with
+		posCopy := position
+		shouldExit, reason := b.strategy.CheckExitConditions(&posCopy)
 		if shouldExit {
-			b.logger.Printf("Exit signal: %s", reason)
-			b.executeExit(b.ctx, reason)
+			b.logger.Printf("Exit signal for position %s: %s", position.ID[:8], reason)
+			b.executeExitForPosition(&posCopy, reason)
 		} else {
-			b.logger.Println("No exit conditions met, continuing to monitor")
+			b.logger.Printf("No exit conditions met for position %s", position.ID[:8])
 		}
 
 		// Check for adjustments (Phase 2) - only during regular hours
 		if b.config.Strategy.Adjustments.Enabled && isMarketOpen {
-			b.checkAdjustments()
+			b.checkAdjustmentsForPosition(&posCopy)
 		}
-	} else {
-		// Check entry conditions - only during regular trading hours
-		if isMarketOpen {
-			b.logger.Println("No position, checking entry conditions...")
+	}
+
+	// Check if we can open new positions - only during regular trading hours
+	maxPositions := b.config.Risk.MaxPositions
+	if maxPositions <= 0 {
+		maxPositions = 1 // Default to 1 if not configured
+	}
+	
+	if isMarketOpen && len(positions) < maxPositions {
+		b.logger.Printf("Have %d/%d positions, checking entry conditions...", len(positions), maxPositions)
+		
+		// Check if we have sufficient buying power for new positions
+		buyingPower, err := b.broker.GetOptionBuyingPower()
+		if err != nil {
+			b.logger.Printf("Warning: Could not get option buying power: %v", err)
+			buyingPower = 0
+		}
+		
+		b.logger.Printf("Available option buying power: $%.2f", buyingPower)
+		
+		// Only attempt entry if we have meaningful buying power
+		if buyingPower > 1000 { // Minimum threshold for a new position
 			canEnter, reason := b.strategy.CheckEntryConditions()
 			if canEnter {
 				b.logger.Printf("Entry signal: %s", reason)
-				b.executeEntry()
+				// Try to open positions up to the max limit
+				remainingSlots := maxPositions - len(positions)
+				for i := 0; i < remainingSlots && i < 1; i++ { // Limit to 1 new position per cycle for safety
+					b.executeEntry()
+				}
 			} else {
 				b.logger.Printf("Entry conditions not met: %s", reason)
 			}
 		} else {
-			b.logger.Printf("Market %s: Skipping entry checks, only monitoring existing positions", marketState)
+			b.logger.Printf("Insufficient buying power for new positions")
+		}
+	} else if !isMarketOpen {
+		b.logger.Printf("Market %s: Skipping entry checks, only monitoring existing positions", marketState)
+	} else {
+		b.logger.Printf("Maximum positions (%d) reached, not checking for new entries", maxPositions)
+	}
+
+	// Maintain backward compatibility with single position
+	if len(positions) == 1 {
+		// Update the legacy single position for compatibility
+		if err := b.storage.SetCurrentPosition(&positions[0]); err != nil {
+			b.logger.Printf("Warning: Failed to update legacy single position: %v", err)
+		}
+	} else if len(positions) == 0 {
+		// Clear the legacy single position
+		if err := b.storage.SetCurrentPosition(nil); err != nil {
+			b.logger.Printf("Warning: Failed to clear legacy single position: %v", err)
 		}
 	}
 
@@ -487,10 +531,13 @@ func (b *Bot) executeEntry() {
 		return
 	}
 
-	// Save position to storage
-	if err := b.storage.SetCurrentPosition(position); err != nil {
-		b.logger.Printf("Failed to save position: %v", err)
-		return
+	// Save position to storage (use AddPosition for multiple positions support)
+	if err := b.storage.AddPosition(position); err != nil {
+		// Fallback to SetCurrentPosition for backward compatibility
+		if err := b.storage.SetCurrentPosition(position); err != nil {
+			b.logger.Printf("Failed to save position: %v", err)
+			return
+		}
 	}
 
 	b.logger.Printf("Position saved: ID=%s, LimitPrice=$%.2f, DTE=%d",
@@ -826,4 +873,62 @@ func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
 	}
 
 	return nil, fmt.Errorf("today's date %s still not found after calendar refresh", today)
+}
+
+// executeExitForPosition executes exit for a specific position
+func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.ExitReason) {
+	b.logger.Printf("Executing exit for position %s: %s", position.ID[:8], reason)
+
+	if !b.isPositionReadyForExit(position) {
+		return
+	}
+
+	b.logPositionClose(position)
+
+	maxDebit := b.calculateMaxDebit(position, reason)
+
+	if maxDebit <= 0 {
+		b.logger.Printf("Skipping close order for position %s: calculated maxDebit $%.2f is invalid (must be > 0)", position.ID[:8], maxDebit)
+		return
+	}
+
+	// Get appropriate tick size for the symbol and round maxDebit up to tick size
+	tickSize, err := b.broker.GetTickSize(position.Symbol)
+	if err != nil {
+		b.logger.Printf("Warning: Failed to get tick size for %s, using default 0.01: %v", position.Symbol, err)
+		tickSize = 0.01
+	}
+	maxDebit = util.CeilToTick(maxDebit, tickSize)
+
+	// Place the close order
+	closeOrder, err := b.retryClient.ClosePositionWithRetry(
+		b.ctx,
+		position,
+		maxDebit,
+	)
+
+	if err != nil {
+		b.logger.Printf("Failed to place close order for position %s: %v", position.ID[:8], err)
+		return
+	}
+
+	// Update position with exit order ID
+	position.ExitOrderID = fmt.Sprintf("%d", closeOrder.Order.ID)
+	if err := b.storage.UpdatePosition(position); err != nil {
+		b.logger.Printf("Failed to update position %s with exit order ID: %v", position.ID[:8], err)
+	}
+
+	b.logger.Printf("Close order placed for position %s: order_id=%d, max_debit=$%.2f",
+		position.ID[:8], closeOrder.Order.ID, maxDebit)
+
+	// Start order status polling in background
+	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)
+}
+
+// checkAdjustmentsForPosition checks if adjustments are needed for a specific position
+func (b *Bot) checkAdjustmentsForPosition(position *models.Position) {
+	// Placeholder for adjustment logic (Phase 2)
+	// This would check if the position needs to be adjusted based on
+	// market movement and the football system rules
+	b.logger.Printf("Adjustment check for position %s not yet implemented", position.ID[:8])
 }
