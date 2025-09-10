@@ -150,12 +150,11 @@ func (c *Config) resolveLocation() *time.Location {
 	if loc, err := time.LoadLocation(tz); err == nil {
 		return loc
 	}
+	// Last resort: after embedding tzdata, retry NY; else fallback to UTC
 	if loc, err := time.LoadLocation("America/New_York"); err == nil {
 		return loc
 	}
-	// WARNING: Falling back to fixed ET offset - this ignores DST and will drift half the year
-	// Consider installing timezone data or using a container with proper TZ support
-	return time.FixedZone("ET", -5*60*60)
+	return time.UTC
 }
 
 // Validate checks that all configuration values are valid and consistent.
