@@ -24,7 +24,12 @@ build:
 # Build for production (optimized)
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) cmd/bot/main.go
+	@echo "⏱️  Starting build timer..."
+	@START_TIME=$$(date +%s); \
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) cmd/bot/main.go; \
+	END_TIME=$$(date +%s); \
+	DURATION=$$((END_TIME - START_TIME)); \
+	echo "⏱️  Build completed in $${DURATION} seconds"
 
 # Run tests
 test:
