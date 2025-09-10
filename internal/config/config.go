@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	_ "time/tzdata"
 
 	yaml "gopkg.in/yaml.v3"
 )
@@ -240,6 +241,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Strategy.Exit.StopLossPct <= 0 {
 		return fmt.Errorf("strategy.exit.stop_loss_pct must be > 0")
+	}
+	if c.Strategy.Exit.MaxDTE <= 0 {
+		return fmt.Errorf("strategy.exit.max_dte must be > 0")
 	}
 
 	// Adjustment thresholds must be sensible relative to stop loss
