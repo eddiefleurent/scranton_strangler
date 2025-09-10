@@ -526,30 +526,14 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 
 	target := time.Now().AddDate(0, 0, targetDTE)
 
-	// Ask broker for supported expirations with timeout to prevent hangs
-	type expirationsResult struct {
-		exps []string
-		err  error
-	}
-	resultChan := make(chan expirationsResult, 1)
-
-	go func() {
-		expirations, brokerErr := s.broker.GetExpirations(s.config.Symbol)
-		resultChan <- expirationsResult{exps: expirations, err: brokerErr}
-	}()
-
-	var exps []string
-	var err error
-	select {
-	case result := <-resultChan:
-		exps = result.exps
-		err = result.err
-	case <-ctx.Done():
-		s.logger.Printf("Warning: GetExpirations timed out: %v", ctx.Err())
-		err = ctx.Err()
+	// Ask broker for supported expirations with context support
+	exps, err := s.broker.GetExpirationsCtx(ctx, s.config.Symbol)
+	if err != nil {
+		s.logger.Printf("Warning: GetExpirationsCtx failed: %v", err)
+		return ""
 	}
 
-	if err == nil && len(exps) > 0 {
+	if len(exps) > 0 {
 		best := exps[0]
 		bestDiff := math.MaxInt32
 		for _, e := range exps {
@@ -822,9 +806,13 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		if sl <= 0 {
 			sl = 2.5
 		} // Default to 250% to match old behavior
-		// Clamp the stop-loss to the risk cap only when MaxPositionLoss is explicitly set (> 0)
-		if s.config.MaxPositionLoss > 0 && sl > s.config.MaxPositionLoss {
-			sl = s.config.MaxPositionLoss
+		// Respect account-equity risk cap by converting it to "credit units"
+		if s.config.MaxPositionLoss > 0 {
+			if equity, err := s.broker.GetAccountBalance(); err == nil && equity > 0 && absTotalNetCredit > 0 {
+				riskDollars := equity * (s.config.MaxPositionLoss / 100.0)
+				riskStopLossPct := riskDollars / absTotalNetCredit
+				sl = math.Min(sl, riskStopLossPct)
+			}
 		}
 		if profitPct <= -sl {
 			return true, ExitReasonStopLoss
