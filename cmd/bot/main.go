@@ -353,18 +353,6 @@ func (b *Bot) runTradingCycle() {
 		b.logger.Printf("Maximum positions (%d) reached, not checking for new entries", maxPositions)
 	}
 
-	// Maintain backward compatibility with single position
-	if len(positions) == 1 {
-		// Update the legacy single position for compatibility
-		if err := b.storage.SetCurrentPosition(&positions[0]); err != nil {
-			b.logger.Printf("Warning: Failed to update legacy single position: %v", err)
-		}
-	} else if len(positions) == 0 {
-		// Clear the legacy single position
-		if err := b.storage.SetCurrentPosition(nil); err != nil {
-			b.logger.Printf("Warning: Failed to clear legacy single position: %v", err)
-		}
-	}
 
 	b.logger.Println("Trading cycle complete")
 }
@@ -477,13 +465,10 @@ func (b *Bot) executeEntry() {
 		return
 	}
 
-	// Save position to storage (use AddPosition for multiple positions support)
+	// Save position to storage
 	if err := b.storage.AddPosition(position); err != nil {
-		// Fallback to SetCurrentPosition for backward compatibility
-		if err := b.storage.SetCurrentPosition(position); err != nil {
-			b.logger.Printf("Failed to save position: %v", err)
-			return
-		}
+		b.logger.Printf("Failed to save position: %v", err)
+		return
 	}
 
 	b.logger.Printf("Position saved: ID=%s, LimitPrice=$%.2f, DTE=%d",
@@ -541,7 +526,8 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 				// Clear the terminal order ID to allow re-attempt
 				position.ExitOrderID = ""
 				position.ExitReason = ""
-				if err := b.storage.SetCurrentPosition(position); err != nil {
+				// Use UpdatePosition to persist to both legacy and CurrentPositions
+				if err := b.storage.UpdatePosition(position); err != nil {
 					b.logger.Printf("Warning: Failed to clear terminal exit order ID: %v", err)
 				}
 				return true
