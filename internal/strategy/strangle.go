@@ -250,22 +250,15 @@ func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 	}
 
 	// Store the current IV reading for historical analysis
-	s.storeCurrentIVReading(currentIV, targetExp)
+	s.storeCurrentIVReading(currentIV)
 
 	return currentIV, nil
 }
 
 // storeCurrentIVReading stores the current IV reading for future historical analysis
-func (s *StrangleStrategy) storeCurrentIVReading(iv float64, expiration string) {
+func (s *StrangleStrategy) storeCurrentIVReading(iv float64) {
 	if s.storage == nil {
 		return // No storage available
-	}
-
-	// Parse expiration date to validate format
-	_, err := time.Parse("2006-01-02", expiration)
-	if err != nil {
-		s.logger.Printf("Warning: Could not parse expiration date %s for IV storage: %v", expiration, err)
-		return
 	}
 
 	// Create IV reading for today's date
@@ -479,8 +472,29 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 
 	target := time.Now().AddDate(0, 0, targetDTE)
 
-	// Ask broker for supported expirations and pick the nearest to target
-	exps, err := s.broker.GetExpirations(s.config.Symbol)
+	// Ask broker for supported expirations with timeout to prevent hangs
+	type expirationsResult struct {
+		exps []string
+		err  error
+	}
+	resultChan := make(chan expirationsResult, 1)
+
+	go func() {
+		expirations, brokerErr := s.broker.GetExpirations(s.config.Symbol)
+		resultChan <- expirationsResult{exps: expirations, err: brokerErr}
+	}()
+
+	var exps []string
+	var err error
+	select {
+	case result := <-resultChan:
+		exps = result.exps
+		err = result.err
+	case <-ctx.Done():
+		s.logger.Printf("Warning: GetExpirations timed out: %v", ctx.Err())
+		err = ctx.Err()
+	}
+
 	if err == nil && len(exps) > 0 {
 		best := exps[0]
 		bestDiff := math.MaxInt32
@@ -638,7 +652,7 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 	// Get tick size from broker for proper spread validation
 	var tickSize float64 = 0.01 // Default fallback
 	if s.broker != nil {
-		if brokerTickSize, err := s.broker.GetTickSize(put.Underlying); err == nil && brokerTickSize > 0 {
+		if brokerTickSize, err := s.broker.GetTickSize(s.config.Symbol); err == nil && brokerTickSize > 0 {
 			tickSize = brokerTickSize
 		}
 	}
@@ -727,8 +741,8 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 
 	// Check profit target
 	// Calculate profit percentage against abs(net credit) received (in dollars)
-	// GetNetCredit() returns per-share credit, multiply by quantity and shares per contract (100)
-	absTotalNetCredit := math.Abs(position.GetNetCredit()) * float64(position.Quantity) * 100
+	// GetNetCredit() returns per-share credit, multiply by quantity and shares per contract
+	absTotalNetCredit := math.Abs(position.GetNetCredit()) * float64(position.Quantity) * sharesPerContract
 	if absTotalNetCredit == 0 {
 		return true, ExitReasonError
 	}

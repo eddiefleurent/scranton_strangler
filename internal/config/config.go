@@ -14,10 +14,13 @@ import (
 // Risk Management Constants
 const (
 	// defaultEscalateLossPct is used when strategy.escalate_loss_pct is unset
+	// Percent of position credit (e.g., 2.0 = 2% of credit received)
 	defaultEscalateLossPct = 2.0
 	// defaultStopLossPct is used when strategy.exit.stop_loss_pct is unset
+	// Percent of position credit (e.g., 2.5 = 2.5% of credit received)
 	defaultStopLossPct = 2.5
 	// defaultRiskMaxPositionLoss is used when risk.max_position_loss is unset
+	// Percent of account equity (e.g., 3.0 = 3% of account value)
 	defaultRiskMaxPositionLoss = 3.0
 	// defaultMaxDTE represents the default maximum days to expiration before forced exit (21 days)
 	defaultMaxDTE = 21
@@ -74,7 +77,7 @@ type EntryConfig struct {
 
 // ExitConfig defines exit criteria for closing positions.
 type ExitConfig struct {
-	ProfitTarget float64 `yaml:"profit_target"`
+	ProfitTarget float64 `yaml:"profit_target"` // Fraction (e.g., 0.25 = 25%)
 	MaxDTE       int     `yaml:"max_dte"`
 	StopLossPct  float64 `yaml:"stop_loss_pct"`
 }
@@ -82,14 +85,14 @@ type ExitConfig struct {
 // AdjustmentConfig defines parameters for position adjustments.
 type AdjustmentConfig struct {
 	Enabled             bool    `yaml:"enabled"`
-	SecondDownThreshold float64 `yaml:"second_down_threshold"`
+	SecondDownThreshold float64 `yaml:"second_down_threshold"` // Percent of position credit (e.g., 1.5 = 1.5% of credit received)
 }
 
 // RiskConfig defines risk management parameters.
 type RiskConfig struct {
-	MaxContracts    int     `yaml:"max_contracts"`
-	MaxDailyLoss    float64 `yaml:"max_daily_loss"`
-	MaxPositionLoss float64 `yaml:"max_position_loss"`
+	MaxContracts    int     `yaml:"max_contracts"`     // Maximum number of contracts per position
+	MaxDailyLoss    float64 `yaml:"max_daily_loss"`    // Percent of account equity (e.g., 5.0 = 5% of account value)
+	MaxPositionLoss float64 `yaml:"max_position_loss"` // Percent of account equity (e.g., 3.0 = 3% of account value)
 }
 
 // ScheduleConfig defines trading schedule and market hours.
@@ -114,7 +117,7 @@ func Load(configPath string) (*Config, error) {
 
 	data, err := os.ReadFile(configPath) // #nosec G304 -- configPath is a user-provided config file path
 	if err != nil {
-		return nil, fmt.Errorf("reading config file: %w", err)
+		return nil, fmt.Errorf("reading config file %q: %w", configPath, err)
 	}
 
 	// Expand environment variables
@@ -124,7 +127,7 @@ func Load(configPath string) (*Config, error) {
 	dec := yaml.NewDecoder(strings.NewReader(expanded))
 	dec.KnownFields(true)
 	if err := dec.Decode(&config); err != nil {
-		return nil, fmt.Errorf("parsing config: %w", err)
+		return nil, fmt.Errorf("parsing config %q: %w", configPath, err)
 	}
 
 	// Normalize config defaults
@@ -150,6 +153,8 @@ func (c *Config) resolveLocation() *time.Location {
 	if loc, err := time.LoadLocation("America/New_York"); err == nil {
 		return loc
 	}
+	// WARNING: Falling back to fixed ET offset - this ignores DST and will drift half the year
+	// Consider installing timezone data or using a container with proper TZ support
 	return time.FixedZone("ET", -5*60*60)
 }
 
@@ -238,6 +243,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("strategy.exit.stop_loss_pct must be > 0")
 	}
 
+	// Adjustment thresholds must be sensible relative to stop loss
+	if c.Strategy.Adjustments.Enabled {
+		if c.Strategy.Adjustments.SecondDownThreshold <= 0 {
+			return fmt.Errorf("strategy.adjustments.second_down_threshold must be > 0 when adjustments.enabled is true")
+		}
+		if c.Strategy.Adjustments.SecondDownThreshold >= c.Strategy.Exit.StopLossPct {
+			return fmt.Errorf("strategy.adjustments.second_down_threshold (%.2f) must be < strategy.exit.stop_loss_pct (%.2f)",
+				c.Strategy.Adjustments.SecondDownThreshold, c.Strategy.Exit.StopLossPct)
+		}
+	}
+
 	// Validate loss percentage constraints
 	if c.Strategy.EscalateLossPct >= c.Strategy.Exit.StopLossPct {
 		return fmt.Errorf("strategy.escalate_loss_pct (%.2f) must be < strategy.exit.stop_loss_pct (%.2f)",
@@ -264,7 +280,7 @@ func (c *Config) Validate() error {
 	// Schedule validation
 	if c.Schedule.MarketCheckInterval == "" {
 		return fmt.Errorf("schedule.market_check_interval is required (set in Normalize)")
-	} else if _, err := time.ParseDuration(c.Schedule.MarketCheckInterval); err != nil {
+	} else if _, err := time.ParseDuration(strings.TrimSpace(c.Schedule.MarketCheckInterval)); err != nil {
 		return fmt.Errorf("schedule.market_check_interval invalid: %w", err)
 	}
 	loc := c.resolveLocation()
@@ -289,7 +305,7 @@ func (c *Config) IsPaperTrading() bool {
 
 // GetCheckInterval returns the configured market check interval duration.
 func (c *Config) GetCheckInterval() time.Duration {
-	d, err := time.ParseDuration(c.Schedule.MarketCheckInterval)
+	d, err := time.ParseDuration(strings.TrimSpace(c.Schedule.MarketCheckInterval))
 	if err != nil {
 		return 15 * time.Minute // default
 	}
@@ -331,6 +347,12 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 func (c *Config) Normalize() {
 	if strings.TrimSpace(c.Schedule.MarketCheckInterval) == "" {
 		c.Schedule.MarketCheckInterval = "15m"
+	}
+	if strings.TrimSpace(c.Environment.Mode) == "" {
+		c.Environment.Mode = "paper"
+	}
+	if strings.TrimSpace(c.Environment.LogLevel) == "" {
+		c.Environment.LogLevel = "info"
 	}
 	if c.Strategy.Exit.MaxDTE == 0 {
 		c.Strategy.Exit.MaxDTE = defaultMaxDTE

@@ -27,6 +27,9 @@ type mockBrokerForStrategy struct {
 	marketClockErr  error
 }
 
+// Compile-time interface compliance check
+var _ broker.Broker = (*mockBrokerForStrategy)(nil)
+
 func (m *mockBrokerForStrategy) GetAccountBalance() (float64, error) {
 	return m.balance, nil
 }
@@ -400,13 +403,13 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 			Strike:     400.0,
 			OptionType: "put",
 			Bid:        1.50,
-			Ask:        1.60,
+			Ask:        1.60, // Spread = 0.10 >= 0.01 tick
 		},
 		{
 			Strike:     400.0,
 			OptionType: "call",
 			Bid:        0.80,
-			Ask:        0.90,
+			Ask:        0.90, // Spread = 0.10 >= 0.01 tick
 		},
 		{
 			Strike:     420.0,
@@ -419,6 +422,18 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 			OptionType: "call",
 			Bid:        2.10,
 			Ask:        2.30,
+		},
+		{
+			Strike:     410.0,
+			OptionType: "put",
+			Bid:        1.5000,
+			Ask:        1.5005, // 0.0005 < 0.01 tick - for tight spread test
+		},
+		{
+			Strike:     430.0,
+			OptionType: "call",
+			Bid:        0.8000,
+			Ask:        0.8005, // 0.0005 < 0.01 tick - for tight spread test
 		},
 	}
 
@@ -450,6 +465,12 @@ func TestStrangleStrategy_calculateExpectedCredit(t *testing.T) {
 			putStrike:  350.0,
 			callStrike: 450.0,
 			expected:   0.0, // No matching strikes
+		},
+		{
+			name:       "reject tight spreads (< 1 tick)",
+			putStrike:  410.0,
+			callStrike: 430.0,
+			expected:   0.0,
 		},
 	}
 
@@ -927,12 +948,14 @@ func (m *mockBroker) GetOptionChain(_, expiration string, _ bool) ([]broker.Opti
 		options = []broker.Option{
 			{
 				Strike:     400.0,
+				Underlying: "SPY",
 				OptionType: "put",
 				Bid:        0.80,
 				Ask:        0.90, // Mid = 0.85
 			},
 			{
 				Strike:     420.0,
+				Underlying: "SPY",
 				OptionType: "call",
 				Bid:        0.85,
 				Ask:        0.95, // Mid = 0.90

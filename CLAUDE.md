@@ -79,7 +79,7 @@ The bot follows a component-based architecture with clear separation of concerns
 - **Position Manager**: Tracks state, P&L, and persists to `positions.json`
 
 ### Core Strategy Rules
-- **Entry**: IVR > 30, 45 DTE (±5), 16Δ strikes, minimum $2 credit
+- **Entry**: IV > 30%, 45 DTE (±5), 16Δ strikes, minimum $2 credit
 - **Exit**: 50% profit target or 21 DTE remaining
 - **Risk**: Maximum 35% account allocation
 
