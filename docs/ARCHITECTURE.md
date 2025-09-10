@@ -683,6 +683,95 @@ if regime == "high_vol": use 30Δ
 
 ## Implementation Details
 
+### Position Synchronization & State Management
+
+The bot implements robust position synchronization to prevent broker/storage mismatches that can lead to over-allocation and trading errors.
+
+#### Reconciliation System
+
+```go
+// Main reconciliation flow
+func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Position {
+    // 1. Get current broker positions
+    brokerPositions := b.broker.GetPositions()
+    
+    // 2. Check stored positions against broker (detect manual closes)
+    activePositions := []models.Position{}
+    for _, position := range storedPositions {
+        if b.isPositionOpenInBroker(&position, brokerPositions) {
+            activePositions = append(activePositions, position)
+        } else {
+            b.storage.ClosePositionByID(position.ID, finalPnL, "manual_close")
+        }
+    }
+    
+    // 3. Detect orphaned broker positions (timeout-related sync issues)
+    orphanedStrangles := b.findOrphanedStrangles(brokerPositions, activePositions)
+    for _, orphan := range orphanedStrangles {
+        recoveryPos := b.createRecoveryPosition(orphan)
+        b.storage.AddPosition(recoveryPos)
+        activePositions = append(activePositions, *recoveryPos)
+    }
+    
+    return activePositions
+}
+```
+
+#### Enhanced Timeout Handling
+
+**Problem Solved**: Order polling goroutines would timeout after 5 minutes and prematurely close positions locally, while orders actually filled on the broker side.
+
+```go
+func (m *Manager) handleOrderTimeout(positionID string) {
+    position := m.storage.GetPositionByID(positionID)
+    
+    // NEW: Check broker before closing locally
+    brokerPositions, err := m.broker.GetPositions()
+    if err == nil {
+        isOpenInBroker := m.isPositionOpenInBroker(position, brokerPositions)
+        if isOpenInBroker {
+            // Order actually filled! Recover the position
+            position.TransitionState(models.StateOpen, "order_filled")
+            m.storage.UpdatePosition(position)
+            return // Exit early - position recovered
+        }
+    }
+    
+    // Original timeout handling only if truly not filled
+    m.storage.ClosePositionByID(positionID, 0, "order_timeout")
+}
+```
+
+#### Reconciliation Triggers
+
+1. **Every Trading Cycle**: `reconcilePositions()` runs at start of each 15-minute cycle
+2. **Before New Trades**: Additional reconcile check before opening positions to prevent exceeding limits
+3. **Bot Restart**: Automatic reconciliation on startup to handle deployment interruptions
+
+#### Emergency Liquidation
+
+```bash
+# Force close all positions via market orders
+make liquidate
+
+# Direct API utility
+go run scripts/liquidate_positions.go
+```
+
+The liquidation tool:
+- Fetches current broker positions
+- Places aggressive buy-to-close orders at 200% above ask price
+- Provides market order equivalent behavior for emergency situations
+
+#### Common Sync Issues Fixed
+
+| Issue | Root Cause | Solution |
+|-------|------------|----------|
+| **Over-allocation** | Bot loses track of filled orders | Reconcile before new trades |
+| **Timeout Premature Close** | 5min polling timeout vs slow sandbox fills | Check broker before local close |
+| **Redeploy Orphans** | Killed goroutines lose order tracking | Startup reconciliation |
+| **Manual Intervention** | User closes positions via broker UI | Detect manual closes in reconcile |
+
 ### Configuration Schema
 
 ```yaml

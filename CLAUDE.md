@@ -38,6 +38,9 @@ make unraid-restart    # Restart bot on Unraid
 > **SECURITY WARNING**: Add config.yaml to .gitignore and NEVER commit it. Populate secrets from environment variables or CI secrets using `envsubst < config.yaml.template > config.yaml` or similar secure injection methods. Also protect `data/positions.json` and `logs/` as they may contain sensitive trading information.
 make dev-setup        # Create config.yaml from example
 
+# Emergency liquidation
+make liquidate        # Close ALL positions using market orders (requires confirmation)
+
 # Cleanup
 make clean            # Remove build artifacts
 
@@ -143,6 +146,31 @@ The state machine enforces:
 - Automatic validation
 
 See `docs/STATE_MACHINE.md` for detailed documentation.
+
+### Position Reconciliation & Sync Management
+The bot includes robust position synchronization to prevent broker/storage mismatches:
+
+**Reconciliation Process:**
+- Runs automatically every trading cycle
+- Additional reconcile check before opening new trades
+- Detects positions closed manually outside the bot
+- Recovers positions that filled but weren't tracked due to timeouts
+
+**Timeout Handling:**
+- Enhanced timeout logic checks broker positions before closing locally
+- Prevents premature position closure when orders actually filled
+- Handles frequent redeploys and network interruptions gracefully
+
+**Emergency Tools:**
+- `make liquidate` - Force close all positions via market orders
+- `scripts/liquidate_positions.go` - Direct API liquidation utility
+- Automatic position limit enforcement prevents over-allocation
+
+**Common Sync Issues Fixed:**
+- Order timeout during polling (bot thinks order failed, but it filled)
+- Frequent bot restarts killing order polling goroutines
+- Manual position management via broker interface
+- Network interruptions during order status checks
 
 ### Configuration
 Uses `config.yaml` for all settings. Copy from `config.yaml.example` and update with your Tradier credentials. Key configuration sections:

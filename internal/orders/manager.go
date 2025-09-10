@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -266,6 +268,38 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		return
 	}
 
+	// Before closing position, check if broker actually has open positions matching this trade
+	// This prevents closing positions that actually filled but we lost track due to polling timeout
+	m.logger.Printf("Order timeout for position %s - verifying broker state before closing", positionID)
+	
+	brokerPositions, err := m.broker.GetPositions()
+	if err != nil {
+		m.logger.Printf("Failed to get broker positions during timeout handling: %v", err)
+		// Continue with original timeout logic as fallback
+	} else {
+		// Check if this position actually exists in the broker
+		isOpenInBroker := m.isPositionOpenInBroker(position, brokerPositions)
+		if isOpenInBroker {
+			m.logger.Printf("Position %s order timed out but position exists in broker - transitioning to open state", positionID)
+			
+			// The order actually filled! Transition to open state instead of closing
+			if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
+				m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
+				// Continue with timeout closure as fallback
+			} else {
+				if err := m.storage.UpdatePosition(position); err != nil {
+					m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
+				} else {
+					m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled", positionID)
+					return // Exit early - position recovered
+				}
+			}
+		}
+	}
+
+	// Original timeout handling - only reached if broker check failed or position not found in broker
+	m.logger.Printf("Proceeding with timeout closure for position %s", positionID)
+
 	// Detect entry vs exit order timeout
 	isExitOrder := position.ExitOrderID != "" && position.GetCurrentState() != models.StateSubmitted
 
@@ -414,4 +448,89 @@ func (m *Manager) isOrderCompletelyFilled(orderStatus *broker.OrderResponse) boo
 	// 1. Executed quantity >= requested quantity, OR
 	// 2. Remaining quantity is zero AND something was actually executed (not a rejected order)
 	return isComplete || (hasZeroRemaining && !nothingExecuted)
+}
+
+// isPositionOpenInBroker checks if a stored position still exists in broker positions
+func (m *Manager) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
+	for _, brokerPos := range brokerPositions {
+		// Match by symbol and quantity (simplified matching)
+		if brokerPos.Symbol == position.Symbol {
+			// For options positions, check if we have both legs still open
+			hasCallLeg := false
+			hasCallStrike := false
+			hasPutLeg := false  
+			hasPutStrike := false
+			
+			// Check if broker position matches our stored position strikes
+			for _, brokerPos2 := range brokerPositions {
+				if brokerPos2.Symbol == position.Symbol {
+					// Parse option symbol using OPRA format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
+					// SPY option format: SPY240315C00610000 or SPY240315P00500000
+					parsedStrike, optionType, err := m.parseOptionSymbol(brokerPos2.Symbol)
+					if err != nil {
+						continue // Skip invalid symbols
+					}
+					
+					if optionType == "C" {
+						hasCallLeg = true
+						if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
+							hasCallStrike = true
+						}
+					} else if optionType == "P" {
+						hasPutLeg = true
+						if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
+							hasPutStrike = true
+						}
+					}
+				}
+			}
+			
+			// Position is open if we have both call and put legs with matching strikes
+			if hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// parseOptionSymbol parses an OPRA format option symbol to extract strike and type
+// Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
+// Example: SPY240315C00610000 -> strike=610.00, type="C"
+func (m *Manager) parseOptionSymbol(symbol string) (float64, string, error) {
+	if len(symbol) < 15 {
+		return 0, "", fmt.Errorf("option symbol too short: %s", symbol)
+	}
+	
+	// Find the option type (C or P) - should be at a fixed position for OPRA format
+	// For SPY format: positions 9-10 should be the expiration date end, position 10 should be C/P
+	var optionTypePos int
+	var optionType string
+	
+	// Look for C or P in the expected positions
+	for i := 6; i < len(symbol)-8; i++ {
+		if symbol[i] == 'C' || symbol[i] == 'P' {
+			optionType = string(symbol[i])
+			optionTypePos = i
+			break
+		}
+	}
+	
+	if optionType == "" {
+		return 0, "", fmt.Errorf("no option type (C/P) found in symbol: %s", symbol)
+	}
+	
+	// Extract strike price (8 digits after the option type)
+	if optionTypePos+9 > len(symbol) {
+		return 0, "", fmt.Errorf("symbol too short for strike extraction: %s", symbol)
+	}
+	
+	strikeStr := symbol[optionTypePos+1 : optionTypePos+9]
+	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid strike format in symbol %s: %w", symbol, err)
+	}
+	
+	strike := float64(strikeInt) / 1000.0
+	return strike, optionType, nil
 }

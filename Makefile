@@ -2,13 +2,13 @@
 
 .PHONY: all help build build-prod test test-coverage lint run clean \
         deploy-unraid unraid-logs unraid-status unraid-restart \
-        dev-setup test-api test-paper security-scan build-test-helper tools check
+        dev-setup test-api test-paper security-scan build-test-helper tools check liquidate
 
 all: build
 
 # Default target
 help:
-	@printf "Targets:\n  build/test/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  test-coverage/security-scan/build-test-helper\n  dev-setup/check\n"
+	@printf "Targets:\n  build/test/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  test-coverage/security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
 
 # Go binary name and paths
 BINARY_NAME=scranton-strangler
@@ -92,6 +92,14 @@ test-api:
 test-paper:
 	@echo "Running end-to-end paper trading test..."
 	cd scripts/test_paper_trading && go run main.go
+
+# Liquidate all positions via market orders
+liquidate:
+	@echo "🚨 LIQUIDATING ALL POSITIONS 🚨"
+	@echo "This will close ALL open positions using aggressive market pricing"
+	@echo "Set TRADIER_API_KEY and TRADIER_ACCOUNT_ID environment variables first"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	cd scripts && go run liquidate_positions.go
 
 # Build test helper
 build-test-helper:

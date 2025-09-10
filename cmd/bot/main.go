@@ -321,31 +321,41 @@ func (b *Bot) runTradingCycle() {
 	if isMarketOpen && len(positions) < maxPositions {
 		b.logger.Printf("Have %d/%d positions, checking entry conditions...", len(positions), maxPositions)
 		
-		// Check if we have sufficient buying power for new positions
-		buyingPower, err := b.broker.GetOptionBuyingPower()
-		if err != nil {
-			b.logger.Printf("Warning: Could not get option buying power: %v", err)
-			buyingPower = 0
-		}
+		// Additional reconcile before opening new trades to catch any recent position changes
+		// This is especially important to prevent exceeding max positions due to sync issues
+		b.logger.Printf("Running additional reconcile check before opening new trades...")
+		positions = b.reconcilePositions(positions)
 		
-		b.logger.Printf("Available option buying power: $%.2f", buyingPower)
-		
-		// Only attempt entry if we have meaningful buying power
-		if buyingPower > 1000 { // Minimum threshold for a new position
-			canEnter, reason := b.strategy.CheckEntryConditions()
-			if canEnter {
-				b.logger.Printf("Entry signal: %s", reason)
-				// Try to open positions up to the max limit
-				remainingSlots := maxPositions - len(positions)
-				maxNewPositions := b.config.Strategy.MaxNewPositionsPerCycle
-				for i := 0; i < remainingSlots && i < maxNewPositions; i++ {
-					b.executeEntry()
+		// Re-check position count after reconcile
+		if len(positions) >= maxPositions {
+			b.logger.Printf("Position limit reached after reconcile (%d/%d), skipping new entries", len(positions), maxPositions)
+		} else {
+			// Check if we have sufficient buying power for new positions
+			buyingPower, err := b.broker.GetOptionBuyingPower()
+			if err != nil {
+				b.logger.Printf("Warning: Could not get option buying power: %v", err)
+				buyingPower = 0
+			}
+			
+			b.logger.Printf("Available option buying power: $%.2f", buyingPower)
+			
+			// Only attempt entry if we have meaningful buying power
+			if buyingPower > 1000 { // Minimum threshold for a new position
+				canEnter, reason := b.strategy.CheckEntryConditions()
+				if canEnter {
+					b.logger.Printf("Entry signal: %s", reason)
+					// Try to open positions up to the max limit
+					remainingSlots := maxPositions - len(positions)
+					maxNewPositions := b.config.Strategy.MaxNewPositionsPerCycle
+					for i := 0; i < remainingSlots && i < maxNewPositions; i++ {
+						b.executeEntry()
+					}
+				} else {
+					b.logger.Printf("Entry conditions not met: %s", reason)
 				}
 			} else {
-				b.logger.Printf("Entry conditions not met: %s", reason)
+				b.logger.Printf("Insufficient buying power for new positions")
 			}
-		} else {
-			b.logger.Printf("Insufficient buying power for new positions")
 		}
 	} else if !isMarketOpen {
 		b.logger.Printf("Market %s: Skipping entry checks, only monitoring existing positions", marketState)
@@ -758,7 +768,10 @@ func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.
 	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)
 }
 
-// reconcilePositions detects manually closed positions and updates storage
+// reconcilePositions detects position mismatches between broker and storage
+// It handles two cases:
+// 1. Positions in storage but closed in broker (manual closes)
+// 2. Positions in broker but missing from storage (timeout-related sync issues)
 func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Position {
 	// Get current broker positions
 	brokerPositions, err := b.broker.GetPositions()
@@ -767,8 +780,12 @@ func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Pos
 		return storedPositions // Return unchanged on error
 	}
 
+	b.logger.Printf("Reconciling %d stored positions with %d broker positions", 
+		len(storedPositions), len(brokerPositions))
+
 	var activePositions []models.Position
 	
+	// First pass: Check stored positions against broker
 	for _, position := range storedPositions {
 		// Skip already closed positions
 		if position.GetCurrentState() == models.StateClosed {
@@ -801,8 +818,186 @@ func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Pos
 			activePositions = append(activePositions, position)
 		}
 	}
+
+	// Second pass: Check for orphaned broker positions (positions in broker but not in storage)
+	// This handles the case where orders timed out locally but actually filled
+	orphanedStrangles := b.findOrphanedStrangles(brokerPositions, activePositions)
+	for _, orphanStrangle := range orphanedStrangles {
+		b.logger.Printf("Detected orphaned strangle in broker: Put %.0f / Call %.0f, creating recovery position", 
+			orphanStrangle.putStrike, orphanStrangle.callStrike)
+			
+		// Create a recovery position for this orphaned strangle
+		recoveryPos := b.createRecoveryPosition(orphanStrangle)
+		if recoveryPos != nil {
+			if err := b.storage.AddPosition(recoveryPos); err != nil {
+				b.logger.Printf("Failed to add recovery position: %v", err)
+			} else {
+				activePositions = append(activePositions, *recoveryPos)
+				b.logger.Printf("Added recovery position %s for orphaned strangle", shortID(recoveryPos.ID))
+			}
+		}
+	}
 	
 	return activePositions
+}
+
+// orphanedStrangle represents a strangle position found in broker but not in storage
+type orphanedStrangle struct {
+	putStrike   float64
+	callStrike  float64
+	expiration  string
+	quantity    int
+	symbol      string
+}
+
+// findOrphanedStrangles identifies strangle positions in broker that aren't tracked in storage
+func (b *Bot) findOrphanedStrangles(brokerPositions []broker.PositionItem, activePositions []models.Position) []orphanedStrangle {
+	var orphaned []orphanedStrangle
+	
+	// Group broker positions by expiration and identify strangles
+	positionsByExp := make(map[string][]broker.PositionItem)
+	for _, brokerPos := range brokerPositions {
+		if brokerPos.Symbol == "SPY" { // Only handle SPY options
+			continue // Skip underlying
+		}
+		
+		// Extract expiration from option symbol
+		exp := b.extractExpirationFromSymbol(brokerPos.Symbol)
+		if exp != "" {
+			positionsByExp[exp] = append(positionsByExp[exp], brokerPos)
+		}
+	}
+	
+	// For each expiration, look for call/put pairs that form strangles
+	for exp, positions := range positionsByExp {
+		strangles := b.identifyStranglesFromPositions(positions, exp)
+		
+		// Check if each strangle is already tracked in our active positions
+		for _, strangle := range strangles {
+			isTracked := false
+			for _, activePos := range activePositions {
+				if b.strangleMatches(activePos, strangle) {
+					isTracked = true
+					break
+				}
+			}
+			
+			if !isTracked {
+				orphaned = append(orphaned, strangle)
+			}
+		}
+	}
+	
+	return orphaned
+}
+
+// createRecoveryPosition creates a position object for an orphaned strangle
+func (b *Bot) createRecoveryPosition(orphan orphanedStrangle) *models.Position {
+	// Parse expiration
+	expTime, err := time.Parse("2006-01-02", orphan.expiration)
+	if err != nil {
+		b.logger.Printf("Failed to parse expiration %s for recovery position", orphan.expiration)
+		return nil
+	}
+	
+	// Generate new position ID
+	positionID := generatePositionID()
+	
+	// Create position
+	position := models.NewPosition(
+		positionID,
+		orphan.symbol,
+		orphan.putStrike,
+		orphan.callStrike,
+		expTime,
+		orphan.quantity,
+	)
+	
+	// Set as recovered/reconciled position
+	position.EntryDate = time.Now().UTC()
+	position.DTE = position.CalculateDTE()
+	
+	// Set reasonable defaults (we don't know the actual entry details)
+	position.CreditReceived = 0 // We don't know the original credit
+	position.EntrySpot = 0      // We don't know the original spot price
+	position.EntryIV = 0        // We don't know the original IV
+	
+	// Transition to Open state (assume it's already filled)
+	if err := position.TransitionState(models.StateOpen, "recovered_position"); err != nil {
+		b.logger.Printf("Failed to set recovery position state: %v", err)
+		return nil
+	}
+	
+	return position
+}
+
+// Helper functions for orphaned strangle detection
+func (b *Bot) extractExpirationFromSymbol(symbol string) string {
+	// SPY option format: SPY251024C00678000
+	// Extract YYMMDD part
+	if len(symbol) < 12 {
+		return ""
+	}
+	
+	// Look for the date part (6 digits after SPY)
+	if len(symbol) >= 9 {
+		dateStr := symbol[3:9] // YYMMDD
+		// Convert YYMMDD to YYYY-MM-DD
+		if len(dateStr) == 6 {
+			year := "20" + dateStr[0:2]
+			month := dateStr[2:4]
+			day := dateStr[4:6]
+			return year + "-" + month + "-" + day
+		}
+	}
+	return ""
+}
+
+func (b *Bot) identifyStranglesFromPositions(positions []broker.PositionItem, expiration string) []orphanedStrangle {
+	var strangles []orphanedStrangle
+	
+	// Group positions by strike for this expiration
+	callStrikes := make(map[float64]int) // strike -> quantity
+	putStrikes := make(map[float64]int)
+	
+	for _, pos := range positions {
+		strike, optionType, err := parseOptionSymbol(pos.Symbol)
+		if err != nil {
+			continue
+		}
+		
+		quantity := int(math.Abs(pos.Quantity)) // Use absolute value
+		
+		if optionType == "C" {
+			callStrikes[strike] += quantity
+		} else if optionType == "P" {
+			putStrikes[strike] += quantity
+		}
+	}
+	
+	// Find matching call/put pairs (simple approach - assumes same quantity)
+	for callStrike, callQty := range callStrikes {
+		for putStrike, putQty := range putStrikes {
+			if callQty == putQty && callQty > 0 {
+				strangles = append(strangles, orphanedStrangle{
+					putStrike:  putStrike,
+					callStrike: callStrike,
+					expiration: expiration,
+					quantity:   callQty,
+					symbol:     "SPY",
+				})
+			}
+		}
+	}
+	
+	return strangles
+}
+
+func (b *Bot) strangleMatches(position models.Position, strangle orphanedStrangle) bool {
+	return math.Abs(position.PutStrike-strangle.putStrike) < 0.01 &&
+		math.Abs(position.CallStrike-strangle.callStrike) < 0.01 &&
+		position.Expiration.Format("2006-01-02") == strangle.expiration &&
+		position.Quantity == strangle.quantity
 }
 
 // parseOptionSymbol parses an OPRA format option symbol to extract strike and type
