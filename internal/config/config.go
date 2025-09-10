@@ -178,10 +178,10 @@ func (c *Config) Validate() error {
 	}
 
 	// Broker validation
-	if c.Broker.APIKey == "" {
+	if strings.TrimSpace(c.Broker.APIKey) == "" {
 		return fmt.Errorf("broker.api_key is required")
 	}
-	if c.Broker.AccountID == "" {
+	if strings.TrimSpace(c.Broker.AccountID) == "" {
 		return fmt.Errorf("broker.account_id is required")
 	}
 
@@ -277,8 +277,12 @@ func (c *Config) Validate() error {
 	// Schedule validation
 	if c.Schedule.MarketCheckInterval == "" {
 		return fmt.Errorf("schedule.market_check_interval is required (set in Normalize)")
-	} else if _, err := time.ParseDuration(strings.TrimSpace(c.Schedule.MarketCheckInterval)); err != nil {
+	}
+	trimmedInterval := strings.TrimSpace(c.Schedule.MarketCheckInterval)
+	if duration, err := time.ParseDuration(trimmedInterval); err != nil {
 		return fmt.Errorf("schedule.market_check_interval invalid: %w", err)
+	} else if duration <= 0 {
+		return fmt.Errorf("schedule.market_check_interval must be > 0")
 	}
 	loc := c.resolveLocation()
 	s, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
@@ -304,6 +308,9 @@ func (c *Config) IsPaperTrading() bool {
 func (c *Config) GetCheckInterval() time.Duration {
 	d, err := time.ParseDuration(strings.TrimSpace(c.Schedule.MarketCheckInterval))
 	if err != nil {
+		return 15 * time.Minute // default
+	}
+	if d <= 0 {
 		return 15 * time.Minute // default
 	}
 	return d
