@@ -851,11 +851,15 @@ func (s *JSONStorage) AddPosition(pos *models.Position) error {
 		}
 	}
 	
-	// Add the new position
-	s.data.CurrentPositions = append(s.data.CurrentPositions, *pos)
-	
-	// Also update legacy single position for compatibility
-	s.data.CurrentPosition = pos
+	// Add the new position (deep copy)
+	if cloned := clonePosition(pos); cloned != nil {
+		s.data.CurrentPositions = append(s.data.CurrentPositions, *cloned)
+	} else {
+		return fmt.Errorf("failed to clone position for persistence")
+	}
+
+	// Also update legacy single position for compatibility (separate deep copy)
+	s.data.CurrentPosition = clonePosition(pos)
 	
 	return s.saveUnsafe()
 }
@@ -865,27 +869,33 @@ func (s *JSONStorage) UpdatePosition(pos *models.Position) error {
 	if pos == nil {
 		return errors.New("position cannot be nil")
 	}
-	
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	found := false
 	for i := range s.data.CurrentPositions {
 		if s.data.CurrentPositions[i].ID == pos.ID {
-			s.data.CurrentPositions[i] = *pos
-			found = true
-			// Update legacy single position if it matches
-			if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == pos.ID {
-				s.data.CurrentPosition = pos
+			// Create a deep copy to avoid storing caller's pointer directly
+			cloned := clonePosition(pos)
+			if cloned == nil {
+				return fmt.Errorf("failed to clone position for update")
 			}
+
+			// Update the position in the slice with the cloned copy
+			s.data.CurrentPositions[i] = *cloned
+
+			// Update legacy single position with a separate copy (not the caller's pointer)
+			s.data.CurrentPosition = clonePosition(pos)
+			found = true
 			break
 		}
 	}
-	
+
 	if !found {
 		return fmt.Errorf("position with ID %s not found", pos.ID)
 	}
-	
+
 	return s.saveUnsafe()
 }
 

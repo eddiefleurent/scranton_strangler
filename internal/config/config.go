@@ -3,7 +3,6 @@ package config
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -260,12 +259,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("strategy.escalate_loss_pct (%.2f) must be < strategy.exit.stop_loss_pct (%.2f)",
 			c.Strategy.EscalateLossPct, c.Strategy.Exit.StopLossPct)
 	}
-	// Enforce: strategy.exit.stop_loss_pct must not exceed risk.max_position_loss
-	// This keeps strategy-level loss thresholds at or below global risk caps
-	if c.Strategy.Exit.StopLossPct > c.Risk.MaxPositionLoss {
-		return fmt.Errorf("strategy.exit.stop_loss_pct (%.2f) must be <= risk.max_position_loss (%.2f)",
-			c.Strategy.Exit.StopLossPct, c.Risk.MaxPositionLoss)
-	}
+	// Note: Cross-unit comparison between StopLossPct (position credit %) and
+	// MaxPositionLoss (account equity %) is invalid and removed. Runtime logic
+	// in strategy handles clamping stop losses to risk caps when position context is available.
 
 	// Risk validation
 	if c.Risk.MaxContracts <= 0 {
@@ -365,8 +361,8 @@ func (c *Config) Normalize() {
 		c.Risk.MaxPositionLoss = defaultRiskMaxPositionLoss
 	}
 	if c.Strategy.Exit.StopLossPct == 0 {
-		// Clamp StopLossPct to not exceed MaxPositionLoss when unset
-		c.Strategy.Exit.StopLossPct = math.Min(defaultStopLossPct, c.Risk.MaxPositionLoss)
+		// StopLossPct uses credit units and is not constrained by MaxPositionLoss (equity units)
+		c.Strategy.Exit.StopLossPct = defaultStopLossPct
 	}
 }
 

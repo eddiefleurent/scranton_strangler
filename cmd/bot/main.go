@@ -369,60 +369,6 @@ func (b *Bot) runTradingCycle() {
 	b.logger.Println("Trading cycle complete")
 }
 
-func (b *Bot) checkExistingPosition(now time.Time) bool {
-	position := b.storage.GetCurrentPosition()
-	if position == nil {
-		return false
-	}
-
-	// Check if position is already closed
-	if position.GetCurrentState() == models.StateClosed {
-		// Position needs completion if it has exit order/reason but not in history
-		needsCompletion := position.ExitOrderID != "" &&
-			position.ExitReason != "" &&
-			!b.storage.HasInHistory(position.ID)
-
-		if needsCompletion {
-			b.logger.Printf("Position %s was closed by exit order, completing position close", position.ID)
-			exitReason := strategy.ExitReason(position.ExitReason)
-			b.completePositionClose(position, exitReason)
-		} else if !b.storage.HasInHistory(position.ID) {
-			b.logger.Printf("Position %s is closed but missing completion data", position.ID)
-		} else {
-			b.logger.Printf("Position %s already finalized in history", position.ID)
-		}
-		return false
-	}
-
-	// Calculate real-time P&L
-	realTimePnL, err := b.strategy.CalculatePositionPnL(position)
-	if err != nil {
-		b.logger.Printf("Warning: Could not calculate real-time P&L: %v", err)
-		realTimePnL = position.CurrentPnL // Fall back to stored value
-	} else {
-		delta := math.Abs(realTimePnL - position.CurrentPnL)
-
-		// Throttle P&L updates to reduce write amplification
-		// Update if: significant change (>= $1.00) OR enough time has passed since last update
-		shouldUpdate := delta >= 1.00 || now.Sub(b.lastPnLUpdate) >= b.pnlThrottle
-
-		if shouldUpdate {
-			position.CurrentPnL = realTimePnL
-			if err := b.storage.SetCurrentPosition(position); err != nil {
-				b.logger.Printf("Warning: Failed to update position P&L: %v", err)
-			} else {
-				b.lastPnLUpdate = now
-			}
-		}
-	}
-
-	b.logger.Printf("Found existing position: %s %s Put %.0f / Call %.0f (DTE: %d, P&L: $%.2f)",
-		position.Symbol, position.Expiration.Format("2006-01-02"),
-		position.PutStrike, position.CallStrike,
-		position.CalculateDTE(), realTimePnL)
-
-	return true
-}
 
 func (b *Bot) executeEntry() {
 	b.logger.Println("Executing entry...")
@@ -547,62 +493,6 @@ func (b *Bot) executeEntry() {
 	go b.orderManager.PollOrderStatus(position.ID, placedOrder.Order.ID, true)
 }
 
-func (b *Bot) executeExit(ctx context.Context, reason strategy.ExitReason) {
-	b.logger.Printf("Executing exit: %s", reason)
-
-	position := b.storage.GetCurrentPosition()
-	if position == nil {
-		b.logger.Printf("No position to exit")
-		return
-	}
-
-	if !b.isPositionReadyForExit(position) {
-		return
-	}
-
-	b.logPositionClose(position)
-
-	maxDebit := b.calculateMaxDebit(position, reason)
-
-	if maxDebit <= 0 {
-		b.logger.Printf("Skipping close order for position %s: calculated maxDebit $%.2f is invalid (must be > 0)", position.ID, maxDebit)
-		return
-	}
-
-	// Get appropriate tick size for the symbol and round maxDebit up to tick size
-	tickSize, err := b.broker.GetTickSize(position.Symbol)
-	if err != nil {
-		b.logger.Printf("Warning: Failed to get tick size for %s, using default 0.01: %v", position.Symbol, err)
-		tickSize = 0.01
-	}
-
-	roundedMaxDebit := util.CeilToTick(maxDebit, tickSize)
-	b.logger.Printf("Using tick size %.4f for symbol %s, rounded max debit: $%.2f (was $%.2f)", tickSize, position.Symbol, roundedMaxDebit, maxDebit)
-	closeOrder, err := b.retryClient.ClosePositionWithRetry(ctx, position, roundedMaxDebit)
-	if err != nil {
-		b.logger.Printf("Failed to place close order after retries: %v", err)
-		return
-	}
-
-	b.logger.Printf("Close order placed successfully: %d", closeOrder.Order.ID)
-
-	// Store close order metadata and set position to adjusting state
-	position.ExitOrderID = fmt.Sprintf("%d", closeOrder.Order.ID)
-	position.ExitReason = string(reason)
-	if err := position.TransitionState(models.StateAdjusting, "close_order_placed"); err != nil {
-		b.logger.Printf("Warning: failed to transition to adjusting state: %v", err)
-	}
-
-	if err := b.storage.SetCurrentPosition(position); err != nil {
-		b.logger.Printf("Failed to save position with close order ID: %v", err)
-		return
-	}
-
-	b.logger.Printf("Position %s transitioned to adjusting state, monitoring close order %d", position.ID, closeOrder.Order.ID)
-
-	// Start order status polling for close order in background
-	go b.orderManager.PollOrderStatus(position.ID, closeOrder.Order.ID, false)
-}
 
 func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 	currentState := position.GetCurrentState()
@@ -737,62 +627,9 @@ func (b *Bot) calculateMaxDebit(position *models.Position, reason strategy.ExitR
 	}
 }
 
-func (b *Bot) completePositionClose(
-	position *models.Position,
-	reason strategy.ExitReason,
-) {
-	actualPnL := b.calculateActualPnL(position, reason)
-	b.logPnL(position, actualPnL)
 
-	if err := b.storage.ClosePosition(actualPnL, string(reason)); err != nil {
-		b.logger.Printf("Failed to close position in storage: %v", err)
-		return
-	}
 
-	b.logger.Printf("Position closed successfully: %s", reason)
 
-	stats := b.storage.GetStatistics()
-	b.logger.Printf("Trade Statistics - Total: %d, Win Rate: %.1f%%, Total P&L: $%.2f",
-		stats.TotalTrades, stats.WinRate*100, stats.TotalPnL)
-}
-
-func (b *Bot) calculateActualPnL(position *models.Position, reason strategy.ExitReason) float64 {
-	actualPnL, err := b.strategy.CalculatePositionPnL(position)
-	if err != nil {
-		b.logger.Printf("Warning: Could not calculate real P&L, using estimated value: %v", err)
-		if reason == strategy.ExitReasonProfitTarget {
-			pt := b.config.Strategy.Exit.ProfitTarget
-			if pt < 0 || pt > 1 {
-				pt = 0.50
-			}
-			netCredit := position.GetNetCredit()
-			return math.Abs(netCredit) * float64(position.Quantity) * 100 * pt
-		}
-		multiple := b.config.Strategy.Exit.StopLossPct
-		if multiple <= 1.0 {
-			multiple = 2.5
-		}
-		netCredit := position.GetNetCredit()
-		return -1 * math.Abs(netCredit) * multiple * float64(position.Quantity) * 100
-	}
-	return actualPnL
-}
-
-func (b *Bot) logPnL(position *models.Position, actualPnL float64) {
-	netCredit := position.GetNetCredit()
-	denom := math.Abs(netCredit) * float64(position.Quantity) * 100
-	if denom <= 0 {
-		b.logger.Printf("Position P&L: $%.2f (net credit unknown)", actualPnL)
-		return
-	}
-	percent := (actualPnL / denom) * 100
-	b.logger.Printf("Position P&L: $%.2f (%.1f%% of total net credit)", actualPnL, percent)
-}
-
-func (b *Bot) checkAdjustments() {
-	b.logger.Println("Checking for adjustments...")
-	// TODO: Implement adjustment logic (Phase 2)
-}
 
 // generatePositionID creates a unique ID for positions using UUID for guaranteed uniqueness
 func generatePositionID() string {

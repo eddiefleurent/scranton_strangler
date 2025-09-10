@@ -238,13 +238,10 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		position.ExitOrderID == fmt.Sprintf("%d", orderID)
 
 	if isExitOrder {
-		m.logger.Printf("Exit order failed for position %s: %s, marking position as error and clearing exit order", positionID, reason)
-		// For exit order failures, mark position as error and clear the exit order ID
+		m.logger.Printf("Exit order failed for position %s: %s, keeping position active and clearing exit order", positionID, reason)
+		// For exit order failures, keep position state unchanged and clear the exit order ID
 		position.ExitOrderID = ""
 		position.ExitReason = ""
-		if err := position.TransitionState(models.StateError, "exit_order_failed"); err != nil {
-			m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
-		}
 	} else {
 		if err := position.TransitionState(models.StateError, "order_failed"); err != nil {
 			m.logger.Printf("Failed to transition position %s to error: %v", positionID, err)
@@ -262,7 +259,7 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 	}
 
 	if isExitOrder {
-		m.logger.Printf("Position %s reverted to active state due to exit order failure: %s", positionID, reason)
+		m.logger.Printf("Position %s kept active due to exit order failure: %s", positionID, reason)
 	} else {
 		m.logger.Printf("Position %s marked as error due to order failure: %s", positionID, reason)
 	}
@@ -299,45 +296,28 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		finalPnL = 0
 		closeReason = "order_timeout"
 
-		// Use ClosePosition to finalize the trade with zero P&L
-		if err := m.storage.ClosePosition(finalPnL, closeReason); err != nil {
-			m.logger.Printf("Failed to close position %s on entry timeout: %v", positionID, err)
-			return
+		// Prefer ID-aware API; fallback for back-compat
+		if err := m.storage.ClosePositionByID(positionID, finalPnL, closeReason); err != nil {
+			if err2 := m.storage.ClosePosition(finalPnL, closeReason); err2 != nil {
+				m.logger.Printf("Failed to close position %s on entry timeout: %v (fallback: %v)", positionID, err, err2)
+				return
+			}
 		}
 
 		m.logger.Printf("Position %s closed due to entry order timeout. Final P&L: $%.2f", positionID, finalPnL)
 	} else {
-		// For exit timeouts, use the state-specific transition reason
-		if err := position.TransitionState(models.StateClosed, transitionReason); err != nil {
-			// If direct transition to closed fails, transition to error state
-			m.logger.Printf("Cannot transition %s from %s to closed: %v. Marking as error.",
-				positionID, currentState, err)
-			if errFallback := position.TransitionState(models.StateError, "order_timeout"); errFallback != nil {
-				m.logger.Printf("Failed to transition position %s to error: %v", positionID, errFallback)
-				return
-			}
-
-			// Save the error state position
-			if err := m.storage.SetCurrentPosition(position); err != nil {
-				m.logger.Printf("Failed to save position %s after timeout error: %v", positionID, err)
-				return
-			}
-
-			m.logger.Printf("Position %s marked as error due to order timeout", positionID)
-			return
-		}
-
-		// Exit timeout successful - use current P&L or fallback to credit received
+		// Exit timeout: compute P&L (prefer CurrentPnL) and finalize via storage
 		finalPnL = position.CurrentPnL
 		if finalPnL == 0 {
 			finalPnL = position.CreditReceived * float64(position.Quantity) * 100
 		}
 		closeReason = transitionReason
 
-		// Use ClosePosition to finalize the trade
-		if err := m.storage.ClosePosition(finalPnL, closeReason); err != nil {
-			m.logger.Printf("Failed to close position %s on exit timeout: %v", positionID, err)
-			return
+		if err := m.storage.ClosePositionByID(positionID, finalPnL, closeReason); err != nil {
+			if err2 := m.storage.ClosePosition(finalPnL, closeReason); err2 != nil {
+				m.logger.Printf("Failed to close position %s on exit timeout: %v (fallback: %v)", positionID, err, err2)
+				return
+			}
 		}
 
 		m.logger.Printf("Position %s closed due to exit order timeout. Final P&L: $%.2f", positionID, finalPnL)

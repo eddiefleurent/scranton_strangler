@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
@@ -9,6 +10,7 @@ import (
 
 // MockStorage implements Interface for testing
 type MockStorage struct {
+	mu               sync.RWMutex
 	saveError        error
 	loadError        error
 	currentPosition  *models.Position
@@ -30,6 +32,9 @@ func NewMockStorage() *MockStorage {
 
 // GetCurrentPosition returns the mock current position.
 func (m *MockStorage) GetCurrentPosition() *models.Position {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if m.currentPosition == nil {
 		return nil
 	}
@@ -44,6 +49,9 @@ func (m *MockStorage) GetCurrentPosition() *models.Position {
 
 // SetCurrentPosition updates the mock current position.
 func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if pos == nil {
 		m.currentPosition = nil
 		return nil
@@ -59,6 +67,9 @@ func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
 
 // ClosePosition closes the mock position.
 func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.currentPosition == nil {
 		return fmt.Errorf("no position to close")
 	}
@@ -112,6 +123,9 @@ func (m *MockStorage) ClosePosition(finalPnL float64, reason string) error {
 
 // AddAdjustment adds an adjustment to the mock position.
 func (m *MockStorage) AddAdjustment(adj models.Adjustment) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if m.currentPosition == nil {
 		return fmt.Errorf("no current position to adjust")
 	}
@@ -122,18 +136,27 @@ func (m *MockStorage) AddAdjustment(adj models.Adjustment) error {
 
 // Save simulates saving data (mock implementation).
 func (m *MockStorage) Save() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.saveCallCount++
 	return m.saveError
 }
 
 // Load simulates loading data (mock implementation).
 func (m *MockStorage) Load() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.loadCallCount++
 	return m.loadError
 }
 
 // GetHistory returns the mock historical position data.
 func (m *MockStorage) GetHistory() []models.Position {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	out := make([]models.Position, len(m.history))
 	for i := range m.history {
 		if cp := clonePosition(&m.history[i]); cp != nil {
@@ -147,6 +170,9 @@ func (m *MockStorage) GetHistory() []models.Position {
 
 // HasInHistory checks if a position with the given ID exists in the mock history.
 func (m *MockStorage) HasInHistory(id string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	for _, pos := range m.history {
 		if pos.ID == id {
 			return true
@@ -157,6 +183,9 @@ func (m *MockStorage) HasInHistory(id string) bool {
 
 // GetStatistics returns the mock statistics data.
 func (m *MockStorage) GetStatistics() *Statistics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if m.statistics == nil {
 		return &Statistics{}
 	}
@@ -166,31 +195,49 @@ func (m *MockStorage) GetStatistics() *Statistics {
 
 // GetDailyPnL returns the mock daily P&L for a date.
 func (m *MockStorage) GetDailyPnL(date string) float64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	return m.dailyPnL[date]
 }
 
 // SetSaveError configures the mock to return an error on Save calls.
 func (m *MockStorage) SetSaveError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.saveError = err
 }
 
 // SetLoadError configures the mock to return an error on Load calls.
 func (m *MockStorage) SetLoadError(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.loadError = err
 }
 
 // GetSaveCallCount returns the number of times Save was called.
 func (m *MockStorage) GetSaveCallCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	return m.saveCallCount
 }
 
 // GetLoadCallCount returns the number of times Load was called.
 func (m *MockStorage) GetLoadCallCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	return m.loadCallCount
 }
 
 // AddHistoryPosition adds a position to the mock history.
 func (m *MockStorage) AddHistoryPosition(pos models.Position) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if cp := clonePosition(&pos); cp != nil {
 		m.history = append(m.history, *cp)
 		return
@@ -200,11 +247,15 @@ func (m *MockStorage) AddHistoryPosition(pos models.Position) {
 
 // SetDailyPnL sets the mock daily P&L for a specific date.
 func (m *MockStorage) SetDailyPnL(date string, pnl float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.dailyPnL[date] = pnl
 }
 
 // Helper method to update statistics (consistent with JSONStorage)
 func (m *MockStorage) updateStatistics(pnl float64) {
+	// Note: this method assumes caller has already acquired the mutex
 	m.statistics.TotalTrades++
 	m.statistics.TotalPnL += pnl
 
@@ -256,11 +307,14 @@ func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 
 // GetCurrentPositions returns all current open positions
 func (m *MockStorage) GetCurrentPositions() []models.Position {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	// Migrate legacy single position if needed
 	if m.currentPosition != nil && len(m.currentPositions) == 0 {
 		m.currentPositions = []models.Position{*m.currentPosition}
 	}
-	
+
 	// Return a deep copy
 	positions := make([]models.Position, len(m.currentPositions))
 	for i := range m.currentPositions {
@@ -274,69 +328,97 @@ func (m *MockStorage) GetCurrentPositions() []models.Position {
 
 // AddPosition adds a new position to the current positions list
 func (m *MockStorage) AddPosition(pos *models.Position) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if pos == nil {
 		return fmt.Errorf("position cannot be nil")
 	}
-	
+
 	// Check if position already exists
 	for _, existingPos := range m.currentPositions {
 		if existingPos.ID == pos.ID {
 			return fmt.Errorf("position with ID %s already exists", pos.ID)
 		}
 	}
-	
-	m.currentPositions = append(m.currentPositions, *pos)
-	m.currentPosition = pos // Update legacy single position
+
+	// Create a deep copy to avoid storing caller pointer directly
+	cloned := clonePosition(pos)
+	if cloned == nil {
+		return fmt.Errorf("failed to clone position for storage")
+	}
+
+	// Append the cloned copy to currentPositions
+	m.currentPositions = append(m.currentPositions, *cloned)
+
+	// Set currentPosition to point to the same cloned instance (not the caller's pointer)
+	m.currentPosition = cloned
+
 	return nil
 }
 
 // UpdatePosition updates an existing position
 func (m *MockStorage) UpdatePosition(pos *models.Position) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if pos == nil {
 		return fmt.Errorf("position cannot be nil")
 	}
-	
+
 	found := false
 	for i := range m.currentPositions {
 		if m.currentPositions[i].ID == pos.ID {
-			m.currentPositions[i] = *pos
-			found = true
-			// Update legacy single position if it matches
-			if m.currentPosition != nil && m.currentPosition.ID == pos.ID {
-				m.currentPosition = pos
+			// Create a deep copy to avoid aliasing with caller's struct
+			cloned := clonePosition(pos)
+			if cloned == nil {
+				return fmt.Errorf("failed to clone position for update")
 			}
+
+			// Update the position in the slice with the cloned copy
+			m.currentPositions[i] = *cloned
+
+			// Update legacy single position with the same cloned instance
+			m.currentPosition = cloned
+			found = true
 			break
 		}
 	}
-	
+
 	if !found {
 		return fmt.Errorf("position with ID %s not found", pos.ID)
 	}
-	
+
 	return nil
 }
 
 // GetPositionByID retrieves a specific position by ID
 func (m *MockStorage) GetPositionByID(id string) *models.Position {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	for i := range m.currentPositions {
 		if m.currentPositions[i].ID == id {
 			return clonePosition(&m.currentPositions[i])
 		}
 	}
-	
+
 	// Check legacy single position
 	if m.currentPosition != nil && m.currentPosition.ID == id {
 		return clonePosition(m.currentPosition)
 	}
-	
+
 	return nil
 }
 
 // ClosePositionByID closes a specific position by ID
 func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	var posToClose *models.Position
 	var newPositions []models.Position
-	
+
 	// Find and remove the position
 	for i := range m.currentPositions {
 		if m.currentPositions[i].ID == id {
@@ -345,7 +427,7 @@ func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 			newPositions = append(newPositions, m.currentPositions[i])
 		}
 	}
-	
+
 	if posToClose == nil {
 		// Check legacy single position
 		if m.currentPosition != nil && m.currentPosition.ID == id {
@@ -355,36 +437,55 @@ func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 			return fmt.Errorf("position with ID %s not found", id)
 		}
 	}
-	
-	// Update position with closing details
+
+	// Determine canonical condition based on current state
+	var condition string
+	switch posToClose.GetCurrentState() {
+	case models.StateOpen:
+		condition = models.ConditionPositionClosed
+	case models.StateSubmitted:
+		condition = models.ConditionOrderTimeout
+	case models.StateFirstDown, models.StateSecondDown:
+		condition = models.ConditionExitConditions
+	case models.StateThirdDown:
+		condition = models.ConditionHardStop
+	case models.StateFourthDown:
+		condition = models.ConditionEmergencyExit
+	case models.StateAdjusting:
+		condition = models.ConditionHardStop
+	case models.StateRolling:
+		condition = models.ConditionForceClose
+	case models.StateError:
+		condition = models.ConditionForceClose
+	default:
+		condition = models.ConditionExitConditions
+	}
+
+	if err := posToClose.TransitionState(models.StateClosed, condition); err != nil {
+		return fmt.Errorf("failed to transition to closed: %w", err)
+	}
+
 	posToClose.CurrentPnL = finalPnL
 	posToClose.ExitReason = reason
-	posToClose.ExitDate = time.Now()
-	
+
 	// Update positions list
 	m.currentPositions = newPositions
-	
+
 	// Clear legacy single position if it matches
 	if m.currentPosition != nil && m.currentPosition.ID == id {
 		m.currentPosition = nil
 	}
-	
-	// Add to history
+
+	// Add to history (copy)
 	m.history = append(m.history, *posToClose)
-	
-	// Update statistics (simplified for mock)
-	m.statistics.TotalTrades++
-	m.statistics.TotalPnL += finalPnL
-	if finalPnL > 0 {
-		m.statistics.WinningTrades++
-	} else if finalPnL < 0 {
-		m.statistics.LosingTrades++
-	}
-	
+
+	// Update statistics via shared helper
+	m.updateStatistics(finalPnL)
+
 	// Update daily P&L
 	dateStr := time.Now().Format("2006-01-02")
 	m.dailyPnL[dateStr] = m.dailyPnL[dateStr] + finalPnL
-	
+
 	return nil
 }
 

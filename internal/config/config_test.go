@@ -116,19 +116,15 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 		}
 	})
 
-	t.Run("stop_loss_pct greater than max_position_loss - invalid", func(t *testing.T) {
+	t.Run("stop_loss_pct greater than max_position_loss - now valid", func(t *testing.T) {
 		config := *baseConfig
 		config.Strategy.EscalateLossPct = 1.5
 		config.Strategy.Exit.StopLossPct = 2.5
 		config.Risk.MaxPositionLoss = 2.0
 
 		err := config.Validate()
-		if err == nil {
-			t.Error("Expected error when stop_loss_pct > max_position_loss")
-		}
-		expectedMsg := "strategy.exit.stop_loss_pct (2.50) must be <= risk.max_position_loss (2.00)"
-		if !strings.Contains(err.Error(), expectedMsg) {
-			t.Errorf("Expected error message to contain '%s', got: %v", expectedMsg, err)
+		if err != nil {
+			t.Errorf("Expected no error when stop_loss_pct > max_position_loss (cross-unit comparison removed), got: %v", err)
 		}
 	})
 
@@ -412,8 +408,8 @@ func TestValidate_StoragePath(t *testing.T) {
 	})
 }
 
-func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
-	t.Run("stop_loss_pct clamped when max_position_loss is less than default", func(t *testing.T) {
+func TestNormalizeExitConfig_StopLossDefault(t *testing.T) {
+	t.Run("stop_loss_pct set to default regardless of max_position_loss", func(t *testing.T) {
 		config := &Config{
 			Strategy: StrategyConfig{
 				Exit: ExitConfig{
@@ -427,12 +423,12 @@ func TestNormalizeExitConfig_StopLossClamping(t *testing.T) {
 
 		config.Normalize()
 
-		if config.Strategy.Exit.StopLossPct != 2.0 {
-			t.Errorf("Expected StopLossPct to be clamped to 2.0, got %.2f", config.Strategy.Exit.StopLossPct)
+		if config.Strategy.Exit.StopLossPct != 2.5 {
+			t.Errorf("Expected StopLossPct to be set to default 2.5, got %.2f", config.Strategy.Exit.StopLossPct)
 		}
 	})
 
-	t.Run("stop_loss_pct not clamped when max_position_loss is greater than default", func(t *testing.T) {
+	t.Run("stop_loss_pct set to default when max_position_loss is greater than default", func(t *testing.T) {
 		config := &Config{
 			Strategy: StrategyConfig{
 				Exit: ExitConfig{

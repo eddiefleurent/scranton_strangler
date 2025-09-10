@@ -472,6 +472,11 @@ func (s *StrangleStrategy) hasMajorEventsNearby() bool {
 // getVariedDTETarget returns a DTE target that varies based on existing positions
 // to avoid opening identical trades
 func (s *StrangleStrategy) getVariedDTETarget() int {
+	// Early guard for nil storage (prevents panic in tests or dry runs)
+	if s.storage == nil {
+		return s.config.DTETarget
+	}
+
 	// Get existing positions to check their DTEs
 	positions := s.storage.GetCurrentPositions()
 	
