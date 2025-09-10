@@ -57,6 +57,10 @@ func (f *fakeBroker) GetExpirations(symbol string) ([]string, error) {
 	return []string{}, nil
 }
 
+func (f *fakeBroker) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
+	return f.GetExpirations(symbol)
+}
+
 func (f *fakeBroker) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	return []broker.Option{}, nil
 }

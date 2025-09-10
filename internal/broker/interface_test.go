@@ -863,6 +863,10 @@ func (m *MockBroker) GetExpirations(_ string) ([]string, error) {
 	return []string{"2024-12-20"}, nil
 }
 
+func (m *MockBroker) GetExpirationsCtx(_ context.Context, _ string) ([]string, error) {
+	return m.GetExpirations("")
+}
+
 func (m *MockBroker) GetOptionChain(_, _ string, _ bool) ([]Option, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
@@ -1179,6 +1183,7 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		{"GetPositions", func() error { _, err := cb.GetPositions(); return err }},
 		{"GetQuote", func() error { _, err := cb.GetQuote("SPY"); return err }},
 		{"GetExpirations", func() error { _, err := cb.GetExpirations("SPY"); return err }},
+		{"GetExpirationsCtx", func() error { _, err := cb.GetExpirationsCtx(context.Background(), "SPY"); return err }},
 		{"GetOptionChain", func() error { _, err := cb.GetOptionChain("SPY", "2024-12-20", false); return err }},
 		{"PlaceStrangleOrder", func() error {
 			_, err := cb.PlaceStrangleOrder("SPY", 400, 420, "2024-12-20", 1, 2.0, false, "day", "")

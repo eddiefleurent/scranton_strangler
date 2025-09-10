@@ -45,6 +45,10 @@ func (m *mockBrokerForOrders) GetExpirations(symbol string) ([]string, error) {
 	return []string{"2024-12-20"}, nil
 }
 
+func (m *mockBrokerForOrders) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
+	return m.GetExpirations(symbol)
+}
+
 func (m *mockBrokerForOrders) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	return []broker.Option{}, nil
 }
@@ -566,7 +570,8 @@ func TestManager_HandleOrderTimeout_EntryOrder(t *testing.T) {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
-	m := NewManager(nil, mockStorage, logger, nil)
+	mockBroker := &mockBrokerForOrders{}
+	m := NewManager(mockBroker, mockStorage, logger, nil)
 
 	// Simulate entry order timeout
 	m.handleOrderTimeout("test-pos")
@@ -629,7 +634,8 @@ func TestManager_HandleOrderTimeout_ExitOrderFromAdjusting(t *testing.T) {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
-	m := NewManager(nil, mockStorage, logger, nil)
+	mockBroker := &mockBrokerForOrders{}
+	m := NewManager(mockBroker, mockStorage, logger, nil)
 
 	// Simulate exit order timeout
 	m.handleOrderTimeout("test-pos")

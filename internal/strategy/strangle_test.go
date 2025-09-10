@@ -54,6 +54,10 @@ func (m *mockBrokerForStrategy) GetExpirations(symbol string) ([]string, error) 
 	return m.expirations, m.expirationsErr
 }
 
+func (m *mockBrokerForStrategy) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
+	return m.GetExpirations(symbol)
+}
+
 func (m *mockBrokerForStrategy) GetOptionChain(symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
 	return m.chain, m.chainError
 }
@@ -921,6 +925,10 @@ func (m *mockBroker) GetExpirations(_ string) ([]string, error) {
 		}
 	}
 	return exps, nil
+}
+
+func (m *mockBroker) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
+	return m.GetExpirations(symbol)
 }
 
 func (m *mockBroker) GetOptionChain(_, expiration string, _ bool) ([]broker.Option, error) {
