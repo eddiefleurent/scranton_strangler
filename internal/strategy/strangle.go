@@ -162,7 +162,7 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 		return nil, fmt.Errorf("credit too low: %.2f < %.2f", credit, s.config.MinCredit)
 	}
 
-	quantity := s.calculatePositionSize(credit)
+	quantity := s.calculatePositionSize(credit, quote.Last, putStrike, callStrike)
 	if quantity <= 0 {
 		return nil, fmt.Errorf("calculated position size is invalid: %d - unable to allocate capital for trade", quantity)
 	}
@@ -767,9 +767,15 @@ func (s *StrangleStrategy) debugAvailableStrikes(options []broker.Option, limit 
 	return result
 }
 
-func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
+func (s *StrangleStrategy) calculatePositionSize(creditPerShare, spotPrice, putStrike, callStrike float64) int {
 	// Defense-in-depth: guard against zero/negative quantities
 	if creditPerShare <= 0 {
+		return 0
+	}
+
+	// Validate spot price for margin calculation
+	if spotPrice <= 0 || math.IsNaN(spotPrice) || math.IsInf(spotPrice, 0) {
+		s.logger.Printf("Warning: invalid spot price for sizing (%.4f)", spotPrice)
 		return 0
 	}
 
@@ -794,26 +800,22 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	}
 	allocatedCapital := buyingPower * alloc
 
-	// Estimate buying power requirement for short strangles
-	// For paper trading, use a simplified calculation
-	// Typical margin requirement for short strangles: 20% of underlying + credit received
-	// But for simplicity in paper trading, we'll use a conservative estimate
+	// Calculate per-contract margin using Reg-T requirement:
+	// premium + max(20% * spot - OTM, 10% * spot)
 	creditTotal := creditPerShare * sharesPerContract
+	otmPut := math.Max(0, spotPrice-putStrike)     // dollars OTM for put
+	otmCall := math.Max(0, callStrike-spotPrice)   // dollars OTM for call
+	smallerOTM := math.Min(otmPut, otmCall)
+	coreMargin := math.Max(0.2*spotPrice-smallerOTM, 0.1*spotPrice) * sharesPerContract
+	estimatedMargin := coreMargin + creditTotal
 
-	// Use configured BPRMultiplier for margin estimation, with sensible fallback
-	bprMultiplier := s.config.BPRMultiplier
-	if bprMultiplier <= 0 {
-		// Default fallback: 10.0x credit as margin estimate
-		// Rationale: Industry standard short options margin = 20% of underlying + premium received
-		// For SPY at ~$450, 16Δ strangle ~$450 wide, credit ~$4-6, this approximates:
-		// Margin ≈ ($450 * 0.20) + $5 = ~$95, vs credit * 10 = $50-60 (conservative)
-		// This 10x multiplier provides reasonable position sizing without being overly restrictive
-		bprMultiplier = 10.0
+	// Optional extra safety via BPRMultiplier floor (never lower than core calc)
+	if s.config.BPRMultiplier > 0 {
+		estimatedMargin = math.Max(estimatedMargin, creditTotal*s.config.BPRMultiplier)
 	}
-	estimatedMargin := creditTotal * bprMultiplier
 
-	s.logger.Printf("Sizing: credit/contract=$%.2f, est margin/contract=$%.2f (%.1fx multiplier), allocated buying power=$%.2f",
-		creditTotal, estimatedMargin, bprMultiplier, allocatedCapital)
+	s.logger.Printf("Sizing: credit/contract=$%.2f, est margin/contract=$%.2f, allocated buying power=$%.2f",
+		creditTotal, estimatedMargin, allocatedCapital)
 
 	maxContracts := int(allocatedCapital / estimatedMargin)
 	if maxContracts < 1 {

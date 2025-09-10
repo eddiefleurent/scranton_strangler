@@ -45,7 +45,7 @@ log_info "Prerequisites check passed"
 echo "🔨 Building Go binary for Linux..."
 make build-prod
 
-if [ ! -f "scranton-strangler" ]; then
+if [ ! -f "bin/scranton-strangler" ]; then
     log_error "Build failed - binary not found"
 fi
 
@@ -61,7 +61,7 @@ ssh "$UNRAID_HOST" "if [ -f $UNRAID_APP_PATH/stop-service.sh ]; then $UNRAID_APP
 
 # Copy binary and config to Unraid
 echo "📦 Copying files to Unraid..."
-scp scranton-strangler "$UNRAID_HOST:$UNRAID_APP_PATH/"
+scp bin/scranton-strangler "$UNRAID_HOST:$UNRAID_APP_PATH/"
 scp config.yaml "$UNRAID_HOST:$UNRAID_APP_PATH/"
 
 # Make binary executable and secure config
@@ -85,7 +85,7 @@ if [ ! -f data/positions.json ]; then
 fi
 
 # Start the bot
-exec ./scranton-strangler > logs/bot.log 2>&1 &
+nohup ./scranton-strangler > logs/bot.log 2>&1 &
 echo \$! > scranton-strangler.pid
 
 echo \"Scranton Strangler started with PID \$(cat scranton-strangler.pid)\"
@@ -164,6 +164,6 @@ echo "🔗 Stop service: ssh $UNRAID_HOST '$UNRAID_APP_PATH/stop-service.sh'"
 echo "🔗 Check positions: ssh $UNRAID_HOST 'cat $UNRAID_APP_PATH/data/positions.json'"
 
 # Cleanup
-rm -f scranton-strangler
+rm -f bin/scranton-strangler
 
 log_info "All done! 🎉"

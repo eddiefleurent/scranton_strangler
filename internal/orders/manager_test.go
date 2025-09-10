@@ -374,7 +374,10 @@ func TestManager_PollOrderStatus_OrderFilled(t *testing.T) {
 	}
 
 	// Verify position was transitioned to StateOpen
-	updatedPosition := mockStorage.GetPositionByID("test-pos")
+	updatedPosition, found := mockStorage.GetPositionByID("test-pos")
+	if !found {
+		t.Fatal("Expected to find updated position")
+	}
 	if updatedPosition.GetCurrentState() != models.StateOpen {
 		t.Errorf("Expected position state to be %s, got %s", models.StateOpen, updatedPosition.GetCurrentState())
 	}
@@ -447,7 +450,10 @@ func TestManager_PollOrderStatus_OrderCanceled(t *testing.T) {
 	}
 
 	// Verify position was transitioned to StateError
-	updatedPosition := mockStorage.GetPositionByID("test-pos")
+	updatedPosition, found := mockStorage.GetPositionByID("test-pos")
+	if !found {
+		t.Fatal("Expected to find updated position")
+	}
 	if updatedPosition.GetCurrentState() != models.StateError {
 		t.Errorf("Expected position state to be %s, got %s", models.StateError, updatedPosition.GetCurrentState())
 	}
@@ -520,9 +526,9 @@ func TestManager_PollOrderStatus_Timeout(t *testing.T) {
 	}
 
 	// Verify position was closed due to timeout
-	currentPosition := mockStorage.GetPositionByID("test-pos")
-	if currentPosition != nil {
-		t.Error("Expected current position to be nil after timeout close")
+	_, found := mockStorage.GetPositionByID("test-pos")
+	if found {
+		t.Error("Expected current position to not be found after timeout close")
 	}
 
 	// Verify position exists in history
@@ -589,9 +595,9 @@ func TestManager_HandleOrderTimeout_EntryOrder(t *testing.T) {
 	m.handleOrderTimeout("test-pos")
 
 	// Verify position was closed and moved to history (current position should be nil)
-	updatedPosition := mockStorage.GetPositionByID("test-pos")
-	if updatedPosition != nil {
-		t.Errorf("Expected current position to be nil after close, got %v", updatedPosition)
+	_, found := mockStorage.GetPositionByID("test-pos")
+	if found {
+		t.Error("Expected current position to not be found after close")
 	}
 
 	// Verify position exists in history and is closed
@@ -653,9 +659,9 @@ func TestManager_HandleOrderTimeout_ExitOrderFromAdjusting(t *testing.T) {
 	m.handleOrderTimeout("test-pos")
 
 	// Verify position was closed and moved to history (current position should be nil)
-	updatedPosition := mockStorage.GetPositionByID("test-pos")
-	if updatedPosition != nil {
-		t.Errorf("Expected current position to be nil after close, got %v", updatedPosition)
+	_, found := mockStorage.GetPositionByID("test-pos")
+	if found {
+		t.Error("Expected current position to not be found after close")
 	}
 
 	// Verify position exists in history and is closed

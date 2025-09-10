@@ -9,9 +9,9 @@
   - [x] Get SPY option chains
   - [x] OTOCO order placement
   - [x] Buy-to-close order placement
-  - [ ] Test with paper trading account
+  - [x] Test with paper trading account
 - [x] **Entry Logic**
-  - [x] Calculate IVR > 30 (simple 20-day lookback)
+  - [x] Calculate IV > 30 (absolute IV, simple 20-day lookback)
   - [x] Find 45 DTE expiration (±5 days acceptable)
   - [x] Select 16 delta strikes (or closest available)
   - [x] Check minimum $2.00 credit requirement
@@ -56,7 +56,7 @@
   - [x] Verify account balance retrieval
   - [x] Test option chain data access
 - [x] **Test Entry Conditions**
-  - [x] Verify IV calculation accuracy (uses absolute IV, not IVR)
+  - [x] Verify IV calculation accuracy (absolute IV, 20-day lookback)
   - [x] Confirm strike selection logic
   - [x] Test position sizing math
   - [x] Validate OTOCO order placement
@@ -76,7 +76,7 @@
   - [x] Test `FindStrangleStrikes()` - strike selection and credit validation
   - [x] Test `CheckExitConditions()` - 50% profit, 21 DTE, 250% loss conditions
   - [x] Test `CalculatePnL()` - position value calculations with live quotes
-  - [x] Test `GetCurrentIV()` - IV calculation with historical data (absolute IV, not IVR)
+  - [x] Test `GetCurrentIV()` - IV calculation with historical data (absolute IV, 20-day lookback)
 - [x] **Broker API Integration Testing - 73.1% Coverage**
   - [x] Test `GetQuote()` - quote fetching with error handling
   - [x] Test `GetOptionChain()` - option data parsing and greeks
@@ -136,7 +136,7 @@
 
 ### MVP Definition: Working Paper Trading Bot
 A bot that can automatically:
-1. Enter SPY short strangles when IVR > 30
+1. Enter SPY short strangles when IV > 30 (absolute IV)
 2. Exit at 50% profit (via OTOCO) or 21 DTE
 3. Apply emergency stops (250% loss, 21 DTE)
 4. Run unattended for 1 week without issues

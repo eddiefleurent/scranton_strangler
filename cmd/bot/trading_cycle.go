@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -279,13 +280,24 @@ func (tc *TradingCycle) placeStrangleOrder(order *strategy.StrangleOrder) (*brok
 	tc.bot.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", 
 		tickSize, order.Symbol, px)
 
-	// Generate deterministic client-order ID
+	// Generate deterministic client-order ID with nonce to avoid duplicates
 	canonicalString := fmt.Sprintf("entry-%s-%s-%.2f-%.2f-%d-%.2f-%s",
 		order.Symbol, order.Expiration, order.PutStrike, order.CallStrike,
 		order.Quantity, px, tc.bot.config.Broker.AccountID)
 
 	hash := sha256.Sum256([]byte(canonicalString))
-	clientOrderID := "entry-" + hex.EncodeToString(hash[:])[:8]
+	base := "entry-" + hex.EncodeToString(hash[:])[:8]
+	
+	// Generate 4-hex nonce from crypto/rand
+	nonceBytes := make([]byte, 2)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		tc.bot.logger.Printf("Warning: Failed to generate nonce, using fallback: %v", err)
+		// Fallback to time-based nonce if crypto/rand fails
+		nonceBytes[0] = byte(time.Now().UnixNano() & 0xFF)
+		nonceBytes[1] = byte((time.Now().UnixNano() >> 8) & 0xFF)
+	}
+	nonce := hex.EncodeToString(nonceBytes)
+	clientOrderID := base + "-" + nonce
 
 	return tc.bot.broker.PlaceStrangleOrder(
 		order.Symbol,
@@ -315,7 +327,7 @@ func (tc *TradingCycle) createPosition(order *strategy.StrangleOrder, expiration
 	)
 
 	position.CreditReceived = order.Credit
-	position.EntryLimitPrice = math.Max(util.FloorToTick(order.Credit, 0.01), 0.01)
+	position.EntryLimitPrice = tc.computeEntryLimitPrice(order.Symbol, order.Credit)
 	position.EntrySpot = order.SpotPrice
 	position.DTE = position.CalculateDTE()
 	position.EntryIV = tc.bot.strategy.GetCurrentIV()
@@ -509,4 +521,14 @@ func (tc *TradingCycle) checkAdjustmentsForPosition(position *models.Position) {
 	if tc.bot.config.Strategy.Adjustments.EnableAdjustmentStub {
 		tc.bot.logger.Printf("Football System adjustment check for position %s not yet implemented", shortID(position.ID))
 	}
+}
+
+// computeEntryLimitPrice calculates the entry limit price using the correct tick size for the symbol
+func (tc *TradingCycle) computeEntryLimitPrice(symbol string, credit float64) float64 {
+	tickSize, err := tc.bot.broker.GetTickSize(symbol)
+	if err != nil {
+		tc.bot.logger.Printf("Warning: Failed to get tick size for %s, using default 0.01: %v", symbol, err)
+		tickSize = 0.01
+	}
+	return math.Max(util.FloorToTick(credit, tickSize), tickSize)
 }

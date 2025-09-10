@@ -16,7 +16,7 @@ broker:
 strategy:
   symbol: "SPY"
   allocation_pct: 0.35  # 35% of account max
-  escalate_loss_pct: 1.5  # Escalate if loss exceeds 150% of credit (must be < exit.stop_loss_pct)
+  escalate_loss_pct: 1.5  # Escalate if loss exceeds 150% of credit (ratio: 1.5 = 150%, must be < exit.stop_loss_pct)
   entry:
     min_iv_pct: 15.0  # Minimum SPY ATM IV percentage to enter (MVP threshold)
     target_dte: 45  # Target days to expiration
@@ -29,7 +29,7 @@ strategy:
   exit:
     profit_target: 0.50  # Exit at 50% profit
     max_dte: 21  # Exit with 21 days remaining
-    stop_loss_pct: 2.0  # Exit if loss exceeds 200% of credit (clamped to risk.max_position_loss)
+    stop_loss_pct: 2.0  # Exit if loss exceeds 200% of credit (ratio: 2.0 = 200%, clamped to risk.max_position_loss)
     
   adjustments:
     enabled: false  # Start with false, enable after MVP proven

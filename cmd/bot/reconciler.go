@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -118,8 +119,10 @@ func (r *Reconciler) findOrphanedStrangles(brokerPositions []broker.PositionItem
 	// Group broker positions by expiration and identify strangles
 	positionsByExp := make(map[string][]broker.PositionItem)
 	for _, brokerPos := range brokerPositions {
-		if brokerPos.Symbol == "SPY" { // Only handle SPY options
-			continue                     // Skip underlying
+		// Extract underlying ticker from the option symbol
+		underlying := extractUnderlyingFromSymbol(brokerPos.Symbol)
+		if underlying != "SPY" { // Only handle SPY options
+			continue // Skip non-SPY positions
 		}
 
 		// Extract expiration from option symbol
@@ -194,68 +197,115 @@ func (r *Reconciler) createRecoveryPosition(orphan orphanedStrangle) *models.Pos
 
 // isPositionOpenInBroker checks if a stored position still exists in broker positions
 func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
+	// For options positions, check if we have both legs still open
+	hasCallLeg := false
+	hasCallStrike := false
+	hasPutLeg := false
+	hasPutStrike := false
+
+	// Check if broker position matches our stored position strikes
 	for _, brokerPos := range brokerPositions {
-		// Match by symbol and quantity (simplified matching)
-		if brokerPos.Symbol == position.Symbol {
-			// For options positions, check if we have both legs still open
-			hasCallLeg := false
-			hasCallStrike := false
-			hasPutLeg := false
-			hasPutStrike := false
+		// Parse option symbol using OPRA format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
+		// SPY option format: SPY240315C00610000 or SPY240315P00500000
+		parsedStrike, optionType, err := parseOptionSymbol(brokerPos.Symbol)
+		if err != nil {
+			continue // Skip invalid symbols (like stock symbols)
+		}
 
-			// Check if broker position matches our stored position strikes
-			for _, brokerPos2 := range brokerPositions {
-				if brokerPos2.Symbol == position.Symbol {
-					// Parse option symbol using OPRA format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
-					// SPY option format: SPY240315C00610000 or SPY240315P00500000
-					parsedStrike, optionType, err := parseOptionSymbol(brokerPos2.Symbol)
-					if err != nil {
-						continue // Skip invalid symbols
-					}
+		// Extract underlying from option symbol
+		underlying := extractUnderlyingFromSymbol(brokerPos.Symbol)
+		if underlying != position.Symbol {
+			continue // Skip positions for different underlyings
+		}
 
-					if optionType == "C" {
-						hasCallLeg = true
-						if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
-							hasCallStrike = true
-						}
-					} else if optionType == "P" {
-						hasPutLeg = true
-						if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
-							hasPutStrike = true
-						}
-					}
-				}
+		// Extract expiration from option symbol
+		expiration := extractExpirationFromSymbol(brokerPos.Symbol)
+		expectedExpiration := position.Expiration.Format("2006-01-02")
+		if expiration != expectedExpiration {
+			continue // Skip positions with different expirations
+		}
+
+		// Check if this matches one of our strangle legs
+		if optionType == "C" {
+			hasCallLeg = true
+			if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
+				hasCallStrike = true
 			}
-
-			// Position is open if we have both call and put legs with matching strikes
-			if hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike {
-				return true
+		} else if optionType == "P" {
+			hasPutLeg = true
+			if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
+				hasPutStrike = true
 			}
 		}
 	}
-	return false
+
+	// Position is open if we have both call and put legs with matching strikes
+	return hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike
 }
 
 // Helper functions
 
+// extractUnderlyingFromSymbol extracts the underlying ticker from an option symbol
+// For OPRA format: SPY240315C00610000 -> "SPY"
+// For stock symbols: "SPY" -> "SPY"
+func extractUnderlyingFromSymbol(symbol string) string {
+	// Handle stock symbols (just return as-is)
+	if !strings.Contains(symbol, "240") && !strings.Contains(symbol, "250") && !strings.Contains(symbol, "260") {
+		// Simple heuristic: if it doesn't contain typical year prefixes, treat as stock
+		return symbol
+	}
+	
+	// For option symbols, extract the ticker part before the date
+	// OPRA format: TICKER[YYMMDD][C/P][STRIKE]
+	// Look for the pattern where we have 6 consecutive digits (YYMMDD)
+	for i := 0; i < len(symbol)-5; i++ {
+		// Check if we have 6 consecutive digits starting at position i
+		allDigits := true
+		for j := i; j < i+6 && j < len(symbol); j++ {
+			if symbol[j] < '0' || symbol[j] > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if allDigits && i > 0 {
+			// Found the date part, return everything before it
+			return symbol[:i]
+		}
+	}
+	
+	// Fallback: if we can't parse it as an option, return the whole symbol
+	return symbol
+}
+
 func extractExpirationFromSymbol(symbol string) string {
-	// SPY option format: SPY251024C00678000
-	// Extract YYMMDD part
-	if len(symbol) < 12 {
+	// Option format: TICKER[YYMMDD][C/P][STRIKE]
+	// Search for the first occurrence of six consecutive digits (YYMMDD)
+	if len(symbol) < 6 {
 		return ""
 	}
 
-	// Look for the date part (6 digits after SPY)
-	if len(symbol) >= 9 {
-		dateStr := symbol[3:9] // YYMMDD
-		// Convert YYMMDD to YYYY-MM-DD
-		if len(dateStr) == 6 {
+	// Look for 6 consecutive digits
+	for i := 0; i <= len(symbol)-6; i++ {
+		// Check if we have 6 consecutive digits starting at position i
+		allDigits := true
+		for j := i; j < i+6; j++ {
+			if symbol[j] < '0' || symbol[j] > '9' {
+				allDigits = false
+				break
+			}
+		}
+		
+		if allDigits {
+			// Found 6-digit date, extract and format
+			dateStr := symbol[i : i+6]
 			year := "20" + dateStr[0:2]
 			month := dateStr[2:4]
 			day := dateStr[4:6]
 			return year + "-" + month + "-" + day
 		}
 	}
+	
+	// No 6-digit run found
 	return ""
 }
 

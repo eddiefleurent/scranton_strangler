@@ -238,16 +238,23 @@ func (m *DataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, c
 		}
 	}
 
-	// Fallback when no Greeks are present - choose strikes based on distance to current price
-	if bestPutStrike == 0 && bestCallStrike == 0 {
-		spot := m.currentPrice
-		// Simple 16-delta-ish heuristic: ~1.5–2 std devs; pick 10% OTM as placeholder
-		putStrike = spot * 0.9
-		callStrike = spot * 1.1
-		return putStrike, callStrike
+	// Apply fallback per leg when Greeks are missing
+	spot := m.currentPrice
+	
+	// Use best strikes when available, otherwise apply 16Δ heuristic
+	if bestPutStrike == 0 {
+		putStrike = spot * 0.9  // ~16Δ put strike
+	} else {
+		putStrike = bestPutStrike
+	}
+	
+	if bestCallStrike == 0 {
+		callStrike = spot * 1.1  // ~16Δ call strike
+	} else {
+		callStrike = bestCallStrike
 	}
 
-	return bestPutStrike, bestCallStrike
+	return putStrike, callStrike
 }
 
 // CalculateStrangleCredit calculates the credit received for a strangle.

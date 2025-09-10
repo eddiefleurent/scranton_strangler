@@ -224,9 +224,10 @@ func (m *MockStorage) GetCurrentPositions() []models.Position {
 
 	positions := make([]models.Position, len(m.currentPositions))
 	for i := range m.currentPositions {
-		cloned := clonePosition(&m.currentPositions[i])
-		if cloned != nil {
+		if cloned := clonePosition(&m.currentPositions[i]); cloned != nil {
 			positions[i] = *cloned
+		} else {
+			positions[i] = m.currentPositions[i]
 		}
 	}
 
@@ -294,17 +295,20 @@ func (m *MockStorage) UpdatePosition(pos *models.Position) error {
 }
 
 // GetPositionByID retrieves a specific position by ID
-func (m *MockStorage) GetPositionByID(id string) *models.Position {
+func (m *MockStorage) GetPositionByID(id string) (models.Position, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	for i := range m.currentPositions {
 		if m.currentPositions[i].ID == id {
-			return clonePosition(&m.currentPositions[i])
+			cloned := clonePosition(&m.currentPositions[i])
+			if cloned != nil {
+				return *cloned, true
+			}
 		}
 	}
 
-	return nil
+	return models.Position{}, false
 }
 
 // ClosePositionByID closes a specific position by ID

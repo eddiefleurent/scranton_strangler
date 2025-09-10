@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
+	"log"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -24,8 +26,10 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Original Position State: %s\n", pos.GetCurrentState())
-	fmt.Printf("Original StateMachine is nil: %v\n", pos.StateMachine == nil)
+	originalState := pos.GetCurrentState()
+	originalSMIsNil := pos.StateMachine == nil
+	fmt.Printf("Original Position State: %s\n", originalState)
+	fmt.Printf("Original StateMachine is nil: %v\n", originalSMIsNil)
 
 	// Serialize to JSON
 	jsonData, err := json.MarshalIndent(pos, "", "  ")
@@ -54,10 +58,40 @@ func main() {
 		return
 	}
 
-	fmt.Printf("Deserialized Position State: %s\n", deserializedPos.GetCurrentState())
-	fmt.Printf("Deserialized StateMachine is nil: %v\n", deserializedPos.StateMachine == nil)
+	// Assert that deserialized state equals original state
+	deserializedState := deserializedPos.GetCurrentState()
+	if deserializedState != originalState {
+		log.Fatalf("State mismatch after deserialization: expected %s, got %s", originalState, deserializedState)
+	}
+
+	// Assert StateMachine is nil after deserialization
+	deserializedSMIsNil := deserializedPos.StateMachine == nil
+	if !deserializedSMIsNil {
+		log.Fatalf("StateMachine should be nil after deserialization, but is not nil")
+	}
 
 	// Test that lazy initialization works
-	fmt.Printf("Deserialized Management Phase: %d\n", deserializedPos.GetManagementPhase())
-	fmt.Printf("After lazy init, StateMachine is nil: %v\n", deserializedPos.StateMachine == nil)
+	originalManagementPhase := pos.GetManagementPhase()
+	deserializedManagementPhase := deserializedPos.GetManagementPhase()
+	if deserializedManagementPhase != originalManagementPhase {
+		log.Fatalf("Management phase mismatch: expected %d, got %d", originalManagementPhase, deserializedManagementPhase)
+	}
+
+	// Assert StateMachine is no longer nil after lazy initialization
+	afterLazyInitSMIsNil := deserializedPos.StateMachine == nil
+	if afterLazyInitSMIsNil {
+		log.Fatalf("StateMachine should not be nil after lazy initialization, but is nil")
+	}
+
+	// Assert that the full deserialized position equals the original (excluding StateMachine)
+	if !reflect.DeepEqual(pos.ID, deserializedPos.ID) ||
+		!reflect.DeepEqual(pos.Symbol, deserializedPos.Symbol) ||
+		!reflect.DeepEqual(pos.PutStrike, deserializedPos.PutStrike) ||
+		!reflect.DeepEqual(pos.CallStrike, deserializedPos.CallStrike) ||
+		!reflect.DeepEqual(pos.Expiration, deserializedPos.Expiration) ||
+		!reflect.DeepEqual(pos.Quantity, deserializedPos.Quantity) {
+		log.Fatalf("Deserialized position data does not match original")
+	}
+
+	fmt.Printf("✅ All assertions passed: JSON serialization/deserialization working correctly")
 }

@@ -271,7 +271,12 @@ func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse
 
 // getTodaysMarketSchedule gets today's market schedule from the cached calendar
 func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
-	now := time.Now().In(b.nyLocation)
+	var now time.Time
+	if b.nyLocation != nil {
+		now = time.Now().In(b.nyLocation)
+	} else {
+		now = time.Now().In(time.UTC)
+	}
 	calendar, err := b.getMarketCalendar(int(now.Month()), now.Year())
 	if err != nil {
 		return nil, err

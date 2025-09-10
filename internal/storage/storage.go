@@ -761,18 +761,20 @@ func (s *JSONStorage) UpdatePosition(pos *models.Position) error {
 }
 
 // GetPositionByID retrieves a specific position by ID
-func (s *JSONStorage) GetPositionByID(id string) *models.Position {
+func (s *JSONStorage) GetPositionByID(id string) (models.Position, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	
 	for i := range s.data.CurrentPositions {
 		if s.data.CurrentPositions[i].ID == id {
 			cloned := clonePosition(&s.data.CurrentPositions[i])
-			return cloned
+			if cloned != nil {
+				return *cloned, true
+			}
 		}
 	}
 	
-	return nil
+	return models.Position{}, false
 }
 
 // ClosePositionByID closes a specific position by ID

@@ -83,8 +83,8 @@ func testInterface(t *testing.T, storage Interface) {
 	}
 	
 	// Test GetPositionByID
-	posById := storage.GetPositionByID(testPos.ID)
-	if posById == nil {
+	posById, found := storage.GetPositionByID(testPos.ID)
+	if !found {
 		t.Fatal("Expected to find position by ID")
 	}
 	if posById.ID != testPos.ID {
@@ -114,8 +114,8 @@ func testInterface(t *testing.T, storage Interface) {
 	}
 
 	// Verify adjustment was added
-	currentPos := storage.GetPositionByID(testPos.ID)
-	if currentPos == nil {
+	currentPos, found := storage.GetPositionByID(testPos.ID)
+	if !found {
 		t.Fatal("Position disappeared after update")
 	}
 	if len(currentPos.Adjustments) != 1 {
@@ -302,6 +302,279 @@ func TestExitMetadataBackup(t *testing.T) {
 	// Verify final P&L is recorded
 	if closedPos.CurrentPnL != finalPnL {
 		t.Errorf("Expected final P&L %f, got %f", finalPnL, closedPos.CurrentPnL)
+	}
+}
+
+// TestClosePositionReasonMappings tests the explicit reason to condition mappings
+func TestClosePositionReasonMappings(t *testing.T) {
+	testCases := []struct {
+		reason            string
+		expectedCondition string
+		description       string
+		initialState      models.PositionState // State that allows the expected condition
+	}{
+		{"manual", models.ConditionForceClose, "manual close should map to force_close condition", models.StateError},
+		{"force_close", models.ConditionForceClose, "force_close should map to force_close condition", models.StateRolling},
+		{"hard_stop", models.ConditionHardStop, "hard_stop should map to hard_stop condition", models.StateThirdDown},
+		{"stop_loss", models.ConditionHardStop, "stop_loss should map to hard_stop condition", models.StateAdjusting},
+		{"profit_target", models.ConditionExitConditions, "profit_target should map to exit_conditions", models.StateFirstDown},
+		{"time", models.ConditionExitConditions, "time should map to exit_conditions", models.StateSecondDown},
+		{"emergency_exit", models.ConditionEmergencyExit, "emergency_exit should map to emergency_exit condition", models.StateFourthDown},
+		{"escalate", models.ConditionEmergencyExit, "escalate should map to emergency_exit condition", models.StateFourthDown},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.reason, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tmpFile := fmt.Sprintf("%s/test_reason_mapping_%s_%d.json", tmpDir, tc.reason, time.Now().UnixNano())
+
+			storage, err := NewJSONStorage(tmpFile)
+			if err != nil {
+				t.Fatalf("Failed to create JSON storage: %v", err)
+			}
+
+			// Create and add a test position
+			testPos := models.NewPosition(
+				fmt.Sprintf("test-reason-%s", tc.reason),
+				"SPY",
+				445.0,
+				455.0,
+				time.Now().AddDate(0, 0, 30),
+				1,
+			)
+
+			// Set up position to be in the state that allows the expected condition
+			setupPositionForState(t, testPos, tc.initialState)
+
+			err = storage.AddPosition(testPos)
+			if err != nil {
+				t.Fatalf("Failed to add position: %v", err)
+			}
+
+			// Close position with the specific reason
+			finalPnL := 1.75
+			err = storage.ClosePositionByID(testPos.ID, finalPnL, tc.reason)
+			if err != nil {
+				t.Fatalf("Failed to close position with reason '%s': %v", tc.reason, err)
+			}
+
+			// Verify position is in history with expected condition
+			history := storage.GetHistory()
+			if len(history) != 1 {
+				t.Fatalf("Expected 1 position in history, got %d", len(history))
+			}
+
+			closedPos := history[0]
+			if closedPos.ExitReason != tc.reason {
+				t.Errorf("Expected exit reason '%s', got '%s'", tc.reason, closedPos.ExitReason)
+			}
+
+			// Check the state machine was transitioned with the correct condition
+			// by verifying the position reached closed state
+			if closedPos.GetCurrentState() != models.StateClosed {
+				t.Errorf("Expected position to be in closed state, got %s", closedPos.GetCurrentState())
+			}
+		})
+	}
+}
+
+// TestClosePositionDefaultStateMappings tests the default branch state to condition mappings
+func TestClosePositionDefaultStateMappings(t *testing.T) {
+	testCases := []struct {
+		state             models.PositionState
+		expectedCondition string
+		description       string
+	}{
+		{models.StateOpen, models.ConditionPositionClosed, "StateOpen should map to position_closed condition"},
+		{models.StateSubmitted, models.ConditionOrderTimeout, "StateSubmitted should map to order_timeout condition"},
+		{models.StateFirstDown, models.ConditionExitConditions, "StateFirstDown should map to exit_conditions"},
+		{models.StateSecondDown, models.ConditionExitConditions, "StateSecondDown should map to exit_conditions"},
+		{models.StateThirdDown, models.ConditionHardStop, "StateThirdDown should map to hard_stop condition"},
+		{models.StateFourthDown, models.ConditionEmergencyExit, "StateFourthDown should map to emergency_exit condition"},
+		{models.StateError, models.ConditionForceClose, "StateError should map to force_close condition"},
+		{models.StateAdjusting, models.ConditionHardStop, "StateAdjusting should map to hard_stop condition"},
+		{models.StateRolling, models.ConditionForceClose, "StateRolling should map to force_close condition"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(string(tc.state), func(t *testing.T) {
+			tmpDir := t.TempDir()
+			tmpFile := fmt.Sprintf("%s/test_state_mapping_%s_%d.json", tmpDir, tc.state, time.Now().UnixNano())
+
+			storage, err := NewJSONStorage(tmpFile)
+			if err != nil {
+				t.Fatalf("Failed to create JSON storage: %v", err)
+			}
+
+			// Create a test position and set it to the desired state
+			testPos := models.NewPosition(
+				fmt.Sprintf("test-state-%s", tc.state),
+				"SPY",
+				445.0,
+				455.0,
+				time.Now().AddDate(0, 0, 30),
+				1,
+			)
+
+			// Set up position to reach the target state
+			setupPositionForState(t, testPos, tc.state)
+
+			err = storage.AddPosition(testPos)
+			if err != nil {
+				t.Fatalf("Failed to add position: %v", err)
+			}
+
+			// Close position with a generic reason to trigger default mapping
+			finalPnL := 0.50
+			genericReason := "generic_close_reason"
+			err = storage.ClosePositionByID(testPos.ID, finalPnL, genericReason)
+			if err != nil {
+				t.Fatalf("Failed to close position in state '%s': %v", tc.state, err)
+			}
+
+			// Verify position is in history
+			history := storage.GetHistory()
+			if len(history) != 1 {
+				t.Fatalf("Expected 1 position in history, got %d", len(history))
+			}
+
+			closedPos := history[0]
+			if closedPos.ExitReason != genericReason {
+				t.Errorf("Expected exit reason '%s', got '%s'", genericReason, closedPos.ExitReason)
+			}
+
+			// Check the position reached closed state
+			if closedPos.GetCurrentState() != models.StateClosed {
+				t.Errorf("Expected position to be in closed state, got %s", closedPos.GetCurrentState())
+			}
+		})
+	}
+}
+
+// TestClosePositionFallbackCondition tests the fallback condition for unknown states
+func TestClosePositionFallbackCondition(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := fmt.Sprintf("%s/test_fallback_%d.json", tmpDir, time.Now().UnixNano())
+
+	storage, err := NewJSONStorage(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to create JSON storage: %v", err)
+	}
+
+	// Create a test position
+	testPos := models.NewPosition(
+		"test-fallback",
+		"SPY",
+		445.0,
+		455.0,
+		time.Now().AddDate(0, 0, 30),
+		1,
+	)
+
+	// Set to first down state where ConditionExitConditions is valid for fallback
+	setupPositionForState(t, testPos, models.StateFirstDown)
+
+	err = storage.AddPosition(testPos)
+	if err != nil {
+		t.Fatalf("Failed to add position: %v", err)
+	}
+
+	// Close position with a generic reason to trigger default mapping
+	finalPnL := 0.25
+	genericReason := "unknown_state_close"
+	err = storage.ClosePositionByID(testPos.ID, finalPnL, genericReason)
+	if err != nil {
+		t.Fatalf("Failed to close position with unknown state: %v", err)
+	}
+
+	// Verify position is in history
+	history := storage.GetHistory()
+	if len(history) != 1 {
+		t.Fatalf("Expected 1 position in history, got %d", len(history))
+	}
+
+	closedPos := history[0]
+	if closedPos.ExitReason != genericReason {
+		t.Errorf("Expected exit reason '%s', got '%s'", genericReason, closedPos.ExitReason)
+	}
+
+	// Check the position reached closed state (fallback should use exit_conditions)
+	if closedPos.GetCurrentState() != models.StateClosed {
+		t.Errorf("Expected position to be in closed state, got %s", closedPos.GetCurrentState())
+	}
+}
+
+// setupPositionForState configures a position to be in the specified state
+func setupPositionForState(t *testing.T, pos *models.Position, targetState models.PositionState) {
+	// Start from idle and work our way to the target state
+	switch targetState {
+	case models.StateIdle:
+		// Position starts in idle, nothing to do
+		return
+	case models.StateSubmitted:
+		err := pos.TransitionState(models.StateSubmitted, models.ConditionOrderPlaced)
+		if err != nil {
+			t.Fatalf("Failed to transition to submitted: %v", err)
+		}
+	case models.StateOpen:
+		err := pos.TransitionState(models.StateSubmitted, models.ConditionOrderPlaced)
+		if err != nil {
+			t.Fatalf("Failed to transition to submitted: %v", err)
+		}
+		err = pos.TransitionState(models.StateOpen, models.ConditionOrderFilled)
+		if err != nil {
+			t.Fatalf("Failed to transition to open: %v", err)
+		}
+		// Set required fields for open state
+		pos.CreditReceived = 3.50
+		pos.Quantity = 1
+	case models.StateFirstDown:
+		setupPositionForState(t, pos, models.StateOpen)
+		err := pos.TransitionState(models.StateFirstDown, models.ConditionStartManagement)
+		if err != nil {
+			t.Fatalf("Failed to transition to first down: %v", err)
+		}
+	case models.StateSecondDown:
+		setupPositionForState(t, pos, models.StateFirstDown)
+		err := pos.TransitionState(models.StateSecondDown, models.ConditionStrikeChallenged)
+		if err != nil {
+			t.Fatalf("Failed to transition to second down: %v", err)
+		}
+	case models.StateThirdDown:
+		setupPositionForState(t, pos, models.StateSecondDown)
+		err := pos.TransitionState(models.StateThirdDown, models.ConditionStrikeBreached)
+		if err != nil {
+			t.Fatalf("Failed to transition to third down: %v", err)
+		}
+	case models.StateFourthDown:
+		setupPositionForState(t, pos, models.StateThirdDown)
+		err := pos.TransitionState(models.StateFourthDown, models.ConditionAdjustmentFailed)
+		if err != nil {
+			t.Fatalf("Failed to transition to fourth down: %v", err)
+		}
+	case models.StateError:
+		err := pos.TransitionState(models.StateSubmitted, models.ConditionOrderPlaced)
+		if err != nil {
+			t.Fatalf("Failed to transition to submitted: %v", err)
+		}
+		err = pos.TransitionState(models.StateError, models.ConditionOrderFailed)
+		if err != nil {
+			t.Fatalf("Failed to transition to error: %v", err)
+		}
+	case models.StateAdjusting:
+		setupPositionForState(t, pos, models.StateSecondDown)
+		err := pos.TransitionState(models.StateAdjusting, models.ConditionRollUntested)
+		if err != nil {
+			t.Fatalf("Failed to transition to adjusting: %v", err)
+		}
+	case models.StateRolling:
+		setupPositionForState(t, pos, models.StateFourthDown)
+		err := pos.TransitionState(models.StateRolling, models.ConditionRollAsPunt)
+		if err != nil {
+			t.Fatalf("Failed to transition to rolling: %v", err)
+		}
+	default:
+		t.Fatalf("Unknown target state: %s", targetState)
 	}
 }
 

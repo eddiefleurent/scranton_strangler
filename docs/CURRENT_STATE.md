@@ -12,7 +12,7 @@
 - **Symbol**: SPY only
 - **IV Threshold**: Configurable minimum (default 30% absolute IV)
 - **DTE Target**: 45 days (±5 day range acceptable)
-- **Strikes**: 16 delta put/call (closest available)
+- **Strikes**: 16 delta put/call (closest available) with OTM validation
 - **Credit**: Minimum $2.00 per strangle
 - **Position Limit**: Up to 5 concurrent positions
 - **Allocation**: 35% max account allocation per position
@@ -20,8 +20,9 @@
 ### Exit Conditions
 - **Profit Target**: 50% of credit received (automatic via OTOCO)
 - **Time Exit**: 21 DTE remaining (forced close)
-- **Stop Loss**: 250% of credit received
-- **Emergency**: Manual liquidation tools available
+- **Stop Loss**: Configurable via `stop_loss_pct` (default 2.5 = 250% of credit)
+- **Emergency Exit**: Hardcoded 200% loss threshold enforced by `StateMachine.ShouldEmergencyExit`
+- **Manual Emergency**: Liquidation tools available (`make liquidate`)
 
 ## Architecture Overview
 
@@ -68,7 +69,8 @@ StateSecondDown → StateThirdDown → StateFourthDown → StateClosed
 - Proper handling of partial fills
 
 ### 5. Risk Management ✅
-- Account allocation limits (35% per position)
+- **Enhanced Position Sizing**: Accurate Reg-T margin calculation (premium + max(20% * underlying - OTM, 10% * underlying))
+- Account allocation limits (35% per position) 
 - Buying power validation
 - Position count limits
 - Emergency liquidation (`make liquidate`)

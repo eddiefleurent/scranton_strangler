@@ -93,7 +93,12 @@ func (m *MockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike flo
 
 func (m *MockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, price, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
 	args := m.Called(symbol, putStrike, callStrike, expiration, quantity, price, profitTarget, preview)
-	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+	v := args.Get(0)
+	if v == nil {
+		return nil, args.Error(1)
+	}
+	resp, _ := v.(*broker.OrderResponse)
+	return resp, args.Error(1)
 }
 
 func (m *MockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) {
@@ -228,7 +233,7 @@ func createTestBot(t *testing.T) *TestBot {
 				MaxDTE:       21,
 				StopLossPct:  2.5,
 			},
-			EscalateLossPct: 200,
+			EscalateLossPct: 2.0, // 200% loss ratio
 			MaxNewPositionsPerCycle: 1,
 			Adjustments: config.AdjustmentConfig{
 				Enabled: false,
@@ -275,7 +280,7 @@ func createTestBot(t *testing.T) *TestBot {
 		Symbol:              cfg.Strategy.Symbol,
 		DTETarget:           cfg.Strategy.Entry.TargetDTE,
 		DTERange:            []int{cfg.Strategy.Entry.DTERange[0], cfg.Strategy.Entry.DTERange[1]},
-		DeltaTarget:         cfg.Strategy.Entry.Delta / 100,
+		DeltaTarget:         float64(cfg.Strategy.Entry.Delta) / 100,
 		ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
 		MaxDTE:              cfg.Strategy.Exit.MaxDTE,
 		AllocationPct:       cfg.Strategy.AllocationPct,

@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -30,21 +31,31 @@ import (
 
 func main() {
 	// Load configuration
-	cfgPath := flag.String("config", "../config.yaml", "Path to config.yaml")
+	cfgPath := flag.String("config", "./config.yaml", "Path to config.yaml")
 	flag.Parse()
 	
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		log.Fatalf("❌ Failed to load config: %v", err)
+	var cfg *config.Config
+	if *cfgPath != "" {
+		if c, err := config.Load(*cfgPath); err == nil {
+			cfg = c
+		} else if os.Getenv("TRADIER_API_KEY") == "" || os.Getenv("TRADIER_ACCOUNT_ID") == "" {
+			log.Fatalf("❌ Failed to load config and env vars missing: %v", err)
+		}
 	}
 
 	fmt.Printf("📝 Loading credentials (env overrides config)...\n")
-	apiKey := cfg.Broker.APIKey
+	apiKey := ""
+	if cfg != nil {
+		apiKey = cfg.Broker.APIKey
+	}
 	if v := os.Getenv("TRADIER_API_KEY"); v != "" {
 		apiKey = v
 		fmt.Printf("✅ Using TRADIER_API_KEY from environment\n")
 	}
-	accountID := cfg.Broker.AccountID
+	accountID := ""
+	if cfg != nil {
+		accountID = cfg.Broker.AccountID
+	}
 	if v := os.Getenv("TRADIER_ACCOUNT_ID"); v != "" {
 		accountID = v
 		fmt.Printf("✅ Using TRADIER_ACCOUNT_ID from environment\n")
@@ -68,7 +79,7 @@ func main() {
 	
 	fmt.Printf("Found %d positions to close:\n", len(positions))
 	for i, pos := range positions {
-		fmt.Printf("  %d. %s: %.0f contracts @ $%.2f\n", i+1, pos.Symbol, pos.Quantity, pos.CostBasis)
+		fmt.Printf("  %d. %s: %.0f contracts @ $%.2f\n", i+1, pos.Symbol, math.Abs(pos.Quantity), pos.CostBasis)
 	}
 	
 	// Close each position individually using market orders (aggressive pricing)
@@ -78,27 +89,23 @@ func main() {
 		}
 		
 		// Determine position direction and appropriate close order type
-		quantity := int(pos.Quantity)
-		absQuantity := quantity
-		if absQuantity < 0 {
-			absQuantity = -absQuantity
-		}
+		quantity := int(math.Abs(math.Round(pos.Quantity)))
+		isShort := pos.Quantity < 0
 		
-		isShort := quantity < 0
 		orderType := "buy-to-close MARKET"
 		if !isShort {
 			orderType = "sell-to-close MARKET"
 		}
 		
-		fmt.Printf("\n📝 Closing %s (%d contracts) using %s order...\n", pos.Symbol, absQuantity, orderType)
+		fmt.Printf("\n📝 Closing %s (%d contracts) using %s order...\n", pos.Symbol, quantity, orderType)
 		fmt.Printf("💥 MARKET ORDER: Will execute at current market price for immediate fill\n")
 		
 		// Place the appropriate market order type based on position direction
 		var orderResp *broker.OrderResponse
 		if isShort {
-			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, absQuantity, "day")
+			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, quantity, "day")
 		} else {
-			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, absQuantity, "day")
+			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, quantity, "day")
 		}
 		if err != nil {
 			fmt.Printf("❌ Failed to close %s: %v\n", pos.Symbol, err)

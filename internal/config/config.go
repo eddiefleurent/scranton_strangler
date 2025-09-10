@@ -13,10 +13,10 @@ import (
 // Risk Management Constants
 const (
 	// defaultEscalateLossPct is used when strategy.escalate_loss_pct is unset
-	// Percent of position credit (e.g., 2.0 = 2% of credit received)
+	// Ratio of position credit (e.g., 2.0 = 200% loss triggers escalation)
 	defaultEscalateLossPct = 2.0
 	// defaultStopLossPct is used when strategy.exit.stop_loss_pct is unset
-	// Percent of position credit (e.g., 2.5 = 2.5% of credit received)
+	// Ratio of position credit (e.g., 2.5 = 250% loss triggers hard stop)
 	defaultStopLossPct = 2.5
 	// defaultRiskMaxPositionLoss is used when risk.max_position_loss is unset
 	// Percent of account equity (e.g., 3.0 = 3% of account value)

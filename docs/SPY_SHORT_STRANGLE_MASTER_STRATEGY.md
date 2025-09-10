@@ -4,7 +4,7 @@
 - **Product**: SPY (S&P 500 ETF)
 - **Strategy**: Short Strangle (sell OTM put + OTM call)
 - **Target Win Rate**: 80-90% (with proper management)
-- **Typical Duration**: MaxDTE-30 days (from 45 DTE entry, where MaxDTE = 21)
+- **Typical Duration**: ~24 days (entered ≈45 DTE, exited at ≈21 DTE remaining)
 - **Profit Target**: 50% of initial credit
 - **Capital Allocation**: 30-35% of account max
 

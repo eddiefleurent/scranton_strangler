@@ -1298,7 +1298,7 @@ func extractUnderlyingFromOSI(s string) string {
 			}
 
 			// All conditions met, return underlying
-			return trimmedS[:i]
+			return strings.TrimSpace(trimmedS[:i])
 		}
 	}
 

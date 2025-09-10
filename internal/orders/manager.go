@@ -174,8 +174,8 @@ func (m *Manager) PollOrderStatus(positionID string, orderID int, isEntryOrder b
 
 func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 	// Try to get position by ID first (for multiple positions support)
-	position := m.storage.GetPositionByID(positionID)
-	if position == nil {
+	position, found := m.storage.GetPositionByID(positionID)
+	if !found {
 		m.logger.Printf("Position %s not found", positionID)
 		return
 	}
@@ -192,7 +192,7 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 			return
 		}
 
-		if err := m.storage.UpdatePosition(position); err != nil {
+		if err := m.storage.UpdatePosition(&position); err != nil {
 			m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
 			return
 		}
@@ -227,8 +227,8 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 
 func (m *Manager) handleOrderFailed(positionID string, orderID int, reason string) {
 	// Try to get position by ID first (for multiple positions support)
-	position := m.storage.GetPositionByID(positionID)
-	if position == nil {
+	position, found := m.storage.GetPositionByID(positionID)
+	if !found {
 		m.logger.Printf("Position %s not found", positionID)
 		return
 	}
@@ -249,7 +249,7 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		}
 	}
 
-	if err := m.storage.UpdatePosition(position); err != nil {
+	if err := m.storage.UpdatePosition(&position); err != nil {
 		m.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
 		return
 	}
@@ -262,8 +262,8 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 }
 
 func (m *Manager) handleOrderTimeout(positionID string) {
-	position := m.storage.GetPositionByID(positionID)
-	if position == nil {
+	position, found := m.storage.GetPositionByID(positionID)
+	if !found {
 		m.logger.Printf("Position %s not found", positionID)
 		return
 	}
@@ -272,13 +272,16 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 	// This prevents closing positions that actually filled but we lost track due to polling timeout
 	m.logger.Printf("Order timeout for position %s - verifying broker state before closing", positionID)
 	
-	brokerPositions, err := m.broker.GetPositions()
+	// Bound the broker probe by CallTimeout to avoid indefinite hangs
+	posCtx, cancel := context.WithTimeout(context.Background(), m.config.CallTimeout)
+	defer cancel()
+	brokerPositions, err := m.getPositionsWithTimeout(posCtx)
 	if err != nil {
 		m.logger.Printf("Failed to get broker positions during timeout handling: %v", err)
 		// Continue with original timeout logic as fallback
 	} else {
 		// Check if this position actually exists in the broker
-		isOpenInBroker := m.isPositionOpenInBroker(position, brokerPositions)
+		isOpenInBroker := m.isPositionOpenInBroker(&position, brokerPositions)
 		if isOpenInBroker {
 			m.logger.Printf("Position %s order timed out but position exists in broker - transitioning to open state", positionID)
 			
@@ -287,7 +290,7 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 				m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
 				// Continue with timeout closure as fallback
 			} else {
-				if err := m.storage.UpdatePosition(position); err != nil {
+				if err := m.storage.UpdatePosition(&position); err != nil {
 					m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
 				} else {
 					m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled", positionID)
@@ -457,8 +460,9 @@ func (m *Manager) isPositionOpenInBroker(position *models.Position, brokerPositi
 	hasPutStrike := false
 
 	for _, bp := range brokerPositions {
-		// Only consider this underlying
-		if !strings.HasPrefix(bp.Symbol, position.Symbol) {
+		// Only consider this underlying - use strict equality to avoid false matches
+		brokerUnderlying := m.extractUnderlyingFromSymbol(bp.Symbol)
+		if brokerUnderlying != position.Symbol {
 			continue
 		}
 		// Match expiration
@@ -485,22 +489,89 @@ func (m *Manager) isPositionOpenInBroker(position *models.Position, brokerPositi
 // Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
 // Example: SPY240315C00610000 -> "2024-03-15"
 func (m *Manager) extractExpirationFromSymbol(symbol string) string {
-	// SPY option format: SPY251024C00678000
-	// Extract YYMMDD part
-	if len(symbol) < 12 {
-		return ""
-	}
-	
-	// Look for the date part (6 digits after SPY)
-	if len(symbol) >= 9 {
-		dateStr := symbol[3:9] // YYMMDD
-		// Convert YYMMDD to YYYY-MM-DD
-		if len(dateStr) == 6 {
-			year := "20" + dateStr[0:2]
-			month := dateStr[2:4]
-			day := dateStr[4:6]
-			return year + "-" + month + "-" + day
+	// Find a 'C' or 'P' followed by exactly 8 digits (strike*1000),
+	// then take the preceding 6 digits as YYMMDD.
+	for i := len(symbol) - 9; i >= 6; i-- {
+		ch := symbol[i]
+		if ch != 'C' && ch != 'P' {
+			continue
 		}
+		if i+9 > len(symbol) {
+			continue
+		}
+		strikeStr := symbol[i+1 : i+9]
+		allDigits := true
+		for _, r := range strikeStr {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if !allDigits {
+			continue
+		}
+		dateStart := i - 6
+		if dateStart < 0 {
+			continue
+		}
+		dateStr := symbol[dateStart:i]
+		for _, r := range dateStr {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if !allDigits {
+			continue
+		}
+		year := "20" + dateStr[0:2]
+		month := dateStr[2:4]
+		day := dateStr[4:6]
+		return year + "-" + month + "-" + day
+	}
+	return ""
+}
+
+// extractUnderlyingFromSymbol extracts the underlying symbol from an OPRA option symbol
+// by finding the C/P option type followed by 8-digit strike, then parsing the underlying
+func (m *Manager) extractUnderlyingFromSymbol(symbol string) string {
+	// Find a 'C' or 'P' followed by exactly 8 digits (strike*1000)
+	for i := len(symbol) - 9; i >= 6; i-- {
+		ch := symbol[i]
+		if ch != 'C' && ch != 'P' {
+			continue
+		}
+		if i+9 > len(symbol) {
+			continue
+		}
+		strikeStr := symbol[i+1 : i+9]
+		allDigits := true
+		for _, r := range strikeStr {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if !allDigits {
+			continue
+		}
+		// Found valid option type and strike, preceding 6 chars should be date
+		dateStart := i - 6
+		if dateStart < 0 {
+			continue
+		}
+		dateStr := symbol[dateStart:i]
+		for _, r := range dateStr {
+			if r < '0' || r > '9' {
+				allDigits = false
+				break
+			}
+		}
+		if !allDigits {
+			continue
+		}
+		// Everything before the date is the underlying
+		return symbol[:dateStart]
 	}
 	return ""
 }
@@ -552,4 +623,23 @@ func (m *Manager) parseOptionSymbol(symbol string) (float64, string, error) {
 	}
 	
 	return 0, "", fmt.Errorf("no valid C/P followed by 8-digit strike found in symbol: %s", symbol)
+}
+
+// getPositionsWithTimeout wraps Broker.GetPositions() with a context timeout.
+func (m *Manager) getPositionsWithTimeout(ctx context.Context) ([]broker.PositionItem, error) {
+	type res struct {
+		pos []broker.PositionItem
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		p, e := m.broker.GetPositions()
+		ch <- res{p, e}
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-ch:
+		return r.pos, r.err
+	}
 }

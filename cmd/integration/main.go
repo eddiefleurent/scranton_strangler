@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -45,6 +47,13 @@ func main() {
 
 	// Initialize storage with temporary test file
 	testStoragePath := "data/positions_integration_test.json"
+	
+	// Ensure the directory exists
+	testDir := filepath.Dir(testStoragePath)
+	if err := os.MkdirAll(testDir, 0o755); err != nil {
+		log.Fatalf("Failed to create storage directory: %v", err)
+	}
+	
 	storageClient, err := storage.NewJSONStorage(testStoragePath)
 	if err != nil {
 		log.Fatalf("Failed to create storage: %v", err)
@@ -83,10 +92,10 @@ func main() {
 	fmt.Println()
 
 	// Run integration tests
-	runIntegrationTests(brokerClient, strangleStrategy, storageClient, logger)
+	runIntegrationTests(brokerClient, strangleStrategy, storageClient, logger, cfg)
 }
 
-func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrategy, storage storage.Interface, logger *log.Logger) {
+func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrategy, storage storage.Interface, logger *log.Logger, cfg *config.Config) {
 	testsPassed := 0
 	totalTests := 6
 
@@ -148,7 +157,7 @@ func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrate
 	// Test 6: Risk management
 	fmt.Println("Test 6: Risk Management")
 	fmt.Println("=======================")
-	if testRiskManagement(strategy, broker, logger) {
+	if testRiskManagement(strategy, broker, logger, cfg) {
 		testsPassed++
 		fmt.Println("✅ PASSED")
 	} else {
@@ -220,13 +229,23 @@ func testEntryConditions(strategy *strategy.StrangleStrategy, logger *log.Logger
 }
 
 func testOrderPreview(broker broker.Broker, logger *log.Logger) bool {
-	// Use realistic SPY strikes for preview
+	// Get current SPY quote to compute realistic strikes
+	quote, err := broker.GetQuote("SPY")
+	if err != nil {
+		logger.Printf("Failed to get SPY quote for strike calculation: %v", err)
+		return false
+	}
+	
+	// Compute strikes as quote ±10%, rounded to nearest $5
+	putStrike := math.Round((quote.Last * 0.90) / 5) * 5
+	callStrike := math.Round((quote.Last * 1.10) / 5) * 5
+	
 	expiration := time.Now().Add(45 * 24 * time.Hour).Format("2006-01-02")
 	
 	order, err := broker.PlaceStrangleOrder(
 		"SPY",
-		600.0, // put strike
-		700.0, // call strike
+		putStrike,  // put strike (computed)
+		callStrike, // call strike (computed)
 		expiration,
 		1,     // quantity
 		2.50,  // limit price
@@ -277,17 +296,21 @@ func testPositionStorage(storage storage.Interface, logger *log.Logger) bool {
 	return true
 }
 
-func testRiskManagement(strategy *strategy.StrangleStrategy, broker broker.Broker, logger *log.Logger) bool {
+func testRiskManagement(strategy *strategy.StrangleStrategy, broker broker.Broker, logger *log.Logger, cfg *config.Config) bool {
 	// Test account balance check
-	balance, err := broker.GetAccountBalance()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	balance, err := broker.GetAccountBalanceCtx(ctx)
 	if err != nil {
 		logger.Printf("Failed to get balance for risk test: %v", err)
 		return false
 	}
 	
 	// Test position sizing calculation
-	maxAllocation := balance * 0.35 // 35% allocation
-	logger.Printf("Max allocation (35%%): $%.2f", maxAllocation)
+	allocationPct := cfg.Strategy.AllocationPct / 100.0
+	maxAllocation := balance * allocationPct
+	logger.Printf("Max allocation (%.0f%%): $%.2f", cfg.Strategy.AllocationPct, maxAllocation)
 	
 	// Test that we have sufficient buying power
 	buyingPower, err := broker.GetOptionBuyingPower()

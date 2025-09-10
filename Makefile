@@ -1,3 +1,4 @@
+SHELL := /bin/bash
 # SPY Strangle Bot - Makefile
 
 .PHONY: all help build build-prod test test-coverage test-integration lint run clean \
@@ -47,6 +48,11 @@ test-coverage:
 # Run end-to-end integration tests
 test-integration:
 	@echo "Running end-to-end integration tests..."
+	@if [ -z "$$TRADIER_API_KEY" ] || [ -z "$$TRADIER_ACCOUNT_ID" ]; then \
+		echo "⏭️  Skipping integration tests; credentials not set"; \
+		echo "   Set TRADIER_API_KEY and TRADIER_ACCOUNT_ID environment variables to enable"; \
+		exit 0; \
+	fi
 	@echo "🧪 Testing complete trading cycle with real Tradier sandbox"
 	@mkdir -p data
 	go run cmd/integration/main.go

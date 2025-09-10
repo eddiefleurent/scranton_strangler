@@ -429,7 +429,10 @@ func (sm *StateMachine) ValidateStateConsistency() error {
 // escalateLossPct is a ratio (e.g., 2.5 means 250%).
 func (sm *StateMachine) ShouldEmergencyExit(
 	creditBasis, currentPnL, dte float64, maxDTE int, escalateLossPct float64) (bool, string) {
-	if creditBasis == 0 {
+	if creditBasis <= 0 {
+		return false, ""
+	}
+	if escalateLossPct <= 0 {
 		return false, ""
 	}
 	lossPercent := (currentPnL / creditBasis) * -100 // Negative because P&L is negative for losses

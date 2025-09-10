@@ -19,7 +19,10 @@ type Interface interface {
 	AddPosition(pos *models.Position) error
 	UpdatePosition(pos *models.Position) error
 	ClosePositionByID(id string, finalPnL float64, reason string) error
-	GetPositionByID(id string) *models.Position
+	// GetPositionByID retrieves a position by ID, returning a copy to ensure thread safety.
+	// Returns (position, true) if found, or (zero-value, false) if not found.
+	// The returned position is a deep copy - callers can safely modify it without affecting storage.
+	GetPositionByID(id string) (models.Position, bool)
 
 	// Data persistence
 	Save() error
