@@ -266,6 +266,26 @@ func TestGetExpirations(t *testing.T) {
 	}
 }
 
+func TestGetExpirationsCtx(t *testing.T) {
+	api, srv := newTestAPIWithServer(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, "/markets/options/expirations") {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"expirations":{"date":["2025-09-19","2025-10-17"]}}`))
+	})
+	defer srv.Close()
+
+	ctx := context.Background()
+	dates, err := api.GetExpirationsCtx(ctx, "AAPL")
+	if err != nil {
+		t.Fatalf("GetExpirationsCtx error: %v", err)
+	}
+	if len(dates) != 2 || dates[0] != "2025-09-19" {
+		t.Fatalf("dates = %#v", dates)
+	}
+}
+
 func TestGetOptionChain(t *testing.T) {
 	api, srv := newTestAPIWithServer(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.RawQuery, "greeks=true") {

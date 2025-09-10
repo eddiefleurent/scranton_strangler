@@ -427,6 +427,11 @@ func (t *TradierAPI) GetQuote(symbol string) (*QuoteItem, error) {
 
 // GetExpirations retrieves available expiration dates for options on a symbol.
 func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
+	return t.GetExpirationsCtx(context.Background(), symbol)
+}
+
+// GetExpirationsCtx retrieves available expiration dates for options on a symbol with context support.
+func (t *TradierAPI) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
 	params := url.Values{}
 	params.Set("symbol", symbol)
 	params.Set("includeAllRoots", "true")
@@ -434,7 +439,7 @@ func (t *TradierAPI) GetExpirations(symbol string) ([]string, error) {
 	endpoint := t.baseURL + "/markets/options/expirations?" + params.Encode()
 
 	var response ExpirationsResponse
-	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
 

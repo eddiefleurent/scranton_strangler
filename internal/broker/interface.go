@@ -23,6 +23,7 @@ type Broker interface {
 	// Market data
 	GetQuote(symbol string) (*QuoteItem, error)
 	GetExpirations(symbol string) ([]string, error)
+	GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error)
 	GetOptionChain(symbol, expiration string, withGreeks bool) ([]Option, error)
 	GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]Option, error)
 	GetMarketClock(delayed bool) (*MarketClockResponse, error)
@@ -447,6 +448,13 @@ func (c *CircuitBreakerBroker) GetQuote(symbol string) (*QuoteItem, error) {
 // GetExpirations wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) GetExpirations(symbol string) ([]string, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]string, error) { return b.GetExpirations(symbol) })
+}
+
+// GetExpirationsCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]string, error) {
+		return b.GetExpirationsCtx(ctx, symbol)
+	})
 }
 
 // GetOptionChain wraps the underlying broker call with circuit breaker
