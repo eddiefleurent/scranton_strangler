@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/models"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
@@ -33,6 +35,7 @@ type StrangleStrategy struct {
 	logger     *log.Logger
 	chainCache map[string]*optionChainCacheEntry // Cache for option chains by symbol+expiration
 	cacheMutex sync.RWMutex                      // Protects concurrent access to chainCache
+	sf         singleflight.Group                // Singleflight to dedupe concurrent identical calls
 	storage    storage.Interface                 // Storage for historical IV data
 }
 
@@ -336,8 +339,9 @@ func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration st
 	// Clean up expired entries to prevent unbounded cache growth
 	s.cleanupExpiredCacheEntries()
 
-	// Fetch from broker using provided fetcher function
-	chain, err := fetcher()
+	// Fetch from broker using singleflight to dedupe concurrent identical calls
+	v, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) { return fetcher() })
+	chain, _ := v.([]broker.Option)
 	if err != nil {
 		return nil, err
 	}
