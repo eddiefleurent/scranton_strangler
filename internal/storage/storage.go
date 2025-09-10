@@ -681,6 +681,15 @@ func (s *JSONStorage) AddAdjustment(adj models.Adjustment) error {
 	}
 
 	s.data.CurrentPosition.Adjustments = append(s.data.CurrentPosition.Adjustments, adj)
+
+	// Also update the corresponding entry in CurrentPositions to avoid drift
+	for i := range s.data.CurrentPositions {
+		if s.data.CurrentPositions[i].ID == s.data.CurrentPosition.ID {
+			s.data.CurrentPositions[i].Adjustments = append(s.data.CurrentPositions[i].Adjustments, adj)
+			break
+		}
+	}
+	
 	return s.saveUnsafe()
 }
 

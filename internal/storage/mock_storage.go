@@ -40,6 +40,9 @@ func (m *MockStorage) GetCurrentPosition() *models.Position {
 	}
 	// Return a deep copy to prevent external mutation of internal state
 	cloned := clonePosition(m.currentPosition)
+	if cloned == nil {
+		return nil
+	}
 	// Preserve StateMachine by copying it if it exists (consistent with JSONStorage)
 	if m.currentPosition.StateMachine != nil {
 		cloned.StateMachine = m.currentPosition.StateMachine.Copy()
@@ -57,6 +60,9 @@ func (m *MockStorage) SetCurrentPosition(pos *models.Position) error {
 		return nil
 	}
 	cloned := clonePosition(pos)
+	if cloned == nil {
+		return fmt.Errorf("failed to clone position")
+	}
 	// Preserve StateMachine by copying it if it exists (consistent with JSONStorage)
 	if pos.StateMachine != nil {
 		cloned.StateMachine = pos.StateMachine.Copy()
