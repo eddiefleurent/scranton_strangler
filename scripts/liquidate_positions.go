@@ -20,22 +20,21 @@ package main
 import (
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
+	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 func main() {
-	// Get credentials from environment
-	apiKey := os.Getenv("TRADIER_API_KEY")
-	accountID := os.Getenv("TRADIER_ACCOUNT_ID")
-	
-	if apiKey == "" {
-		log.Fatal("TRADIER_API_KEY environment variable is required")
+	// Load configuration from parent directory
+	cfg, err := config.Load("../config.yaml")
+	if err != nil {
+		log.Fatalf("❌ Failed to load config: %v", err)
 	}
-	if accountID == "" {
-		log.Fatal("TRADIER_ACCOUNT_ID environment variable is required")
-	}
+
+	fmt.Printf("📝 Using credentials from config.yaml\n")
+	apiKey := cfg.Broker.APIKey
+	accountID := cfg.Broker.AccountID
 
 	// Create broker client
 	client, err := broker.NewTradierClient(apiKey, accountID, true, false, 0.5)

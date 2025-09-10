@@ -97,7 +97,7 @@ test-paper:
 liquidate:
 	@echo "🚨 LIQUIDATING ALL POSITIONS 🚨"
 	@echo "This will close ALL open positions using aggressive market pricing"
-	@echo "Set TRADIER_API_KEY and TRADIER_ACCOUNT_ID environment variables first"
+	@echo "Uses credentials from environment variables or config.yaml"
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
 	cd scripts && go run liquidate_positions.go
 
