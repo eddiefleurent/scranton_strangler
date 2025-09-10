@@ -14,13 +14,7 @@ import (
 // The provided JSONStorage implementation uses sync.RWMutex to serialize access,
 // ensuring all Interface methods are protected for concurrent readers and writers.
 type Interface interface {
-	// Position management (legacy single position)
-	GetCurrentPosition() *models.Position
-	SetCurrentPosition(pos *models.Position) error
-	ClosePosition(finalPnL float64, reason string) error
-	AddAdjustment(adj models.Adjustment) error
-	
-	// Multiple position management
+	// Position management
 	GetCurrentPositions() []models.Position
 	AddPosition(pos *models.Position) error
 	UpdatePosition(pos *models.Position) error

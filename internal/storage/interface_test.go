@@ -32,9 +32,9 @@ func TestInterface(t *testing.T) {
 // testInterface runs common tests on any storage implementation
 func testInterface(t *testing.T, storage Interface) {
 	// Test initial state
-	pos := storage.GetCurrentPosition()
-	if pos != nil {
-		t.Error("Expected no current position initially")
+	positions := storage.GetCurrentPositions()
+	if len(positions) != 0 {
+		t.Error("Expected no current positions initially")
 	}
 
 	// Create a test position
@@ -63,30 +63,42 @@ func testInterface(t *testing.T, storage Interface) {
 	testPos.EntrySpot = 450.0
 	testPos.Quantity = 1 // Ensure Quantity is set to positive value for Open invariants
 
-	// Test setting current position
-	err = storage.SetCurrentPosition(testPos)
+	// Test adding position
+	err = storage.AddPosition(testPos)
 	if err != nil {
-		t.Fatalf("Failed to set current position: %v", err)
+		t.Fatalf("Failed to add position: %v", err)
 	}
 
-	// Test getting current position
-	retrievedPos := storage.GetCurrentPosition()
-	if retrievedPos == nil {
-		t.Fatal("Expected current position, got nil")
+	// Test getting current positions
+	positions = storage.GetCurrentPositions()
+	if len(positions) != 1 {
+		t.Fatalf("Expected 1 position, got %d", len(positions))
 	}
+	retrievedPos := &positions[0]
 	if retrievedPos.ID != testPos.ID {
 		t.Errorf("Expected position ID %s, got %s", testPos.ID, retrievedPos.ID)
 	}
 	if retrievedPos.GetCurrentState() != models.StateOpen {
 		t.Errorf("Expected position state %s, got %s", models.StateOpen, retrievedPos.GetCurrentState())
 	}
-	// Mutate the returned copy; storage should be unaffected.
-	retrievedPos.CurrentPnL = 999
-	if storage.GetCurrentPosition().CurrentPnL == 999 {
-		t.Errorf("GetCurrentPosition leaked internal state (mutation visible)")
+	
+	// Test GetPositionByID
+	posById := storage.GetPositionByID(testPos.ID)
+	if posById == nil {
+		t.Fatal("Expected to find position by ID")
+	}
+	if posById.ID != testPos.ID {
+		t.Errorf("Expected position ID %s, got %s", testPos.ID, posById.ID)
 	}
 
-	// Test adding adjustment
+	// Mutate the returned copy; storage should be unaffected
+	retrievedPos.CurrentPnL = 999
+	positions2 := storage.GetCurrentPositions()
+	if len(positions2) != 1 || positions2[0].CurrentPnL == 999 {
+		t.Error("Expected deep copy protection, but internal state was mutated")
+	}
+
+	// Test updating position with adjustment
 	adjustment := models.Adjustment{
 		Date:        time.Now(),
 		Type:        models.AdjustmentRoll,
@@ -95,14 +107,17 @@ func testInterface(t *testing.T, storage Interface) {
 		Credit:      1.25,
 		Description: "Rolled call side up due to upward pressure",
 	}
-
-	err = storage.AddAdjustment(adjustment)
+	testPos.Adjustments = append(testPos.Adjustments, adjustment)
+	err = storage.UpdatePosition(testPos)
 	if err != nil {
-		t.Fatalf("Failed to add adjustment: %v", err)
+		t.Fatalf("Failed to update position: %v", err)
 	}
 
 	// Verify adjustment was added
-	currentPos := storage.GetCurrentPosition()
+	currentPos := storage.GetPositionByID(testPos.ID)
+	if currentPos == nil {
+		t.Fatal("Position disappeared after update")
+	}
 	if len(currentPos.Adjustments) != 1 {
 		t.Errorf("Expected 1 adjustment, got %d", len(currentPos.Adjustments))
 	}
@@ -112,14 +127,15 @@ func testInterface(t *testing.T, storage Interface) {
 
 	// Test closing position
 	finalPnL := 1.75 // 50% profit
-	err = storage.ClosePosition(finalPnL, "position_closed")
+	err = storage.ClosePositionByID(testPos.ID, finalPnL, "position_closed")
 	if err != nil {
 		t.Fatalf("Failed to close position: %v", err)
 	}
 
 	// Verify position is closed
-	if storage.GetCurrentPosition() != nil {
-		t.Error("Expected no current position after closing")
+	positions = storage.GetCurrentPositions()
+	if len(positions) != 0 {
+		t.Error("Expected no current positions after closing")
 	}
 
 	// Verify position in history
@@ -237,15 +253,15 @@ func TestExitMetadataBackup(t *testing.T) {
 	testPos.CreditReceived = 3.50
 	testPos.Quantity = 1
 
-	err = storage.SetCurrentPosition(testPos)
+	err = storage.AddPosition(testPos)
 	if err != nil {
-		t.Fatalf("Failed to set current position: %v", err)
+		t.Fatalf("Failed to add position: %v", err)
 	}
 
 	// Clear exit metadata to test backup functionality
 	testPos.ExitReason = ""
 	testPos.ExitDate = time.Time{}
-	err = storage.SetCurrentPosition(testPos)
+	err = storage.UpdatePosition(testPos)
 	if err != nil {
 		t.Fatalf("Failed to update position: %v", err)
 	}
@@ -253,7 +269,7 @@ func TestExitMetadataBackup(t *testing.T) {
 	// Close position with valid condition
 	finalPnL := -1.25 // Loss to test edge case
 	t0 := time.Now()
-	err = storage.ClosePosition(finalPnL, "position_closed")
+	err = storage.ClosePositionByID(testPos.ID, finalPnL, "position_closed")
 	if err != nil {
 		t.Fatalf("Failed to close position: %v", err)
 	}

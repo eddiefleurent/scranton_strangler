@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	_ "time/tzdata"
 
 	yaml "gopkg.in/yaml.v3"
 )

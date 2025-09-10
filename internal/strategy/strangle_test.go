@@ -825,7 +825,7 @@ func TestStrangleStrategy_shouldFilterForLiquidity(t *testing.T) {
 				chainCache: make(map[string]*optionChainCacheEntry),
 			}
 
-			result := strategy.shouldFilterForLiquidity(&tt.option)
+			result := strategy.shouldFilterForLiquidity(tt.option)
 			if result != tt.expected {
 				t.Errorf("shouldFilterForLiquidity() = %v, want %v", result, tt.expected)
 			}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -41,22 +42,22 @@ type StrangleStrategy struct {
 
 // Config contains configuration parameters for the strangle strategy.
 type Config struct {
-	Symbol              string
-	DTETarget           int     // 45 days
-	DTERange            []int   // Acceptable DTE range [min, max]
-	DeltaTarget         float64 // 0.16 for 16 delta
-	ProfitTarget        float64 // 0.50 for 50%
-	MaxDTE              int     // 21 days to exit
-	AllocationPct       float64 // 0.35 for 35%
-	MinIVPct            float64 // 15.0 for 15% SPY ATM IV threshold
-	MinCredit           float64 // $2.00
-	EscalateLossPct     float64 // e.g., 2.0 (200% loss triggers escalation)
-	StopLossPct         float64 // e.g., 2.5 (250% loss triggers hard stop)
-	MaxPositionLoss     float64 // Maximum position loss percentage from risk config
-	MaxContracts        int     // Maximum number of contracts per position
-	BPRMultiplier       float64 // Buying power requirement multiplier for margin estimation (default: 10.0, based on industry standard 20% of underlying + premium)
-	MinVolume           int64   // Minimum daily volume for liquidity filtering (default: 100, 0 to disable)
-	MinOpenInterest     int64   // Minimum open interest for liquidity filtering (default: 1000, 0 to disable)
+	Symbol          string
+	DTETarget       int     // 45 days
+	DTERange        []int   // Acceptable DTE range [min, max]
+	DeltaTarget     float64 // 0.16 for 16 delta
+	ProfitTarget    float64 // 0.50 for 50%
+	MaxDTE          int     // 21 days to exit
+	AllocationPct   float64 // 0.35 for 35%
+	MinIVPct        float64 // 15.0 for 15% SPY ATM IV threshold
+	MinCredit       float64 // $2.00
+	EscalateLossPct float64 // e.g., 2.0 (200% loss triggers escalation)
+	StopLossPct     float64 // e.g., 2.5 (250% loss triggers hard stop)
+	MaxPositionLoss float64 // Maximum position loss percentage from risk config
+	MaxContracts    int     // Maximum number of contracts per position
+	BPRMultiplier   float64 // Buying power requirement multiplier for margin estimation (default: 10.0, based on industry standard 20% of underlying + premium)
+	MinVolume       int64   // Minimum daily volume for liquidity filtering (default: 100, 0 to disable)
+	MinOpenInterest int64   // Minimum open interest for liquidity filtering (default: 1000, 0 to disable)
 }
 
 // ExitReason represents the reason for exiting a position
@@ -121,7 +122,7 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 
 	// Vary DTE target to avoid identical positions
 	targetDTE := s.getVariedDTETarget()
-	
+
 	// Find expiration around target DTE
 	targetExp := s.findTargetExpiration(targetDTE)
 	if targetExp == "" {
@@ -194,14 +195,14 @@ func (s *StrangleStrategy) CheckVolatilityThreshold() (bool, string) {
 	if err != nil {
 		return false, fmt.Sprintf("%s IV unavailable: %v", s.config.Symbol, err)
 	}
-	
+
 	ivPercent := currentIV * 100
 	threshold := s.config.MinIVPct // Configurable threshold from config.yaml
-	
+
 	if ivPercent >= threshold {
 		return true, fmt.Sprintf("%s IV elevated: %.1f%% >= %.1f%%", s.config.Symbol, ivPercent, threshold)
 	}
-	
+
 	return false, fmt.Sprintf("%s IV too low: %.1f%% < %.1f%%", s.config.Symbol, ivPercent, threshold)
 }
 
@@ -304,9 +305,6 @@ func (s *StrangleStrategy) storeCurrentIVReading(iv float64) {
 	}
 }
 
-
-
-
 // findNearestStrike finds the strike closest to the current price
 func (s *StrangleStrategy) findNearestStrike(chain []broker.Option, price float64) float64 {
 	if len(chain) == 0 {
@@ -326,7 +324,6 @@ func (s *StrangleStrategy) findNearestStrike(chain []broker.Option, price float6
 
 	return nearestStrike
 }
-
 
 // getCachedOptionChainWithFetcher is a helper function that handles the common caching logic
 func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration string, withGreeks bool, fetcher func() ([]broker.Option, error)) ([]broker.Option, error) {
@@ -394,7 +391,6 @@ func (s *StrangleStrategy) cleanupExpiredCacheEntries() {
 		s.logger.Printf("Cache cleanup: removed %d expired entries", len(expiredKeys))
 	}
 }
-
 
 // getCachedOptionChainWithContext retrieves option chain from cache or fetches from broker with context timeout
 func (s *StrangleStrategy) getCachedOptionChainWithContext(ctx context.Context, symbol, expiration string, withGreeks bool) ([]broker.Option, error) {
@@ -494,19 +490,19 @@ func (s *StrangleStrategy) getVariedDTETarget() int {
 
 	// Get existing positions to check their DTEs
 	positions := s.storage.GetCurrentPositions()
-	
+
 	// If no positions, use the configured target
 	if len(positions) == 0 {
 		return s.config.DTETarget
 	}
-	
+
 	// Collect existing DTEs
 	existingDTEs := make(map[int]bool)
 	for _, pos := range positions {
 		dte := pos.CalculateDTE()
 		existingDTEs[dte] = true
 	}
-	
+
 	// Try different DTE values within the configured range
 	// Default range if not configured
 	minDTE := 40
@@ -515,7 +511,7 @@ func (s *StrangleStrategy) getVariedDTETarget() int {
 		minDTE = s.config.DTERange[0]
 		maxDTE = s.config.DTERange[1]
 	}
-	
+
 	// Try to find a DTE that's not already used
 	preferredDTEs := []int{45, 43, 47, 41, 49, 40, 50, 42, 48, 44, 46}
 	for _, dte := range preferredDTEs {
@@ -524,7 +520,7 @@ func (s *StrangleStrategy) getVariedDTETarget() int {
 			return dte
 		}
 	}
-	
+
 	// If all preferred DTEs are taken, just use the configured target
 	s.logger.Printf("All preferred DTEs taken, using default: %d", s.config.DTETarget)
 	return s.config.DTETarget
@@ -541,6 +537,8 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 	exps, err := s.broker.GetExpirationsCtx(ctx, s.config.Symbol)
 	if err != nil {
 		s.logger.Printf("Warning: GetExpirationsCtx failed: %v", err)
+		// Early return triggers M/W/F fallback in caller - this is intentional
+		// Don't continue with potentially corrupted expiration data
 		return ""
 	}
 
@@ -639,7 +637,7 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 		}
 
 		// Optional liquidity filter: skip illiquid options if configured thresholds are set
-		if s.shouldFilterForLiquidity(&option) {
+		if s.shouldFilterForLiquidity(option) {
 			continue
 		}
 
@@ -662,7 +660,7 @@ func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelt
 }
 
 // shouldFilterForLiquidity determines if an option should be filtered out due to low liquidity
-func (s *StrangleStrategy) shouldFilterForLiquidity(option *broker.Option) bool {
+func (s *StrangleStrategy) shouldFilterForLiquidity(option broker.Option) bool {
 	// If both thresholds are 0 or negative, liquidity filtering is disabled
 	if s.config.MinVolume <= 0 && s.config.MinOpenInterest <= 0 {
 		return false
@@ -696,7 +694,7 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 	put := broker.GetOptionByStrike(options, putStrike, broker.OptionTypePut)
 	call := broker.GetOptionByStrike(options, callStrike, broker.OptionTypeCall)
 	if put == nil || call == nil {
-		s.logger.Printf("DEBUG: Options not found - put: %v (strike %.2f), call: %v (strike %.2f), total options: %d", 
+		s.logger.Printf("DEBUG: Options not found - put: %v (strike %.2f), call: %v (strike %.2f), total options: %d",
 			put != nil, putStrike, call != nil, callStrike, len(options))
 		if len(options) > 0 {
 			s.logger.Printf("DEBUG: Available strikes sample: %s", s.debugAvailableStrikes(options, 5))
@@ -717,19 +715,19 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 
 	// Check each leg against its own minimum spread to filter stale/microstructure quotes
 	if (put.Ask-put.Bid) < putMinSpread || (call.Ask-call.Bid) < callMinSpread {
-		s.logger.Printf("DEBUG: Spread too narrow - put spread: %.4f (min: %.4f), call spread: %.4f (min: %.4f)", 
+		s.logger.Printf("DEBUG: Spread too narrow - put spread: %.4f (min: %.4f), call spread: %.4f (min: %.4f)",
 			put.Ask-put.Bid, putMinSpread, call.Ask-call.Bid, callMinSpread)
 		return 0
 	}
 	// Guard against stale/invalid quotes
 	if put.Bid <= 0 || put.Ask <= 0 || call.Bid <= 0 || call.Ask <= 0 || put.Bid > put.Ask || call.Bid > call.Ask {
-		s.logger.Printf("DEBUG: Invalid quotes - put bid/ask: %.4f/%.4f, call bid/ask: %.4f/%.4f", 
+		s.logger.Printf("DEBUG: Invalid quotes - put bid/ask: %.4f/%.4f, call bid/ask: %.4f/%.4f",
 			put.Bid, put.Ask, call.Bid, call.Ask)
 		return 0
 	}
 	putCredit := (put.Bid + put.Ask) / 2
 	callCredit := (call.Bid + call.Ask) / 2
-	s.logger.Printf("DEBUG: Credit calculation successful - put: %.4f, call: %.4f, total: %.4f", 
+	s.logger.Printf("DEBUG: Credit calculation successful - put: %.4f, call: %.4f, total: %.4f",
 		putCredit, callCredit, putCredit+callCredit)
 	return putCredit + callCredit
 }
@@ -739,21 +737,23 @@ func (s *StrangleStrategy) debugAvailableStrikes(options []broker.Option, limit 
 	if len(options) == 0 {
 		return "none"
 	}
-	
+
 	strikes := make(map[float64]bool)
 	for _, opt := range options {
 		strikes[opt.Strike] = true
 	}
-	
+
 	var strikeList []float64
 	for strike := range strikes {
 		strikeList = append(strikeList, strike)
 	}
-	
+	// Stabilize output
+	sort.Float64s(strikeList)
+
 	if len(strikeList) > limit {
 		strikeList = strikeList[:limit]
 	}
-	
+
 	result := ""
 	for i, strike := range strikeList {
 		if i > 0 {
@@ -785,7 +785,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 		}
 		buyingPower = balance * 0.5 // Conservative estimate: assume 50% of balance is available for options
 	}
-	
+
 	alloc := s.config.AllocationPct
 	if alloc < 0 {
 		alloc = 0
@@ -799,7 +799,7 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	// Typical margin requirement for short strangles: 20% of underlying + credit received
 	// But for simplicity in paper trading, we'll use a conservative estimate
 	creditTotal := creditPerShare * sharesPerContract
-	
+
 	// Use configured BPRMultiplier for margin estimation, with sensible fallback
 	bprMultiplier := s.config.BPRMultiplier
 	if bprMultiplier <= 0 {
@@ -811,13 +811,13 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 		bprMultiplier = 10.0
 	}
 	estimatedMargin := creditTotal * bprMultiplier
-	
+
 	s.logger.Printf("Sizing: credit/contract=$%.2f, est margin/contract=$%.2f (%.1fx multiplier), allocated buying power=$%.2f",
 		creditTotal, estimatedMargin, bprMultiplier, allocatedCapital)
 
 	maxContracts := int(allocatedCapital / estimatedMargin)
 	if maxContracts < 1 {
-		s.logger.Printf("Insufficient buying power for even 1 contract (need $%.2f, have $%.2f allocated)", 
+		s.logger.Printf("Insufficient buying power for even 1 contract (need $%.2f, have $%.2f allocated)",
 			estimatedMargin, allocatedCapital)
 		return 0
 	}

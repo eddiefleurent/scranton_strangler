@@ -362,7 +362,7 @@ func TestManager_PollOrderStatus_OrderFilled(t *testing.T) {
 	}
 
 	// Verify position was transitioned to StateOpen
-	updatedPosition := mockStorage.GetCurrentPosition()
+	updatedPosition := mockStorage.GetPositionByID("test-pos")
 	if updatedPosition.GetCurrentState() != models.StateOpen {
 		t.Errorf("Expected position state to be %s, got %s", models.StateOpen, updatedPosition.GetCurrentState())
 	}
@@ -435,7 +435,7 @@ func TestManager_PollOrderStatus_OrderCanceled(t *testing.T) {
 	}
 
 	// Verify position was transitioned to StateError
-	updatedPosition := mockStorage.GetCurrentPosition()
+	updatedPosition := mockStorage.GetPositionByID("test-pos")
 	if updatedPosition.GetCurrentState() != models.StateError {
 		t.Errorf("Expected position state to be %s, got %s", models.StateError, updatedPosition.GetCurrentState())
 	}
@@ -508,7 +508,7 @@ func TestManager_PollOrderStatus_Timeout(t *testing.T) {
 	}
 
 	// Verify position was closed due to timeout
-	currentPosition := mockStorage.GetCurrentPosition()
+	currentPosition := mockStorage.GetPositionByID("test-pos")
 	if currentPosition != nil {
 		t.Error("Expected current position to be nil after timeout close")
 	}
@@ -577,7 +577,7 @@ func TestManager_HandleOrderTimeout_EntryOrder(t *testing.T) {
 	m.handleOrderTimeout("test-pos")
 
 	// Verify position was closed and moved to history (current position should be nil)
-	updatedPosition := mockStorage.GetCurrentPosition()
+	updatedPosition := mockStorage.GetPositionByID("test-pos")
 	if updatedPosition != nil {
 		t.Errorf("Expected current position to be nil after close, got %v", updatedPosition)
 	}
@@ -641,7 +641,7 @@ func TestManager_HandleOrderTimeout_ExitOrderFromAdjusting(t *testing.T) {
 	m.handleOrderTimeout("test-pos")
 
 	// Verify position was closed and moved to history (current position should be nil)
-	updatedPosition := mockStorage.GetCurrentPosition()
+	updatedPosition := mockStorage.GetPositionByID("test-pos")
 	if updatedPosition != nil {
 		t.Errorf("Expected current position to be nil after close, got %v", updatedPosition)
 	}

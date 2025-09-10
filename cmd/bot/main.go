@@ -530,7 +530,7 @@ func (b *Bot) isPositionReadyForExit(position *models.Position) bool {
 				// Clear the terminal order ID to allow re-attempt
 				position.ExitOrderID = ""
 				position.ExitReason = ""
-				// Use UpdatePosition to persist to both legacy and CurrentPositions
+				// Use UpdatePosition to persist changes
 				if err := b.storage.UpdatePosition(position); err != nil {
 					b.logger.Printf("Warning: Failed to clear terminal exit order ID: %v", err)
 				}
@@ -791,12 +791,9 @@ func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Pos
 			
 			// Close the position with manual close reason
 			if err := b.storage.ClosePositionByID(position.ID, finalPnL, "manual_close"); err != nil {
-				// Fallback to legacy API
-				if err := b.storage.ClosePosition(finalPnL, "manual_close"); err != nil {
-					b.logger.Printf("Failed to close manually detected position %s: %v", shortID(position.ID), err)
-					activePositions = append(activePositions, position) // Keep in list if can't close
-					continue
-				}
+				b.logger.Printf("Failed to close manually detected position %s: %v", shortID(position.ID), err)
+				activePositions = append(activePositions, position) // Keep in list if can't close
+				continue
 			}
 			
 			b.logger.Printf("Position %s closed due to manual intervention. Final P&L: $%.2f", 

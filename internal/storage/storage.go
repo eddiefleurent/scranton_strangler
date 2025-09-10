@@ -37,8 +37,7 @@ type JSONStorage struct {
 // Data represents the complete data structure stored in JSON files.
 type Data struct {
 	LastUpdated      time.Time          `json:"last_updated"`
-	CurrentPosition  *models.Position   `json:"current_position"` // Legacy single position support
-	CurrentPositions []models.Position  `json:"current_positions"` // Multiple positions support
+	CurrentPositions []models.Position  `json:"current_positions"`
 	DailyPnL         map[string]float64 `json:"daily_pnl"`
 	Statistics       *Statistics        `json:"statistics"`
 	History          []models.Position  `json:"history"`
@@ -175,11 +174,6 @@ func (s *JSONStorage) createDataSnapshot() *Data {
 		CurrentPositions: make([]models.Position, len(s.data.CurrentPositions)),
 	}
 
-	// Deep copy CurrentPosition if it exists
-	if s.data.CurrentPosition != nil {
-		snapshot.CurrentPosition = clonePosition(s.data.CurrentPosition)
-	}
-	
 	// Deep copy CurrentPositions
 	for i := range s.data.CurrentPositions {
 		if cloned := clonePosition(&s.data.CurrentPositions[i]); cloned != nil {
@@ -467,116 +461,7 @@ func (s *JSONStorage) syncParentDir() error {
 	return nil
 }
 
-// GetCurrentPosition returns the currently active position or nil if none exists.
-func (s *JSONStorage) GetCurrentPosition() *models.Position {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 
-	if s.data.CurrentPosition == nil {
-		return nil
-	}
-
-	return clonePosition(s.data.CurrentPosition)
-}
-
-// SetCurrentPosition updates the current active position in storage.
-func (s *JSONStorage) SetCurrentPosition(pos *models.Position) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.data.CurrentPosition = clonePosition(pos)
-	return s.saveUnsafe()
-}
-
-// ClosePosition closes the current position and moves it to history.
-func (s *JSONStorage) ClosePosition(finalPnL float64, reason string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.data.CurrentPosition == nil {
-		return fmt.Errorf("no position to close")
-	}
-
-	// Update position status
-	// Position state will be managed by the state machine, not a string field
-	// Map the reason to appropriate state transition condition
-	var condition string
-	// Prefer explicit reason when provided
-	switch reason {
-	case "manual", "force_close":
-		condition = models.ConditionForceClose
-	case "hard_stop", "stop_loss":
-		condition = models.ConditionHardStop
-	case "profit_target", "time":
-		condition = models.ConditionExitConditions
-	case "emergency_exit", "escalate":
-		condition = models.ConditionEmergencyExit
-	}
-	if condition == "" {
-		currentState := s.data.CurrentPosition.GetCurrentState()
-		switch currentState {
-		case models.StateOpen:
-			condition = models.ConditionPositionClosed
-		case models.StateSubmitted:
-			condition = models.ConditionOrderTimeout
-		case models.StateFirstDown, models.StateSecondDown:
-			condition = models.ConditionExitConditions
-		case models.StateThirdDown:
-			condition = models.ConditionHardStop
-		case models.StateFourthDown:
-			condition = models.ConditionEmergencyExit
-		case models.StateError:
-			condition = models.ConditionForceClose
-		case models.StateAdjusting:
-			condition = models.ConditionHardStop
-		case models.StateRolling:
-			condition = models.ConditionForceClose
-		default:
-			condition = models.ConditionExitConditions // fallback
-		}
-	}
-
-	if err := s.data.CurrentPosition.TransitionState(models.StateClosed, condition); err != nil {
-		return fmt.Errorf("failed to transition position to closed state: %w", err)
-	}
-	s.data.CurrentPosition.CurrentPnL = finalPnL
-
-	// If TransitionState doesn't set these, ensure they are recorded.
-	if s.data.CurrentPosition.ExitReason == "" {
-		s.data.CurrentPosition.ExitReason = reason
-	}
-	if s.data.CurrentPosition.ExitDate.IsZero() {
-		s.data.CurrentPosition.ExitDate = time.Now().UTC()
-	}
-
-	// Add to history
-	s.data.History = append(s.data.History, *clonePosition(s.data.CurrentPosition))
-
-	// Update statistics
-	s.updateStatistics(finalPnL)
-
-	// Update daily P&L
-	closedAt := s.data.CurrentPosition.ExitDate
-	if closedAt.IsZero() {
-		closedAt = time.Now().UTC()
-	}
-	// Convert to New York timezone for correct trading day classification
-	nyLoc, err := getNYLocation()
-	if err != nil {
-		// Fallback to UTC if timezone loading fails
-		day := closedAt.Format("2006-01-02")
-		s.data.DailyPnL[day] += finalPnL
-	} else {
-		closedAtNY := closedAt.In(nyLoc)
-		day := closedAtNY.Format("2006-01-02")
-		s.data.DailyPnL[day] += finalPnL
-	}
-
-	// Clear current position
-	s.data.CurrentPosition = nil
-
-	return s.saveUnsafe()
-}
 
 func (s *JSONStorage) updateStatistics(pnl float64) {
 	stats := s.data.Statistics
@@ -671,27 +556,6 @@ func (s *JSONStorage) HasInHistory(id string) bool {
 	return false
 }
 
-// AddAdjustment adds an adjustment to the current position.
-func (s *JSONStorage) AddAdjustment(adj models.Adjustment) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.data.CurrentPosition == nil {
-		return fmt.Errorf("no position to adjust")
-	}
-
-	s.data.CurrentPosition.Adjustments = append(s.data.CurrentPosition.Adjustments, adj)
-
-	// Also update the corresponding entry in CurrentPositions to avoid drift
-	for i := range s.data.CurrentPositions {
-		if s.data.CurrentPositions[i].ID == s.data.CurrentPosition.ID {
-			s.data.CurrentPositions[i].Adjustments = append(s.data.CurrentPositions[i].Adjustments, adj)
-			break
-		}
-	}
-	
-	return s.saveUnsafe()
-}
 
 // clonePosition creates a deep copy of a Position to prevent mutable state leakage
 func clonePosition(pos *models.Position) *models.Position {
@@ -820,33 +684,9 @@ func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 
 // GetCurrentPositions returns all current open positions
 func (s *JSONStorage) GetCurrentPositions() []models.Position {
-	// First check if migration is needed under read lock
 	s.mu.RLock()
-	needsMigration := s.data.CurrentPosition != nil && len(s.data.CurrentPositions) == 0
+	defer s.mu.RUnlock()
 
-	if !needsMigration {
-		// No migration needed, return copy under read lock
-		positions := make([]models.Position, len(s.data.CurrentPositions))
-		for i := range s.data.CurrentPositions {
-			cloned := clonePosition(&s.data.CurrentPositions[i])
-			if cloned != nil {
-				positions[i] = *cloned
-			}
-		}
-		s.mu.RUnlock()
-		return positions
-	}
-
-	// Migration needed, release read lock and acquire write lock
-	s.mu.RUnlock()
-	s.mu.Lock()
-
-	// Re-check condition under write lock (double-check pattern)
-	if s.data.CurrentPosition != nil && len(s.data.CurrentPositions) == 0 {
-		s.data.CurrentPositions = []models.Position{*s.data.CurrentPosition}
-	}
-
-	// Create defensive copy while holding write lock
 	positions := make([]models.Position, len(s.data.CurrentPositions))
 	for i := range s.data.CurrentPositions {
 		cloned := clonePosition(&s.data.CurrentPositions[i])
@@ -854,8 +694,6 @@ func (s *JSONStorage) GetCurrentPositions() []models.Position {
 			positions[i] = *cloned
 		}
 	}
-
-	s.mu.Unlock()
 	return positions
 }
 
@@ -886,9 +724,6 @@ func (s *JSONStorage) AddPosition(pos *models.Position) error {
 	} else {
 		return fmt.Errorf("failed to clone position for persistence")
 	}
-
-	// Also update legacy single position for compatibility (separate deep copy)
-	s.data.CurrentPosition = clonePosition(pos)
 	
 	return s.saveUnsafe()
 }
@@ -913,9 +748,6 @@ func (s *JSONStorage) UpdatePosition(pos *models.Position) error {
 
 			// Update the position in the slice with the cloned copy
 			s.data.CurrentPositions[i] = *cloned
-
-			// Update legacy single position with a separate copy (not the caller's pointer)
-			s.data.CurrentPosition = clonePosition(pos)
 			found = true
 			break
 		}
@@ -940,11 +772,6 @@ func (s *JSONStorage) GetPositionByID(id string) *models.Position {
 		}
 	}
 	
-	// Check legacy single position
-	if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
-		return clonePosition(s.data.CurrentPosition)
-	}
-	
 	return nil
 }
 
@@ -966,12 +793,7 @@ func (s *JSONStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 	}
 	
 	if posToClose == nil {
-		// Check legacy single position
-		if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
-			posToClose = s.data.CurrentPosition
-		} else {
-			return fmt.Errorf("position with ID %s not found", id)
-		}
+		return fmt.Errorf("position with ID %s not found", id)
 	}
 	
 	// Create a deep copy to avoid pointer aliasing
@@ -1034,11 +856,6 @@ func (s *JSONStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 	
 	// Update positions list
 	s.data.CurrentPositions = newPositions
-	
-	// Clear legacy single position if it matches
-	if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
-		s.data.CurrentPosition = nil
-	}
 	
 	// Add to history using the closed copy
 	s.data.History = append(s.data.History, *closedPosition)
