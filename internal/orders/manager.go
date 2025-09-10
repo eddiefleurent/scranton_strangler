@@ -69,12 +69,12 @@ func NewManager(
 		cfg.CallTimeout = DefaultConfig.CallTimeout
 	}
 
-	// Validate required dependencies
+	// Validate required dependencies (fail fast to avoid later panics)
 	if broker == nil {
-		logger.Printf("Warning: broker is nil - this may cause panics during order operations")
+		panic("orders.NewManager: broker must not be nil")
 	}
 	if storage == nil {
-		logger.Printf("Warning: storage is nil - this may cause panics during order operations")
+		panic("orders.NewManager: storage must not be nil")
 	}
 
 	return &Manager{
@@ -258,7 +258,11 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 }
 
 func (m *Manager) handleOrderTimeout(positionID string) {
-	position := m.storage.GetCurrentPosition()
+	// Try by ID first; fallback to "current" for back-compat
+	position := m.storage.GetPositionByID(positionID)
+	if position == nil {
+		position = m.storage.GetCurrentPosition()
+	}
 	if position == nil || position.ID != positionID {
 		m.logger.Printf("Position %s not found or mismatched", positionID)
 		return
