@@ -332,7 +332,7 @@ func TestGetBalance(t *testing.T) {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"balances":{"option_buying_power":1000,"option_short_value":0,"total_equity":2000,"account_value":2000,"pending_orders_count":0,"closed_pl":0,"current_requirement":0,"option_requirement":0}}`))
+		_, _ = w.Write([]byte(`{"balances":{"account_type":"margin","option_short_value":0,"total_equity":2000,"total_cash":1500,"pending_orders_count":0,"close_pl":0,"current_requirement":0,"option_requirement":0,"margin":{"option_buying_power":1000,"stock_buying_power":2000}}}`))
 	})
 	defer srv.Close()
 

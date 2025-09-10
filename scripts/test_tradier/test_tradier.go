@@ -260,11 +260,21 @@ func main() {
 			fmt.Printf("❌ Error: %v\n\n", err)
 		} else {
 			fmt.Printf("✓ Account Balance Retrieved:\n")
+			fmt.Printf("  Account Type:        %s\n", balance.Balances.AccountType)
 			fmt.Printf("  Total Equity:        $%.2f\n", balance.Balances.TotalEquity)
-			fmt.Printf("  Option Buying Power: $%.2f\n", balance.Balances.OptionBuyingPower)
+			
+			// Get option buying power using the helper method
+			optionBuyingPower, err := balance.GetOptionBuyingPower()
+			if err != nil {
+				fmt.Printf("  Option Buying Power: Error - %v\n", err)
+			} else {
+				fmt.Printf("  Option Buying Power: $%.2f\n", optionBuyingPower)
+			}
+			
 			fmt.Printf("  Option Short Value:  $%.2f\n", balance.Balances.OptionShortValue)
 			fmt.Printf("  Current Requirement: $%.2f\n", balance.Balances.CurrentRequirement)
-			fmt.Printf("  Closed P&L:          $%.2f\n", balance.Balances.ClosedPL)
+			fmt.Printf("  Closed P&L:          $%.2f\n", balance.Balances.ClosePL)
+			fmt.Printf("  Total Cash:          $%.2f\n", balance.Balances.TotalCash)
 		}
 
 		// Test 6: Get Positions

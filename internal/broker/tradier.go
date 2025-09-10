@@ -302,15 +302,72 @@ type ExpirationsResponse struct {
 // BalanceResponse represents the account balance response from the Tradier API.
 type BalanceResponse struct {
 	Balances struct {
-		OptionBuyingPower  float64 `json:"option_buying_power"`
 		OptionShortValue   float64 `json:"option_short_value"`
 		TotalEquity        float64 `json:"total_equity"`
-		AccountValue       float64 `json:"account_value"`
-		PendingOrdersCount int     `json:"pending_orders_count"`
-		ClosedPL           float64 `json:"closed_pl"`
+		AccountNumber      string  `json:"account_number"`
+		AccountType        string  `json:"account_type"`
+		ClosePL            float64 `json:"close_pl"`
 		CurrentRequirement float64 `json:"current_requirement"`
+		Equity             float64 `json:"equity"`
+		LongMarketValue    float64 `json:"long_market_value"`
+		MarketValue        float64 `json:"market_value"`
+		OpenPL             float64 `json:"open_pl"`
+		OptionLongValue    float64 `json:"option_long_value"`
 		OptionRequirement  float64 `json:"option_requirement"`
+		PendingOrdersCount int     `json:"pending_orders_count"`
+		ShortMarketValue   float64 `json:"short_market_value"`
+		StockLongValue     float64 `json:"stock_long_value"`
+		TotalCash          float64 `json:"total_cash"`
+		UnclearedFunds     float64 `json:"uncleared_funds"`
+		PendingCash        float64 `json:"pending_cash"`
+		
+		// Account type specific nested objects
+		Margin *struct {
+			FedCall             float64 `json:"fed_call"`
+			MaintenanceCall     float64 `json:"maintenance_call"`
+			OptionBuyingPower   float64 `json:"option_buying_power"`
+			StockBuyingPower    float64 `json:"stock_buying_power"`
+			StockShortValue     float64 `json:"stock_short_value"`
+			Sweep              float64 `json:"sweep"`
+		} `json:"margin"`
+		
+		Cash *struct {
+			CashAvailable    float64 `json:"cash_available"`
+			Sweep           float64 `json:"sweep"`
+			UnsettledFunds  float64 `json:"unsettled_funds"`
+		} `json:"cash"`
+		
+		PDT *struct {
+			FedCall             float64 `json:"fed_call"`
+			MaintenanceCall     float64 `json:"maintenance_call"`
+			OptionBuyingPower   float64 `json:"option_buying_power"`
+			StockBuyingPower    float64 `json:"stock_buying_power"`
+			StockShortValue     float64 `json:"stock_short_value"`
+		} `json:"pdt"`
 	} `json:"balances"`
+}
+
+// GetOptionBuyingPower extracts option buying power based on account type
+func (b *BalanceResponse) GetOptionBuyingPower() (float64, error) {
+	switch b.Balances.AccountType {
+	case "margin":
+		if b.Balances.Margin != nil {
+			return b.Balances.Margin.OptionBuyingPower, nil
+		}
+		return 0, fmt.Errorf("margin account type specified but margin data is missing")
+	case "pdt":
+		if b.Balances.PDT != nil {
+			return b.Balances.PDT.OptionBuyingPower, nil
+		}
+		return 0, fmt.Errorf("pdt account type specified but pdt data is missing")
+	case "cash":
+		if b.Balances.Cash != nil {
+			return b.Balances.Cash.CashAvailable, nil
+		}
+		return 0, fmt.Errorf("cash account type specified but cash data is missing")
+	}
+	
+	return 0, fmt.Errorf("unknown account type: %s", b.Balances.AccountType)
 }
 
 // MarketClockResponse represents the market clock response from the Tradier API.

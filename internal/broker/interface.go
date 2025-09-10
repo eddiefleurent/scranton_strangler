@@ -151,7 +151,7 @@ func (t *TradierClient) GetOptionBuyingPower() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return balance.Balances.OptionBuyingPower, nil
+	return balance.GetOptionBuyingPower()
 }
 
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
