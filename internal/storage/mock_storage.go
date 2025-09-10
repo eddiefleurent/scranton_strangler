@@ -307,13 +307,17 @@ func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 
 // GetCurrentPositions returns all current open positions
 func (m *MockStorage) GetCurrentPositions() []models.Position {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	m.mu.Lock()
+	
 	// Migrate legacy single position if needed
 	if m.currentPosition != nil && len(m.currentPositions) == 0 {
 		m.currentPositions = []models.Position{*m.currentPosition}
 	}
+	
+	// Switch to read lock for the rest of the operation
+	m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 
 	// Return a deep copy
 	positions := make([]models.Position, len(m.currentPositions))
@@ -422,7 +426,11 @@ func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 	// Find and remove the position
 	for i := range m.currentPositions {
 		if m.currentPositions[i].ID == id {
-			posToClose = &m.currentPositions[i]
+			cp := clonePosition(&m.currentPositions[i])
+			if cp == nil {
+				return fmt.Errorf("failed to clone position for closure")
+			}
+			posToClose = cp
 		} else {
 			newPositions = append(newPositions, m.currentPositions[i])
 		}

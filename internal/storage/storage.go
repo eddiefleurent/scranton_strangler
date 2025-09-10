@@ -940,16 +940,68 @@ func (s *JSONStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 		// Check legacy single position
 		if s.data.CurrentPosition != nil && s.data.CurrentPosition.ID == id {
 			posToClose = s.data.CurrentPosition
-			s.data.CurrentPosition = nil
 		} else {
 			return fmt.Errorf("position with ID %s not found", id)
 		}
 	}
 	
+	// Create a deep copy to avoid pointer aliasing
+	closedPosition := clonePosition(posToClose)
+	if closedPosition == nil {
+		return fmt.Errorf("failed to clone position for closing")
+	}
+	
+	// Use FSM transition to ensure proper state management
+	// Map the reason to appropriate state transition condition
+	var condition string
+	switch reason {
+	case "manual", "force_close":
+		condition = models.ConditionForceClose
+	case "hard_stop", "stop_loss":
+		condition = models.ConditionHardStop
+	case "profit_target", "time":
+		condition = models.ConditionExitConditions
+	case "emergency_exit", "escalate":
+		condition = models.ConditionEmergencyExit
+	default:
+		// Infer condition from current state if reason is generic
+		currentState := closedPosition.GetCurrentState()
+		switch currentState {
+		case models.StateOpen:
+			condition = models.ConditionPositionClosed
+		case models.StateSubmitted:
+			condition = models.ConditionOrderTimeout
+		case models.StateFirstDown, models.StateSecondDown:
+			condition = models.ConditionExitConditions
+		case models.StateThirdDown:
+			condition = models.ConditionHardStop
+		case models.StateFourthDown:
+			condition = models.ConditionEmergencyExit
+		case models.StateError:
+			condition = models.ConditionForceClose
+		case models.StateAdjusting:
+			condition = models.ConditionHardStop
+		case models.StateRolling:
+			condition = models.ConditionForceClose
+		default:
+			condition = models.ConditionExitConditions // fallback
+		}
+	}
+	
+	if err := closedPosition.TransitionState(models.StateClosed, condition); err != nil {
+		return fmt.Errorf("failed to transition position to closed state: %w", err)
+	}
+	
 	// Update position with closing details
-	posToClose.CurrentPnL = finalPnL
-	posToClose.ExitReason = reason
-	posToClose.ExitDate = time.Now()
+	closedPosition.CurrentPnL = finalPnL
+	
+	// If TransitionState doesn't set these, ensure they are recorded
+	if closedPosition.ExitReason == "" {
+		closedPosition.ExitReason = reason
+	}
+	if closedPosition.ExitDate.IsZero() {
+		closedPosition.ExitDate = time.Now().UTC()
+	}
 	
 	// Update positions list
 	s.data.CurrentPositions = newPositions
@@ -959,15 +1011,27 @@ func (s *JSONStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 		s.data.CurrentPosition = nil
 	}
 	
-	// Add to history
-	s.data.History = append(s.data.History, *posToClose)
+	// Add to history using the closed copy
+	s.data.History = append(s.data.History, *closedPosition)
 	
 	// Update statistics
 	s.updateStatistics(finalPnL)
 	
-	// Update daily P&L
-	dateStr := time.Now().Format("2006-01-02")
-	s.data.DailyPnL[dateStr] = s.data.DailyPnL[dateStr] + finalPnL
+	// Update daily P&L using New York timezone for correct trading day classification
+	closedAt := closedPosition.ExitDate
+	if closedAt.IsZero() {
+		closedAt = time.Now().UTC()
+	}
+	nyLoc, err := getNYLocation()
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		day := closedAt.Format("2006-01-02")
+		s.data.DailyPnL[day] += finalPnL
+	} else {
+		closedAtNY := closedAt.In(nyLoc)
+		day := closedAtNY.Format("2006-01-02")
+		s.data.DailyPnL[day] += finalPnL
+	}
 	
 	return s.saveUnsafe()
 }
