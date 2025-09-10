@@ -1,6 +1,6 @@
 # SPY Strangle Bot - Makefile
 
-.PHONY: all help build build-prod test test-coverage lint run clean \
+.PHONY: all help build build-prod test test-coverage test-integration lint run clean \
         deploy-unraid unraid-logs unraid-status unraid-restart \
         dev-setup test-api test-paper security-scan build-test-helper tools check liquidate
 
@@ -8,7 +8,7 @@ all: build
 
 # Default target
 help:
-	@printf "Targets:\n  build/test/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  test-coverage/security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
+	@printf "Targets:\n  build/test/test-integration/test-coverage/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
 
 # Go binary name and paths
 BINARY_NAME=scranton-strangler
@@ -19,14 +19,14 @@ BINARY_PATH=./$(BIN_DIR)/$(BINARY_NAME)
 build:
 	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(BINARY_NAME) cmd/bot/main.go
+	go build -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/bot
 
 # Build for production (optimized)
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
 	@echo "⏱️  Starting build timer..."
 	@START_TIME=$$(date +%s); \
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) cmd/bot/main.go; \
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) ./cmd/bot; \
 	END_TIME=$$(date +%s); \
 	DURATION=$$((END_TIME - START_TIME)); \
 	echo "⏱️  Build completed in $${DURATION} seconds"
@@ -43,6 +43,13 @@ test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 	go tool cover -func=coverage.out | tail -n1
 	@echo "Coverage report generated: coverage.html"
+
+# Run end-to-end integration tests
+test-integration:
+	@echo "Running end-to-end integration tests..."
+	@echo "🧪 Testing complete trading cycle with real Tradier sandbox"
+	@mkdir -p data
+	go run cmd/integration/main.go
 
 # Run linter
 lint: tools
@@ -113,9 +120,9 @@ security-scan: tools
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" gosec ./...
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" govulncheck ./...
 
-# Check: lint, test, security scan, and build
-check: lint test security-scan build
-	@echo "✅ All checks passed: lint, test, security scan, and build completed successfully"
+# Check: lint, test, integration test, security scan, and build
+check: lint test test-integration security-scan build
+	@echo "✅ All checks passed: lint, test, integration test, security scan, and build completed successfully"
 
 # Install security tools
 tools:
