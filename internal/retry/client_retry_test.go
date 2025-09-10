@@ -112,6 +112,18 @@ func (f *fakeBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	return &broker.OrderResponse{}, nil
 }
 
+func (f *fakeBroker) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (f *fakeBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
 func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, qty int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
 	callNum := atomic.AddInt32(&f.callCount, 1)
 

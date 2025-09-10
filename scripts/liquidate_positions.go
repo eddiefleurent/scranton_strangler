@@ -2,11 +2,12 @@
 // via market orders through the Tradier API.
 //
 // Usage:
+//   # Option A: use env vars, no config required
 //   export TRADIER_API_KEY="your_key_here"
-//   export TRADIER_ACCOUNT_ID="your_account_here" 
-//   go run liquidate_positions.go
+//   export TRADIER_ACCOUNT_ID="your_account_here"
+//   go run scripts/liquidate_positions.go -config=./config.yaml
 //   
-//   OR use via Makefile:
+//   # Option B: use via Makefile:
 //   make liquidate
 //
 // This tool will:
@@ -18,23 +19,36 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 func main() {
-	// Load configuration from parent directory
-	cfg, err := config.Load("../config.yaml")
+	// Load configuration
+	cfgPath := flag.String("config", "../config.yaml", "Path to config.yaml")
+	flag.Parse()
+	
+	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatalf("❌ Failed to load config: %v", err)
 	}
 
-	fmt.Printf("📝 Using credentials from config.yaml\n")
+	fmt.Printf("📝 Loading credentials (env overrides config)...\n")
 	apiKey := cfg.Broker.APIKey
+	if v := os.Getenv("TRADIER_API_KEY"); v != "" {
+		apiKey = v
+		fmt.Printf("✅ Using TRADIER_API_KEY from environment\n")
+	}
 	accountID := cfg.Broker.AccountID
+	if v := os.Getenv("TRADIER_ACCOUNT_ID"); v != "" {
+		accountID = v
+		fmt.Printf("✅ Using TRADIER_ACCOUNT_ID from environment\n")
+	}
 
 	// Create broker client
 	client, err := broker.NewTradierClient(apiKey, accountID, true, false, 0.5)
@@ -63,37 +77,29 @@ func main() {
 			continue // Skip underlying
 		}
 		
-		// Use absolute value of quantity for buy-to-close
+		// Determine position direction and appropriate close order type
 		quantity := int(pos.Quantity)
-		if quantity < 0 {
-			quantity = -quantity // Convert short to positive for closing
+		absQuantity := quantity
+		if absQuantity < 0 {
+			absQuantity = -absQuantity
 		}
 		
-		fmt.Printf("\n📝 Closing %s (%d contracts)...\n", pos.Symbol, quantity)
+		isShort := quantity < 0
+		orderType := "buy-to-close MARKET"
+		if !isShort {
+			orderType = "sell-to-close MARKET"
+		}
 		
-		// Use market order pricing - get current ask price and add buffer
-		quote, err := client.GetQuote(pos.Symbol)
-		var maxPrice float64
-		if err != nil || quote == nil {
-			fmt.Printf("⚠️ Couldn't get quote for %s, using aggressive limit: %v\n", pos.Symbol, err)
-			maxPrice = 20.0 // Very high fallback price
+		fmt.Printf("\n📝 Closing %s (%d contracts) using %s order...\n", pos.Symbol, absQuantity, orderType)
+		fmt.Printf("💥 MARKET ORDER: Will execute at current market price for immediate fill\n")
+		
+		// Place the appropriate market order type based on position direction
+		var orderResp *broker.OrderResponse
+		if isShort {
+			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, absQuantity, "day")
 		} else {
-			// For buy-to-close, use ask price + 50% buffer to ensure immediate fill
-			askPrice := quote.Ask
-			if askPrice <= 0 {
-				askPrice = quote.Last // Fallback to last price
-			}
-			if askPrice <= 0 {
-				askPrice = 5.0 // Final fallback
-			}
-			maxPrice = askPrice * 3.0 // 200% above ask for guaranteed market-like fill
-			if maxPrice < 5.0 {
-				maxPrice = 5.0 // Minimum $5 to ensure fill
-			}
-			fmt.Printf("📊 %s: Ask $%.2f, using MARKET PRICE $%.2f (guaranteed fill)\n", pos.Symbol, askPrice, maxPrice)
+			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, absQuantity, "day")
 		}
-		
-		orderResp, err := client.PlaceBuyToCloseOrder(pos.Symbol, quantity, maxPrice, "day")
 		if err != nil {
 			fmt.Printf("❌ Failed to close %s: %v\n", pos.Symbol, err)
 			continue

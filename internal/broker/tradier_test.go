@@ -599,6 +599,50 @@ func TestPlaceBuyToCloseOrder_ValidatesInputsAndBuildsForm(t *testing.T) {
 	}
 }
 
+func TestPlaceSellToCloseOrder_ValidatesInputsAndBuildsForm(t *testing.T) {
+	api, srv := newTestAPIWithServer(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s", r.Method)
+		}
+		body, _ := io.ReadAll(r.Body)
+		got := string(body)
+		for _, expect := range []string{
+			"class=option",
+			"symbol=AAPL",
+			"option_symbol=AAPL250101C00150000",
+			"side=sell_to_close",
+			"quantity=5",
+			"type=limit",
+			"duration=day",
+			"price=2.75",
+		} {
+			if !strings.Contains(got, expect) {
+				t.Fatalf("missing %q in body: %s", expect, got)
+			}
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"order":{"id":9002,"status":"ok"}}`))
+	})
+	defer srv.Close()
+
+	// Valid
+	resp, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 5, 2.75, "day")
+	if err != nil || resp.Order.ID != 9002 {
+		t.Fatalf("PlaceSellToCloseOrder got (%+v,%v)", resp, err)
+	}
+
+	// Invalids
+	if _, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 5, 0, "day"); err == nil {
+		t.Fatalf("expected error: non-positive price")
+	}
+	if _, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 0, 1, "day"); err == nil {
+		t.Fatalf("expected error: non-positive quantity")
+	}
+	if _, err := api.PlaceSellToCloseOrder("???", 1, 1, "day"); err == nil {
+		t.Fatalf("expected error: invalid underlying extraction")
+	}
+}
+
 func TestPlaceStrangleOTOCO_ReturnsUnsupported(t *testing.T) {
 	// The function should return ErrOTOCOUnsupported without touching network.
 	api := NewTradierAPI("k", "acc", false)

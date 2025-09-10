@@ -452,85 +452,104 @@ func (m *Manager) isOrderCompletelyFilled(orderStatus *broker.OrderResponse) boo
 
 // isPositionOpenInBroker checks if a stored position still exists in broker positions
 func (m *Manager) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
-	for _, brokerPos := range brokerPositions {
-		// Match by symbol and quantity (simplified matching)
-		if brokerPos.Symbol == position.Symbol {
-			// For options positions, check if we have both legs still open
-			hasCallLeg := false
-			hasCallStrike := false
-			hasPutLeg := false  
-			hasPutStrike := false
-			
-			// Check if broker position matches our stored position strikes
-			for _, brokerPos2 := range brokerPositions {
-				if brokerPos2.Symbol == position.Symbol {
-					// Parse option symbol using OPRA format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
-					// SPY option format: SPY240315C00610000 or SPY240315P00500000
-					parsedStrike, optionType, err := m.parseOptionSymbol(brokerPos2.Symbol)
-					if err != nil {
-						continue // Skip invalid symbols
-					}
-					
-					if optionType == "C" {
-						hasCallLeg = true
-						if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
-							hasCallStrike = true
-						}
-					} else if optionType == "P" {
-						hasPutLeg = true
-						if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
-							hasPutStrike = true
-						}
-					}
-				}
-			}
-			
-			// Position is open if we have both call and put legs with matching strikes
-			if hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike {
-				return true
-			}
+	wantExp := position.Expiration.Format("2006-01-02")
+	hasCallStrike := false
+	hasPutStrike := false
+
+	for _, bp := range brokerPositions {
+		// Only consider this underlying
+		if !strings.HasPrefix(bp.Symbol, position.Symbol) {
+			continue
+		}
+		// Match expiration
+		exp := m.extractExpirationFromSymbol(bp.Symbol)
+		if exp != wantExp {
+			continue
+		}
+		// Parse option leg
+		strike, optType, err := m.parseOptionSymbol(bp.Symbol)
+		if err != nil || bp.Quantity == 0 {
+			continue
+		}
+		if optType == "C" && math.Abs(strike-position.CallStrike) < 0.01 {
+			hasCallStrike = true
+		}
+		if optType == "P" && math.Abs(strike-position.PutStrike) < 0.01 {
+			hasPutStrike = true
 		}
 	}
-	return false
+	return hasCallStrike && hasPutStrike
+}
+
+// extractExpirationFromSymbol extracts expiration date from OPRA option symbol
+// Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
+// Example: SPY240315C00610000 -> "2024-03-15"
+func (m *Manager) extractExpirationFromSymbol(symbol string) string {
+	// SPY option format: SPY251024C00678000
+	// Extract YYMMDD part
+	if len(symbol) < 12 {
+		return ""
+	}
+	
+	// Look for the date part (6 digits after SPY)
+	if len(symbol) >= 9 {
+		dateStr := symbol[3:9] // YYMMDD
+		// Convert YYMMDD to YYYY-MM-DD
+		if len(dateStr) == 6 {
+			year := "20" + dateStr[0:2]
+			month := dateStr[2:4]
+			day := dateStr[4:6]
+			return year + "-" + month + "-" + day
+		}
+	}
+	return ""
 }
 
 // parseOptionSymbol parses an OPRA format option symbol to extract strike and type
 // Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
 // Example: SPY240315C00610000 -> strike=610.00, type="C"
 func (m *Manager) parseOptionSymbol(symbol string) (float64, string, error) {
-	if len(symbol) < 15 {
+	if len(symbol) < 9 {
 		return 0, "", fmt.Errorf("option symbol too short: %s", symbol)
 	}
 	
-	// Find the option type (C or P) - should be at a fixed position for OPRA format
-	// For SPY format: positions 9-10 should be the expiration date end, position 10 should be C/P
-	var optionTypePos int
-	var optionType string
-	
-	// Look for C or P in the expected positions
-	for i := 6; i < len(symbol)-8; i++ {
+	// Find the last C or P that is followed by exactly 8 digits
+	// This is more robust than assuming fixed positions
+	for i := len(symbol) - 9; i >= 0; i-- {
 		if symbol[i] == 'C' || symbol[i] == 'P' {
-			optionType = string(symbol[i])
-			optionTypePos = i
-			break
+			// Check if the remaining characters after C/P are exactly 8 digits
+			if i+9 > len(symbol) {
+				continue // Not enough characters for 8-digit strike
+			}
+			
+			strikeStr := symbol[i+1 : i+9]
+			
+			// Validate that all 8 characters are digits
+			isAllDigits := true
+			for _, char := range strikeStr {
+				if char < '0' || char > '9' {
+					isAllDigits = false
+					break
+				}
+			}
+			
+			if !isAllDigits {
+				continue // Not 8 consecutive digits, keep looking
+			}
+			
+			// Parse the 8-digit strike
+			strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
+			if err != nil {
+				return 0, "", fmt.Errorf("failed to parse strike from symbol %s: %w", symbol, err)
+			}
+			
+			// Convert to float (divide by 1000 per OPRA format)
+			strike := float64(strikeInt) / 1000.0
+			optionType := string(symbol[i])
+			
+			return strike, optionType, nil
 		}
 	}
 	
-	if optionType == "" {
-		return 0, "", fmt.Errorf("no option type (C/P) found in symbol: %s", symbol)
-	}
-	
-	// Extract strike price (8 digits after the option type)
-	if optionTypePos+9 > len(symbol) {
-		return 0, "", fmt.Errorf("symbol too short for strike extraction: %s", symbol)
-	}
-	
-	strikeStr := symbol[optionTypePos+1 : optionTypePos+9]
-	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
-	if err != nil {
-		return 0, "", fmt.Errorf("invalid strike format in symbol %s: %w", symbol, err)
-	}
-	
-	strike := float64(strikeInt) / 1000.0
-	return strike, optionType, nil
+	return 0, "", fmt.Errorf("no valid C/P followed by 8-digit strike found in symbol: %s", symbol)
 }

@@ -958,6 +958,37 @@ func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
 	return resp, nil
 }
 
+func (m *MockBroker) PlaceSellToCloseOrder(_ string, _ int,
+	_ float64, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 124
+	return resp, nil
+}
+
+func (m *MockBroker) PlaceBuyToCloseMarketOrder(_ string, _ int, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 125
+	return resp, nil
+}
+
+func (m *MockBroker) PlaceSellToCloseMarketOrder(_ string, _ int, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 126
+	return resp, nil
+}
+
 func (m *MockBroker) GetMarketClock(_ bool) (*MarketClockResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
@@ -1201,6 +1232,10 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		}},
 		{"PlaceBuyToCloseOrder", func() error {
 			_, err := cb.PlaceBuyToCloseOrder("SPY241220P00400000", 1, 5.0, "day")
+			return err
+		}},
+		{"PlaceSellToCloseOrder", func() error {
+			_, err := cb.PlaceSellToCloseOrder("SPY241220C00420000", 1, 5.0, "day")
 			return err
 		}},
 	}

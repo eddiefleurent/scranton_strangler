@@ -941,6 +941,116 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	return &response, nil
 }
 
+// PlaceSellToCloseOrder places a sell-to-close order for an option position.
+func (t *TradierAPI) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag ...string) (*OrderResponse, error) {
+	// Validate price for limit orders
+	if maxPrice <= 0 {
+		return nil, fmt.Errorf("invalid price for limit order: %.2f, price must be positive", maxPrice)
+	}
+	// Validate quantity for order
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
+	}
+	// Validate and normalize duration
+	nd, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
+	}
+	// Extract underlying symbol from option OCC/OSI code
+	symbol := extractUnderlyingFromOSI(optionSymbol)
+	if symbol == "" {
+		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
+	}
+	params := url.Values{}
+	params.Add("class", "option")
+	params.Add("symbol", symbol) // Required underlying symbol
+	params.Add("option_symbol", optionSymbol)
+	params.Add("side", "sell_to_close")
+	params.Add("quantity", fmt.Sprintf("%d", quantity))
+	params.Add("type", "limit")
+	params.Add("duration", nd)
+	params.Add("price", fmt.Sprintf("%.2f", maxPrice))
+	if len(tag) > 0 && tag[0] != "" {
+		params.Add("tag", tag[0])
+	}
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrderResponse
+	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// PlaceBuyToCloseMarketOrder places a buy-to-close market order for an option position.
+func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
+	// Validate quantity for order
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
+	}
+	// Validate and normalize duration
+	nd, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
+	}
+	// Extract underlying symbol from option OCC/OSI code
+	symbol := extractUnderlyingFromOSI(optionSymbol)
+	if symbol == "" {
+		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
+	}
+	params := url.Values{}
+	params.Add("class", "option")
+	params.Add("symbol", symbol) // Required underlying symbol
+	params.Add("option_symbol", optionSymbol)
+	params.Add("side", "buy_to_close")
+	params.Add("quantity", fmt.Sprintf("%d", quantity))
+	params.Add("type", "market")
+	params.Add("duration", nd)
+	if len(tag) > 0 && tag[0] != "" {
+		params.Add("tag", tag[0])
+	}
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrderResponse
+	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// PlaceSellToCloseMarketOrder places a sell-to-close market order for an option position.
+func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
+	// Validate quantity for order
+	if quantity <= 0 {
+		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
+	}
+	// Validate and normalize duration
+	nd, err := normalizeDuration(duration)
+	if err != nil {
+		return nil, err
+	}
+	// Extract underlying symbol from option OCC/OSI code
+	symbol := extractUnderlyingFromOSI(optionSymbol)
+	if symbol == "" {
+		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
+	}
+	params := url.Values{}
+	params.Add("class", "option")
+	params.Add("symbol", symbol) // Required underlying symbol
+	params.Add("option_symbol", optionSymbol)
+	params.Add("side", "sell_to_close")
+	params.Add("quantity", fmt.Sprintf("%d", quantity))
+	params.Add("type", "market")
+	params.Add("duration", nd)
+	if len(tag) > 0 && tag[0] != "" {
+		params.Add("tag", tag[0])
+	}
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrderResponse
+	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // PlaceStrangleOTOCO places a strangle order with OTOCO (One Triggers Other Cancels) functionality
 // Since Tradier doesn't support OTOCO for multi-leg orders, we implement it by placing
 // a regular strangle order and including profitTarget as a custom parameter for testing

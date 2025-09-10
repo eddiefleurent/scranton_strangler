@@ -87,6 +87,18 @@ func (m *mockBrokerForOrders) PlaceBuyToCloseOrder(optionSymbol string, quantity
 	return &broker.OrderResponse{}, nil
 }
 
+func (m *mockBrokerForOrders) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
 func (m *mockBrokerForOrders) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
 	return &broker.MarketClockResponse{}, nil
 }
