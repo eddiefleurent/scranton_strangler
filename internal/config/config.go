@@ -66,7 +66,7 @@ type EntryConfig struct {
 	MinIVPct        float64 `yaml:"min_iv_pct"`         // Minimum SPY ATM IV percentage to enter
 	DTERange        []int   `yaml:"dte_range"`
 	TargetDTE       int     `yaml:"target_dte"`
-	Delta           float64 `yaml:"delta"`
+	Delta           float64 `yaml:"delta"` // Delta in percentage points (e.g., 16 = 0.16 fractional)
 	MinCredit       float64 `yaml:"min_credit"`
 	MinVolume       int64   `yaml:"min_volume"`         // Minimum daily volume for liquidity filtering
 	MinOpenInterest int64   `yaml:"min_open_interest"`  // Minimum open interest for liquidity filtering

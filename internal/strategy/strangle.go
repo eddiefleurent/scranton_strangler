@@ -23,6 +23,9 @@ type optionChainCacheEntry struct {
 // Cache TTL for option chains
 const optionChainCacheTTL = 1 * time.Minute
 
+// Number of shares per options contract
+const sharesPerContract = 100.0
+
 // StrangleStrategy implements a short strangle options strategy.
 type StrangleStrategy struct {
 	broker     broker.Broker
@@ -418,12 +421,12 @@ func (s *StrangleStrategy) CalculatePositionPnL(position *models.Position) (floa
 	// Calculate current option values (mid price)
 	putValue := (putOption.Bid + putOption.Ask) / 2
 	callValue := (callOption.Bid + callOption.Ask) / 2
-	currentTotalValue := (putValue + callValue) * float64(position.Quantity) * 100 // Options are per 100 shares
+	currentTotalValue := (putValue + callValue) * float64(position.Quantity) * sharesPerContract // Options are per 100 shares
 
 	// Calculate P&L: Credit received - Current value of sold options
 	// (Positive when options lose value, negative when they gain value)
 	// GetNetCredit() returns per-share credit, multiply by quantity and shares per contract (100)
-	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity) * 100)
+	totalCreditReceived := math.Abs(position.GetNetCredit() * float64(position.Quantity) * sharesPerContract)
 	pnl := totalCreditReceived - currentTotalValue
 
 	return pnl, nil
@@ -460,7 +463,7 @@ func (s *StrangleStrategy) GetCurrentPositionValue(position *models.Position) (f
 	putValue := (putOption.Bid + putOption.Ask) / 2
 	callValue := (callOption.Bid + callOption.Ask) / 2
 
-	return (putValue + callValue) * float64(position.Quantity) * 100, nil
+	return (putValue + callValue) * float64(position.Quantity) * sharesPerContract, nil
 }
 
 func (s *StrangleStrategy) hasMajorEventsNearby() bool {
@@ -690,9 +693,9 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	if bprMultiplier > 50.0 {
 		s.logger.Printf("Warning: BPRMultiplier=%.1f seems high; check config", bprMultiplier)
 	}
-	bprPerContract := creditPerShare * 100 * bprMultiplier
+	bprPerContract := creditPerShare * sharesPerContract * bprMultiplier
 	s.logger.Printf("Sizing: credit/contract=$%.2f, est BPR/contract=$%.2f, alloc=$%.2f",
-		creditPerShare*100, bprPerContract, allocatedCapital)
+		creditPerShare*sharesPerContract, bprPerContract, allocatedCapital)
 
 	maxContracts := int(allocatedCapital / bprPerContract)
 	if maxContracts < 1 {

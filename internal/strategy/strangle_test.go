@@ -492,8 +492,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50, // Stored as per-share credit
-				CurrentPnL:     175.0, // 50% profit ($175 on $350 total credit)
+				CreditReceived: 3.50, // Stored as per-share credit (total credit: $350)
 				DTE:            35,
 			},
 			expectedExit:   true,
@@ -507,8 +506,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 21),
 				Quantity:       1,
-				CreditReceived: 3.50, // Stored as per-share credit
-				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 total credit)
+				CreditReceived: 3.50, // Stored as per-share credit (total credit: $350)
 				DTE:            21,   // At max DTE
 			},
 			expectedExit:   true,
@@ -522,8 +520,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50, // Stored as per-share credit
-				CurrentPnL:     -700.0, // -200% loss (-$700 on $350 total credit)
+				CreditReceived: 3.50, // Stored as per-share credit (total credit: $350)
 				DTE:            35,     // Still have time but need escalation
 			},
 			expectedExit:   true,
@@ -537,8 +534,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50, // Stored as per-share credit
-				CurrentPnL:     -875.0, // -250% loss (-$875 on $350 total credit)
+				CreditReceived: 3.50, // Stored as per-share credit (total credit: $350)
 				DTE:            35,     // Still have time but losses are too high
 			},
 			expectedExit:   true,
@@ -552,8 +548,7 @@ func TestStrangleStrategy_CheckExitConditions(t *testing.T) {
 				CallStrike:     420.0,
 				Expiration:     time.Now().AddDate(0, 0, 35),
 				Quantity:       1,
-				CreditReceived: 3.50, // Stored as per-share credit
-				CurrentPnL:     50.0, // Only 14% profit ($50 on $350 total credit)
+				CreditReceived: 3.50, // Stored as per-share credit (total credit: $350)
 				DTE:            35,   // Still have time
 			},
 			expectedExit:   false,
