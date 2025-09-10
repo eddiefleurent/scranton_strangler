@@ -181,13 +181,9 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 			return
 		}
 
-		// Try UpdatePosition first for multiple positions support
 		if err := m.storage.UpdatePosition(position); err != nil {
-			// Fallback to SetCurrentPosition for backward compatibility
-			if err := m.storage.SetCurrentPosition(position); err != nil {
-				m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
-				return
-			}
+			m.logger.Printf("Failed to save position %s after fill: %v", positionID, err)
+			return
 		}
 
 		m.logger.Printf("Position %s successfully transitioned to %s state", positionID, targetState)
@@ -249,13 +245,9 @@ func (m *Manager) handleOrderFailed(positionID string, orderID int, reason strin
 		}
 	}
 
-	// Try UpdatePosition first for multiple positions support
 	if err := m.storage.UpdatePosition(position); err != nil {
-		// Fallback to SetCurrentPosition for backward compatibility
-		if err := m.storage.SetCurrentPosition(position); err != nil {
-			m.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
-			return
-		}
+		m.logger.Printf("Failed to save position %s after failure: %v", positionID, err)
+		return
 	}
 
 	if isExitOrder {

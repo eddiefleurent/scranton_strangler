@@ -302,7 +302,7 @@ func TestManager_PollOrderStatus_OrderFilled(t *testing.T) {
 		t.Fatalf("Failed to set up test position: %v", err)
 	}
 
-	if err := mockStorage.SetCurrentPosition(position); err != nil {
+	if err := mockStorage.AddPosition(position); err != nil {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
@@ -375,7 +375,7 @@ func TestManager_PollOrderStatus_OrderCanceled(t *testing.T) {
 		t.Fatalf("Failed to set up test position: %v", err)
 	}
 
-	if err := mockStorage.SetCurrentPosition(position); err != nil {
+	if err := mockStorage.AddPosition(position); err != nil {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
@@ -448,7 +448,7 @@ func TestManager_PollOrderStatus_Timeout(t *testing.T) {
 		t.Fatalf("Failed to set up test position: %v", err)
 	}
 
-	if err := mockStorage.SetCurrentPosition(position); err != nil {
+	if err := mockStorage.AddPosition(position); err != nil {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
@@ -562,7 +562,7 @@ func TestManager_HandleOrderTimeout_EntryOrder(t *testing.T) {
 		t.Fatalf("Failed to set up test position: %v", err)
 	}
 
-	if err := mockStorage.SetCurrentPosition(position); err != nil {
+	if err := mockStorage.AddPosition(position); err != nil {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
@@ -625,7 +625,7 @@ func TestManager_HandleOrderTimeout_ExitOrderFromAdjusting(t *testing.T) {
 	position.ExitOrderID = "456" // Exit order is active
 	position.ExitReason = "stop_loss"
 
-	if err := mockStorage.SetCurrentPosition(position); err != nil {
+	if err := mockStorage.AddPosition(position); err != nil {
 		t.Fatalf("Failed to set up test position in storage: %v", err)
 	}
 
