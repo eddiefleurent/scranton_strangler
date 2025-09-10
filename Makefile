@@ -49,9 +49,15 @@ test-coverage:
 test-integration:
 	@echo "Running end-to-end integration tests..."
 	@if [ -z "$$TRADIER_API_KEY" ] || [ -z "$$TRADIER_ACCOUNT_ID" ]; then \
-		echo "⏭️  Skipping integration tests; credentials not set"; \
-		echo "   Set TRADIER_API_KEY and TRADIER_ACCOUNT_ID environment variables to enable"; \
-		exit 0; \
+		if [ ! -f "config.yaml" ]; then \
+			echo "⏭️  Skipping integration tests; no credentials found"; \
+			echo "   Set TRADIER_API_KEY and TRADIER_ACCOUNT_ID environment variables or create config.yaml"; \
+			exit 0; \
+		else \
+			echo "📝 Using credentials from config.yaml"; \
+		fi; \
+	else \
+		echo "📝 Using credentials from environment variables"; \
 	fi
 	@echo "🧪 Testing complete trading cycle with real Tradier sandbox"
 	@mkdir -p data
