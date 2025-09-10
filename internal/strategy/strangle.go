@@ -54,7 +54,7 @@ type Config struct {
 	StopLossPct         float64 // e.g., 2.5 (250% loss triggers hard stop)
 	MaxPositionLoss     float64 // Maximum position loss percentage from risk config
 	MaxContracts        int     // Maximum number of contracts per position
-	BPRMultiplier       float64 // Buying power requirement multiplier (default: 10.0)
+	BPRMultiplier       float64 // Buying power requirement multiplier for margin estimation (default: 10.0, based on industry standard 20% of underlying + premium)
 	MinVolume           int64   // Minimum daily volume for liquidity filtering (default: 100, 0 to disable)
 	MinOpenInterest     int64   // Minimum open interest for liquidity filtering (default: 1000, 0 to disable)
 }
@@ -124,6 +124,9 @@ func (s *StrangleStrategy) FindStrangleStrikes() (*StrangleOrder, error) {
 	
 	// Find expiration around target DTE
 	targetExp := s.findTargetExpiration(targetDTE)
+	if targetExp == "" {
+		return nil, fmt.Errorf("failed to find valid expiration for target DTE %d", targetDTE)
+	}
 
 	// Get option chain with Greeks (cached, with timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -206,6 +209,9 @@ func (s *StrangleStrategy) CheckVolatilityThreshold() (bool, string) {
 func (s *StrangleStrategy) getCurrentImpliedVolatility() (float64, error) {
 	// Use target expiration (around 45 DTE)
 	targetExp := s.findTargetExpiration(s.config.DTETarget)
+	if targetExp == "" {
+		return 0, fmt.Errorf("failed to find valid expiration for target DTE %d", s.config.DTETarget)
+	}
 
 	// Get option chain for target expiration with Greeks (cached, timeout)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -341,9 +347,14 @@ func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration st
 
 	// Fetch from broker using singleflight to dedupe concurrent identical calls
 	v, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) { return fetcher() })
-	chain, _ := v.([]broker.Option)
 	if err != nil {
 		return nil, err
+	}
+
+	// Safely type assert and check for nil result
+	chain, ok := v.([]broker.Option)
+	if !ok || chain == nil {
+		return nil, fmt.Errorf("invalid result from broker: expected []broker.Option, got %T", v)
 	}
 
 	// Cache the result (write lock)
@@ -789,12 +800,20 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
 	// But for simplicity in paper trading, we'll use a conservative estimate
 	creditTotal := creditPerShare * sharesPerContract
 	
-	// Estimate margin requirement: typically 15-20% of notional for SPY strangles
-	// Using 15% for paper trading to allow more positions
-	estimatedMargin := creditTotal * 5.0 // 5x credit as a rough margin estimate
+	// Use configured BPRMultiplier for margin estimation, with sensible fallback
+	bprMultiplier := s.config.BPRMultiplier
+	if bprMultiplier <= 0 {
+		// Default fallback: 10.0x credit as margin estimate
+		// Rationale: Industry standard short options margin = 20% of underlying + premium received
+		// For SPY at ~$450, 16Δ strangle ~$450 wide, credit ~$4-6, this approximates:
+		// Margin ≈ ($450 * 0.20) + $5 = ~$95, vs credit * 10 = $50-60 (conservative)
+		// This 10x multiplier provides reasonable position sizing without being overly restrictive
+		bprMultiplier = 10.0
+	}
+	estimatedMargin := creditTotal * bprMultiplier
 	
-	s.logger.Printf("Sizing: credit/contract=$%.2f, est margin/contract=$%.2f, allocated buying power=$%.2f",
-		creditTotal, estimatedMargin, allocatedCapital)
+	s.logger.Printf("Sizing: credit/contract=$%.2f, est margin/contract=$%.2f (%.1fx multiplier), allocated buying power=$%.2f",
+		creditTotal, estimatedMargin, bprMultiplier, allocatedCapital)
 
 	maxContracts := int(allocatedCapital / estimatedMargin)
 	if maxContracts < 1 {
