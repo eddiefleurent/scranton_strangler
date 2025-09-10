@@ -685,6 +685,11 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 	put := broker.GetOptionByStrike(options, putStrike, broker.OptionTypePut)
 	call := broker.GetOptionByStrike(options, callStrike, broker.OptionTypeCall)
 	if put == nil || call == nil {
+		s.logger.Printf("DEBUG: Options not found - put: %v (strike %.2f), call: %v (strike %.2f), total options: %d", 
+			put != nil, putStrike, call != nil, callStrike, len(options))
+		if len(options) > 0 {
+			s.logger.Printf("DEBUG: Available strikes sample: %s", s.debugAvailableStrikes(options, 5))
+		}
 		return 0
 	}
 	// Get tick size from broker for proper spread validation
@@ -701,15 +706,54 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 
 	// Check each leg against its own minimum spread to filter stale/microstructure quotes
 	if (put.Ask-put.Bid) < putMinSpread || (call.Ask-call.Bid) < callMinSpread {
+		s.logger.Printf("DEBUG: Spread too narrow - put spread: %.4f (min: %.4f), call spread: %.4f (min: %.4f)", 
+			put.Ask-put.Bid, putMinSpread, call.Ask-call.Bid, callMinSpread)
 		return 0
 	}
 	// Guard against stale/invalid quotes
 	if put.Bid <= 0 || put.Ask <= 0 || call.Bid <= 0 || call.Ask <= 0 || put.Bid > put.Ask || call.Bid > call.Ask {
+		s.logger.Printf("DEBUG: Invalid quotes - put bid/ask: %.4f/%.4f, call bid/ask: %.4f/%.4f", 
+			put.Bid, put.Ask, call.Bid, call.Ask)
 		return 0
 	}
 	putCredit := (put.Bid + put.Ask) / 2
 	callCredit := (call.Bid + call.Ask) / 2
+	s.logger.Printf("DEBUG: Credit calculation successful - put: %.4f, call: %.4f, total: %.4f", 
+		putCredit, callCredit, putCredit+callCredit)
 	return putCredit + callCredit
+}
+
+// debugAvailableStrikes returns a formatted string of available strikes for debugging
+func (s *StrangleStrategy) debugAvailableStrikes(options []broker.Option, limit int) string {
+	if len(options) == 0 {
+		return "none"
+	}
+	
+	strikes := make(map[float64]bool)
+	for _, opt := range options {
+		strikes[opt.Strike] = true
+	}
+	
+	var strikeList []float64
+	for strike := range strikes {
+		strikeList = append(strikeList, strike)
+	}
+	
+	if len(strikeList) > limit {
+		strikeList = strikeList[:limit]
+	}
+	
+	result := ""
+	for i, strike := range strikeList {
+		if i > 0 {
+			result += ", "
+		}
+		result += fmt.Sprintf("%.2f", strike)
+	}
+	if len(strikes) > limit {
+		result += fmt.Sprintf(" (+%d more)", len(strikes)-limit)
+	}
+	return result
 }
 
 func (s *StrangleStrategy) calculatePositionSize(creditPerShare float64) int {
