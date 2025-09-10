@@ -38,9 +38,10 @@ func TestValidate_LossPercentageConstraints(t *testing.T) {
 			UseOTOCO:    true,
 		},
 		Strategy: StrategyConfig{
-			Symbol:              "SPY",
-			AllocationPct:       0.35,
-			EscalateLossPct:     2.0,
+			Symbol:                  "SPY",
+			AllocationPct:           0.35,
+			EscalateLossPct:         2.0,
+			MaxNewPositionsPerCycle: 1,
 			Entry: EntryConfig{
 				MinIVPct:  15.0,
 				TargetDTE: 45,
@@ -250,7 +251,10 @@ func TestConfig_IsWithinTradingHours(t *testing.T) {
 				t.Fatalf("failed to parse test time: %v", err)
 			}
 
-			result := config.IsWithinTradingHours(testTime)
+			result, err := config.IsWithinTradingHours(testTime)
+			if err != nil {
+				t.Fatalf("IsWithinTradingHours() error = %v", err)
+			}
 			if result != tt.expected {
 				t.Errorf("IsWithinTradingHours() = %v, expected %v", result, tt.expected)
 			}
@@ -301,7 +305,10 @@ func TestConfig_AfterHoursCheck(t *testing.T) {
 				t.Fatalf("failed to parse test time: %v", err)
 			}
 
-			isWithinHours := config.IsWithinTradingHours(testTime)
+			isWithinHours, err := config.IsWithinTradingHours(testTime)
+			if err != nil {
+				t.Fatalf("IsWithinTradingHours() error = %v", err)
+			}
 			shouldSkip := !isWithinHours && !config.Schedule.AfterHoursCheck
 
 			if shouldSkip != tt.expectSkip {
@@ -326,9 +333,10 @@ func TestValidate_StoragePath(t *testing.T) {
 			UseOTOCO:    true,
 		},
 		Strategy: StrategyConfig{
-			Symbol:              "SPY",
-			AllocationPct:       0.35,
-			EscalateLossPct:     2.0,
+			Symbol:                  "SPY",
+			AllocationPct:           0.35,
+			EscalateLossPct:         2.0,
+			MaxNewPositionsPerCycle: 1,
 			Entry: EntryConfig{
 				MinIVPct:  15.0,
 				TargetDTE: 45,

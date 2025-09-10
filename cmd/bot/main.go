@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -183,15 +182,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	ctxBal, cancelBal := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelBal()
 	go func() {
-		// Try context-aware method first, fallback to regular method if not available
-		type balFn interface{ GetAccountBalanceCtx(context.Context) (float64, error) }
-		if cb, ok := b.broker.(balFn); ok {
-			bal, err := cb.GetAccountBalanceCtx(ctxBal)
-			resCh <- balanceResult{balance: bal, err: err}
-			return
-		}
-		// Fallback: keep existing call (cannot cancel)
-		bal, err := b.broker.GetAccountBalance()
+		bal, err := b.broker.GetAccountBalanceCtx(ctxBal)
 		resCh <- balanceResult{balance: bal, err: err}
 	}()
 
@@ -258,22 +249,26 @@ func (b *Bot) runTradingCycle() {
 
 	// Check real-time market status from Tradier
 	marketClock, err := b.broker.GetMarketClock(false)
-	if err != nil {
-		b.logger.Printf("Warning: Could not get market clock: %v, falling back to config-based hours", err)
-	}
 
 	// Determine market status
 	var isMarketOpen bool
 	var marketState string
 	
-	if marketClock != nil {
+	if err == nil && marketClock != nil {
 		marketState = marketClock.Clock.State
 		// Tradier states: "open", "closed", "premarket", "postmarket"
 		isMarketOpen = marketState == "open"
 		b.logger.Printf("Real-time market status: %s", marketState)
 	} else {
 		// Fallback to config-based hours
-		isMarketOpen = b.config.IsWithinTradingHours(now)
+		if err != nil {
+			b.logger.Printf("Warning: Could not get market clock: %v, falling back to config-based hours", err)
+		}
+		isMarketOpen, err = b.config.IsWithinTradingHours(now)
+		if err != nil {
+			b.logger.Printf("Warning: Could not determine trading hours due to timezone error: %v, assuming market closed", err)
+			isMarketOpen = false
+		}
 		marketState = "unknown"
 		b.logger.Printf("Using config-based market hours: open=%t", isMarketOpen)
 	}
@@ -342,7 +337,8 @@ func (b *Bot) runTradingCycle() {
 				b.logger.Printf("Entry signal: %s", reason)
 				// Try to open positions up to the max limit
 				remainingSlots := maxPositions - len(positions)
-				for i := 0; i < remainingSlots && i < 1; i++ { // Limit to 1 new position per cycle for safety
+				maxNewPositions := b.config.Strategy.MaxNewPositionsPerCycle
+				for i := 0; i < remainingSlots && i < maxNewPositions; i++ {
 					b.executeEntry()
 				}
 			} else {
@@ -408,13 +404,14 @@ func (b *Bot) executeEntry() {
 	b.logger.Printf("Using tick size %.4f for symbol %s, rounded price: $%.2f", tickSize, order.Symbol, px)
 
 	// Generate deterministic client-order ID for potential deduplication
-	canonicalString := fmt.Sprintf("entry-%s-%s-%.2f-%.2f-%d-%.2f",
+	canonicalString := fmt.Sprintf("entry-%s-%s-%.2f-%.2f-%d-%.2f-%s",
 		order.Symbol,
 		order.Expiration,
 		order.PutStrike,
 		order.CallStrike,
 		order.Quantity,
-		px)
+		px,
+		b.config.Broker.AccountID)
 
 	hash := sha256.Sum256([]byte(canonicalString))
 	clientOrderID := "entry-" + hex.EncodeToString(hash[:])[:8]
@@ -722,17 +719,18 @@ func (b *Bot) executeExitForPosition(position *models.Position, reason strategy.
 
 	maxDebit := b.calculateMaxDebit(position, reason)
 
-	if maxDebit <= 0 {
-		b.logger.Printf("Skipping close order for position %s: calculated maxDebit $%.2f is invalid (must be > 0)", shortID(position.ID), maxDebit)
-		return
-	}
-
-	// Get appropriate tick size for the symbol and round maxDebit up to tick size
+	// Get appropriate tick size for the symbol and ensure we have a valid default
 	tickSize, err := b.broker.GetTickSize(position.Symbol)
 	if err != nil {
 		b.logger.Printf("Warning: Failed to get tick size for %s, using default 0.01: %v", position.Symbol, err)
 		tickSize = 0.01
 	}
+
+	// Ensure maxDebit is at least one tick to prevent stranded positions
+	if maxDebit <= 0 {
+		b.logger.Printf("Warning: calculated maxDebit $%.2f is invalid for position %s, using minimum of one tick ($%.2f)", maxDebit, shortID(position.ID), tickSize)
+	}
+	maxDebit = math.Max(maxDebit, tickSize)
 	maxDebit = util.CeilToTick(maxDebit, tickSize)
 
 	// Place the close order
@@ -786,7 +784,7 @@ func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Pos
 			// Calculate final P&L (use current P&L if available, otherwise use credit received)
 			finalPnL := position.CurrentPnL
 			if finalPnL == 0 {
-				finalPnL = position.CreditReceived * float64(position.Quantity) * 100
+				finalPnL = math.Abs(position.CreditReceived) * float64(position.Quantity) * 100
 			}
 			
 			// Close the position with manual close reason
@@ -807,6 +805,47 @@ func (b *Bot) reconcilePositions(storedPositions []models.Position) []models.Pos
 	return activePositions
 }
 
+// parseOptionSymbol parses an OPRA format option symbol to extract strike and type
+// Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
+// Example: SPY240315C00610000 -> strike=610.00, type="C"
+func parseOptionSymbol(symbol string) (float64, string, error) {
+	if len(symbol) < 15 {
+		return 0, "", fmt.Errorf("option symbol too short: %s", symbol)
+	}
+	
+	// Find the option type (C or P) - should be at a fixed position for OPRA format
+	// For SPY format: positions 9-10 should be the expiration date end, position 10 should be C/P
+	var optionTypePos int
+	var optionType string
+	
+	// Look for C or P in the expected positions
+	for i := 6; i < len(symbol)-8; i++ {
+		if symbol[i] == 'C' || symbol[i] == 'P' {
+			optionType = string(symbol[i])
+			optionTypePos = i
+			break
+		}
+	}
+	
+	if optionType == "" {
+		return 0, "", fmt.Errorf("no option type (C/P) found in symbol: %s", symbol)
+	}
+	
+	// Extract strike price (8 digits after the option type)
+	if optionTypePos+9 > len(symbol) {
+		return 0, "", fmt.Errorf("symbol too short for strike extraction: %s", symbol)
+	}
+	
+	strikeStr := symbol[optionTypePos+1 : optionTypePos+9]
+	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid strike format in symbol %s: %w", symbol, err)
+	}
+	
+	strike := float64(strikeInt) / 1000.0
+	return strike, optionType, nil
+}
+
 // isPositionOpenInBroker checks if a stored position still exists in broker positions
 func (b *Bot) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
 	for _, brokerPos := range brokerPositions {
@@ -821,19 +860,21 @@ func (b *Bot) isPositionOpenInBroker(position *models.Position, brokerPositions 
 			// Check if broker position matches our stored position strikes
 			for _, brokerPos2 := range brokerPositions {
 				if brokerPos2.Symbol == position.Symbol {
-					// Parse option symbol to get type and strike
+					// Parse option symbol using OPRA format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
 					// SPY option format: SPY240315C00610000 or SPY240315P00500000
-					if len(brokerPos2.Symbol) >= 15 && strings.Contains(brokerPos2.Symbol, "C") {
+					parsedStrike, optionType, err := parseOptionSymbol(brokerPos2.Symbol)
+					if err != nil {
+						continue // Skip invalid symbols
+					}
+					
+					if optionType == "C" {
 						hasCallLeg = true
-						// Extract strike price from call option symbol
-						// This is a simplified check - in production you'd want more robust parsing
-						if strings.Contains(brokerPos2.Symbol, fmt.Sprintf("%05.0f", position.CallStrike*1000)) {
+						if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
 							hasCallStrike = true
 						}
-					} else if len(brokerPos2.Symbol) >= 15 && strings.Contains(brokerPos2.Symbol, "P") {
+					} else if optionType == "P" {
 						hasPutLeg = true
-						// Extract strike price from put option symbol
-						if strings.Contains(brokerPos2.Symbol, fmt.Sprintf("%05.0f", position.PutStrike*1000)) {
+						if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
 							hasPutStrike = true
 						}
 					}
@@ -854,5 +895,7 @@ func (b *Bot) checkAdjustmentsForPosition(position *models.Position) {
 	// Placeholder for adjustment logic (Phase 2)
 	// This would check if the position needs to be adjusted based on
 	// market movement and the football system rules
-	b.logger.Printf("Adjustment check for position %s not yet implemented", shortID(position.ID))
+	if b.config.Strategy.Adjustments.EnableAdjustmentStub {
+		b.logger.Printf("Adjustment check for position %s not yet implemented", shortID(position.ID))
+	}
 }

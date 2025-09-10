@@ -55,12 +55,13 @@ type BrokerConfig struct {
 
 // StrategyConfig defines trading strategy parameters.
 type StrategyConfig struct {
-	Symbol              string           `yaml:"symbol"`
-	Entry               EntryConfig      `yaml:"entry"`
-	Exit                ExitConfig       `yaml:"exit"`
-	Adjustments         AdjustmentConfig `yaml:"adjustments"`
-	AllocationPct       float64          `yaml:"allocation_pct"`
-	EscalateLossPct     float64          `yaml:"escalate_loss_pct"`
+	Symbol                  string           `yaml:"symbol"`
+	Entry                   EntryConfig      `yaml:"entry"`
+	Exit                    ExitConfig       `yaml:"exit"`
+	Adjustments             AdjustmentConfig `yaml:"adjustments"`
+	AllocationPct           float64          `yaml:"allocation_pct"`
+	EscalateLossPct         float64          `yaml:"escalate_loss_pct"`
+	MaxNewPositionsPerCycle int              `yaml:"max_new_positions_per_cycle"`
 }
 
 // EntryConfig defines entry criteria for opening new positions.
@@ -85,6 +86,7 @@ type ExitConfig struct {
 type AdjustmentConfig struct {
 	Enabled             bool    `yaml:"enabled"`
 	SecondDownThreshold float64 `yaml:"second_down_threshold"` // Percent of position credit (e.g., 1.5 = 1.5% of credit received)
+	EnableAdjustmentStub bool   `yaml:"enable_adjustment_stub"` // Feature flag to enable adjustment stub logging
 }
 
 // RiskConfig defines risk management parameters.
@@ -142,19 +144,20 @@ func Load(configPath string) (*Config, error) {
 }
 
 // resolveLocation returns the configured TZ or NY fallback.
-func (c *Config) resolveLocation() *time.Location {
+// With embedded tzdata, LoadLocation should always succeed for valid timezones.
+func (c *Config) resolveLocation() (*time.Location, error) {
 	tz := c.Schedule.Timezone
 	if strings.TrimSpace(tz) == "" {
 		tz = "America/New_York"
 	}
-	if loc, err := time.LoadLocation(tz); err == nil {
-		return loc
+	
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		// With embedded tzdata, this should only fail for invalid timezone names
+		return nil, fmt.Errorf("failed to load timezone %q: %w", tz, err)
 	}
-	// Last resort: after embedding tzdata, retry NY; else fallback to UTC
-	if loc, err := time.LoadLocation("America/New_York"); err == nil {
-		return loc
-	}
-	return time.UTC
+	
+	return loc, nil
 }
 
 // Validate checks that all configuration values are valid and consistent.
@@ -200,6 +203,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Strategy.EscalateLossPct <= 0 {
 		return fmt.Errorf("strategy.escalate_loss_pct must be > 0")
+	}
+	if c.Strategy.MaxNewPositionsPerCycle <= 0 {
+		return fmt.Errorf("strategy.max_new_positions_per_cycle must be > 0")
 	}
 	if c.Strategy.Entry.MinIVPct <= 0 || c.Strategy.Entry.MinIVPct > 100 {
 		return fmt.Errorf("strategy.entry.min_iv_pct must be between 0 and 100")
@@ -286,7 +292,10 @@ func (c *Config) Validate() error {
 	} else if duration <= 0 {
 		return fmt.Errorf("schedule.market_check_interval must be > 0")
 	}
-	loc := c.resolveLocation()
+	loc, err := c.resolveLocation()
+	if err != nil {
+		return fmt.Errorf("timezone resolution failed: %w", err)
+	}
 	s, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
 	e, err2 := time.ParseInLocation("15:04", c.Schedule.TradingEnd, loc)
 	if err1 != nil || err2 != nil || !s.Before(e) {
@@ -319,18 +328,22 @@ func (c *Config) GetCheckInterval() time.Duration {
 }
 
 // IsWithinTradingHours checks if the given time falls within configured trading hours.
-func (c *Config) IsWithinTradingHours(now time.Time) bool {
-	loc := c.resolveLocation()
+func (c *Config) IsWithinTradingHours(now time.Time) (bool, error) {
+	loc, err := c.resolveLocation()
+	if err != nil {
+		return false, fmt.Errorf("timezone resolution failed: %w", err)
+	}
+	
 	today := now.In(loc)
 
 	// Only allow Monday–Friday trading
 	if today.Weekday() == time.Saturday || today.Weekday() == time.Sunday {
-		return false
+		return false, nil
 	}
 
 	// Allow early return for AfterHoursCheck only on weekdays
 	if c.Schedule.AfterHoursCheck {
-		return true
+		return true, nil
 	}
 
 	startClock, err1 := time.ParseInLocation("15:04", c.Schedule.TradingStart, loc)
@@ -346,7 +359,7 @@ func (c *Config) IsWithinTradingHours(now time.Time) bool {
 		endClock.Hour(), endClock.Minute(), 0, 0, loc)
 
 	// Inclusive start, exclusive end
-	return !today.Before(start) && today.Before(end)
+	return !today.Before(start) && today.Before(end), nil
 }
 
 // Normalize sets default values for configuration fields
@@ -372,6 +385,9 @@ func (c *Config) Normalize() {
 	if c.Strategy.Exit.StopLossPct == 0 {
 		// StopLossPct uses credit units and is not constrained by MaxPositionLoss (equity units)
 		c.Strategy.Exit.StopLossPct = defaultStopLossPct
+	}
+	if c.Strategy.MaxNewPositionsPerCycle == 0 {
+		c.Strategy.MaxNewPositionsPerCycle = 1 // Default to 1 for safety
 	}
 }
 
