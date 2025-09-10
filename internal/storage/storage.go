@@ -811,15 +811,33 @@ func (s *JSONStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 
 // GetCurrentPositions returns all current open positions
 func (s *JSONStorage) GetCurrentPositions() []models.Position {
+	// First check if migration is needed under read lock
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	
-	// Migrate legacy single position if needed
+	needsMigration := s.data.CurrentPosition != nil && len(s.data.CurrentPositions) == 0
+
+	if !needsMigration {
+		// No migration needed, return copy under read lock
+		positions := make([]models.Position, len(s.data.CurrentPositions))
+		for i := range s.data.CurrentPositions {
+			cloned := clonePosition(&s.data.CurrentPositions[i])
+			if cloned != nil {
+				positions[i] = *cloned
+			}
+		}
+		s.mu.RUnlock()
+		return positions
+	}
+
+	// Migration needed, release read lock and acquire write lock
+	s.mu.RUnlock()
+	s.mu.Lock()
+
+	// Re-check condition under write lock (double-check pattern)
 	if s.data.CurrentPosition != nil && len(s.data.CurrentPositions) == 0 {
 		s.data.CurrentPositions = []models.Position{*s.data.CurrentPosition}
 	}
-	
-	// Return a deep copy to prevent external mutation
+
+	// Create defensive copy while holding write lock
 	positions := make([]models.Position, len(s.data.CurrentPositions))
 	for i := range s.data.CurrentPositions {
 		cloned := clonePosition(&s.data.CurrentPositions[i])
@@ -827,6 +845,8 @@ func (s *JSONStorage) GetCurrentPositions() []models.Position {
 			positions[i] = *cloned
 		}
 	}
+
+	s.mu.Unlock()
 	return positions
 }
 

@@ -308,18 +308,13 @@ func (m *MockStorage) GetLatestIVReading(symbol string) (*models.IVReading, erro
 // GetCurrentPositions returns all current open positions
 func (m *MockStorage) GetCurrentPositions() []models.Position {
 	m.mu.Lock()
-	
+
 	// Migrate legacy single position if needed
 	if m.currentPosition != nil && len(m.currentPositions) == 0 {
 		m.currentPositions = []models.Position{*m.currentPosition}
 	}
-	
-	// Switch to read lock for the rest of the operation
-	m.mu.Unlock()
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 
-	// Return a deep copy
+	// Return a deep copy while still holding the write lock
 	positions := make([]models.Position, len(m.currentPositions))
 	for i := range m.currentPositions {
 		cloned := clonePosition(&m.currentPositions[i])
@@ -327,6 +322,10 @@ func (m *MockStorage) GetCurrentPositions() []models.Position {
 			positions[i] = *cloned
 		}
 	}
+
+	// Release the write lock after creating the copy
+	m.mu.Unlock()
+
 	return positions
 }
 
@@ -490,9 +489,16 @@ func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 	// Update statistics via shared helper
 	m.updateStatistics(finalPnL)
 
-	// Update daily P&L
-	dateStr := time.Now().Format("2006-01-02")
-	m.dailyPnL[dateStr] = m.dailyPnL[dateStr] + finalPnL
+	// Update daily P&L using NY trading day
+	closedAt := posToClose.ExitDate
+	if closedAt.IsZero() {
+		closedAt = time.Now().UTC()
+	}
+	if nyLoc, err := getNYLocation(); err == nil {
+		closedAt = closedAt.In(nyLoc)
+	}
+	day := closedAt.Format("2006-01-02")
+	m.dailyPnL[day] += finalPnL
 
 	return nil
 }
