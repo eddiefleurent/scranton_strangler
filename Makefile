@@ -64,12 +64,12 @@ clean:
 # Unraid deployment
 deploy-unraid:
 	@echo "Deploying binary to Unraid..."
-	@if [ ! -f deploy.sh ]; then \
+	@if [ ! -f ./deploy.sh ]; then \
 		echo "Error: deploy.sh not found. Please ensure the deployment script exists."; \
 		exit 1; \
 	fi
-	@if [ ! -x deploy.sh ]; then \
-		echo "Error: deploy.sh is not executable. Please run 'chmod +x deploy.sh'."; \
+	@if [ ! -x ./deploy.sh ]; then \
+		echo "Error: deploy.sh is not executable. Please run 'chmod +x ./deploy.sh'."; \
 		exit 1; \
 	fi
 	./deploy.sh
