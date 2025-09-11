@@ -201,6 +201,14 @@ func (f *fakeBroker) CancelOrderCtx(ctx context.Context, orderID int) (*broker.O
 	return f.successResponse(), nil
 }
 
+func (f *fakeBroker) GetOrders() (*broker.OrdersResponse, error) {
+	return &broker.OrdersResponse{}, nil
+}
+
+func (f *fakeBroker) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
+	return f.GetOrders()
+}
+
 func (f *fakeBroker) successResponse() *broker.OrderResponse {
 	if f.resp != nil {
 		return f.resp
