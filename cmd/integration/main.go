@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/eddiefleurent/scranton_strangler/internal/broker"
+	brokerPkg "github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
@@ -34,7 +34,7 @@ func main() {
 	logger := log.New(os.Stdout, "[E2E] ", log.LstdFlags)
 
 	// Initialize broker client
-	brokerClient, err := broker.NewTradierClient(
+	brokerClient, err := brokerPkg.NewTradierClient(
 		cfg.Broker.APIKey,
 		cfg.Broker.AccountID,
 		true, // force sandbox mode for integration tests
@@ -95,7 +95,7 @@ func main() {
 	runIntegrationTests(brokerClient, strangleStrategy, storageClient, logger, cfg)
 }
 
-func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrategy, storage storage.Interface, logger *log.Logger, cfg *config.Config) {
+func runIntegrationTests(broker brokerPkg.Broker, strategy *strategy.StrangleStrategy, storage storage.Interface, logger *log.Logger, cfg *config.Config) {
 	testsPassed := 0
 	totalTests := 6
 
@@ -176,7 +176,7 @@ func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrate
 	}
 }
 
-func testBrokerConnectivity(broker broker.Broker, logger *log.Logger) bool {
+func testBrokerConnectivity(broker brokerPkg.Broker, logger *log.Logger) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -190,7 +190,7 @@ func testBrokerConnectivity(broker broker.Broker, logger *log.Logger) bool {
 	return balance > 0
 }
 
-func testMarketDataRetrieval(broker broker.Broker, logger *log.Logger) bool {
+func testMarketDataRetrieval(broker brokerPkg.Broker, logger *log.Logger) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -231,7 +231,7 @@ func testEntryConditions(strategy *strategy.StrangleStrategy, logger *log.Logger
 	return reason != ""
 }
 
-func testOrderPreview(broker broker.Broker, logger *log.Logger, cfg *config.Config) bool {
+func testOrderPreview(broker brokerPkg.Broker, logger *log.Logger, cfg *config.Config) bool {
 	// Get current SPY quote to compute realistic strikes
 	quote, err := broker.GetQuote("SPY")
 	if err != nil {
@@ -253,7 +253,7 @@ func testOrderPreview(broker broker.Broker, logger *log.Logger, cfg *config.Conf
 		1,     // quantity
 		cfg.Strategy.Entry.MinCredit, // limit price from config
 		true,  // preview mode
-		"day",
+		string(brokerPkg.DurationGTC),
 		fmt.Sprintf("integration-test-%d", time.Now().Unix()%100000),
 	)
 	
@@ -297,7 +297,7 @@ func testPositionStorage(storage storage.Interface, logger *log.Logger) bool {
 	return true
 }
 
-func testRiskManagement(strategy *strategy.StrangleStrategy, broker broker.Broker, logger *log.Logger, cfg *config.Config) bool {
+func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Broker, logger *log.Logger, cfg *config.Config) bool {
 	// Test account balance check
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
