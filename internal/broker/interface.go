@@ -51,6 +51,10 @@ type Broker interface {
 	CancelOrder(orderID int) (*OrderResponse, error)
 	CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error)
 
+	// Order retrieval
+	GetOrders() (*OrdersResponse, error)
+	GetOrdersCtx(ctx context.Context) (*OrdersResponse, error)
+
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
 		quantity int, maxDebit float64, tag string) (*OrderResponse, error)
@@ -272,6 +276,16 @@ func (t *TradierClient) CancelOrder(orderID int) (*OrderResponse, error) {
 // CancelOrderCtx cancels an existing order with context
 func (t *TradierClient) CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
 	return t.TradierAPI.CancelOrderCtx(ctx, orderID)
+}
+
+// GetOrders retrieves all orders for the account
+func (t *TradierClient) GetOrders() (*OrdersResponse, error) {
+	return t.TradierAPI.GetOrders()
+}
+
+// GetOrdersCtx retrieves all orders for the account with context
+func (t *TradierClient) GetOrdersCtx(ctx context.Context) (*OrdersResponse, error) {
+	return t.TradierAPI.GetOrdersCtx(ctx)
 }
 
 // PlaceBuyToCloseOrder places a buy-to-close order for a specific option
@@ -583,6 +597,20 @@ func (c *CircuitBreakerBroker) CancelOrder(orderID int) (*OrderResponse, error) 
 func (c *CircuitBreakerBroker) CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
 		return b.CancelOrderCtx(ctx, orderID)
+	})
+}
+
+// GetOrders wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetOrders() (*OrdersResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrdersResponse, error) {
+		return b.GetOrders()
+	})
+}
+
+// GetOrdersCtx wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) GetOrdersCtx(ctx context.Context) (*OrdersResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrdersResponse, error) {
+		return b.GetOrdersCtx(ctx)
 	})
 }
 

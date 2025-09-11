@@ -859,6 +859,62 @@ func (m *MockBroker) CancelOrderCtx(_ context.Context, orderID int) (*OrderRespo
 	return resp, nil
 }
 
+func (m *MockBroker) GetOrders() (*OrdersResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrdersResponse{}
+	// Return empty orders for basic mock
+	resp.Orders.Order = []struct {
+		CreateDate        string  `json:"create_date"`
+		Type              string  `json:"type"`
+		Symbol            string  `json:"symbol"`
+		Side              string  `json:"side"`
+		Class             string  `json:"class"`
+		Status            string  `json:"status"`
+		Duration          string  `json:"duration"`
+		TransactionDate   string  `json:"transaction_date"`
+		AvgFillPrice      float64 `json:"avg_fill_price"`
+		ExecQuantity      float64 `json:"exec_quantity"`
+		LastFillPrice     float64 `json:"last_fill_price"`
+		LastFillQuantity  float64 `json:"last_fill_quantity"`
+		RemainingQuantity float64 `json:"remaining_quantity"`
+		ID                int     `json:"id"`
+		Price             float64 `json:"price"`
+		Quantity          float64 `json:"quantity"`
+	}{}
+	return resp, nil
+}
+
+func (m *MockBroker) GetOrdersCtx(_ context.Context) (*OrdersResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrdersResponse{}
+	// Return empty orders for basic mock
+	resp.Orders.Order = []struct {
+		CreateDate        string  `json:"create_date"`
+		Type              string  `json:"type"`
+		Symbol            string  `json:"symbol"`
+		Side              string  `json:"side"`
+		Class             string  `json:"class"`
+		Status            string  `json:"status"`
+		Duration          string  `json:"duration"`
+		TransactionDate   string  `json:"transaction_date"`
+		AvgFillPrice      float64 `json:"avg_fill_price"`
+		ExecQuantity      float64 `json:"exec_quantity"`
+		LastFillPrice     float64 `json:"last_fill_price"`
+		LastFillQuantity  float64 `json:"last_fill_quantity"`
+		RemainingQuantity float64 `json:"remaining_quantity"`
+		ID                int     `json:"id"`
+		Price             float64 `json:"price"`
+		Quantity          float64 `json:"quantity"`
+	}{}
+	return resp, nil
+}
+
 func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
 	_ int, _ float64, _ string) (*OrderResponse, error) {
 	m.callCount++

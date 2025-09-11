@@ -468,6 +468,30 @@ type OrderResponse struct {
 	} `json:"order"`
 }
 
+// OrdersResponse represents the response when fetching multiple orders from the Tradier API.
+type OrdersResponse struct {
+	Orders struct {
+		Order []struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		} `json:"order"`
+	} `json:"orders"`
+}
+
 // HistoricalDataPoint represents a single historical data point
 type HistoricalDataPoint struct {
 	Date   time.Time `json:"date"`
@@ -993,6 +1017,26 @@ func (t *TradierAPI) CancelOrderCtx(ctx context.Context, orderID int) (*OrderRes
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
 	var response OrderResponse
 	if err := t.makeRequestCtx(ctx, "DELETE", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// GetOrders retrieves all orders for the account from the current trading day
+func (t *TradierAPI) GetOrders() (*OrdersResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrdersResponse
+	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// GetOrdersCtx retrieves all orders for the account from the current trading day with context
+func (t *TradierAPI) GetOrdersCtx(ctx context.Context) (*OrdersResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrdersResponse
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
