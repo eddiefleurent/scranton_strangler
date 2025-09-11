@@ -39,6 +39,11 @@ type Server struct {
 	allocationThreshold float64
 	profitTarget        float64
 	stopLossPct         float64
+	// Cached templates
+	dashboardTemplate       *template.Template
+	positionsTemplate       *template.Template
+	statsTemplate           *template.Template
+	positionDetailTemplate  *template.Template
 }
 
 type Config struct {
@@ -101,14 +106,55 @@ func NewServer(cfg Config, storage storage.Interface, broker broker.Broker, logg
 		stopLossPct:         cfg.StopLossPct,
 	}
 
+	// Pre-parse templates with shared FuncMap
+	if err := s.parseTemplates(); err != nil {
+		logger.WithError(err).Fatal("Failed to parse templates")
+	}
+
 	s.setupRoutes()
 	return s
 }
 
+func (s *Server) parseTemplates() error {
+	funcMap := template.FuncMap{
+		"mul": func(a, b float64) float64 { return a * b },
+		"div": func(a, b float64) float64 { 
+			if b == 0 { return 0 } // Prevent division by zero
+			return a / b 
+		},
+	}
+
+	var err error
+	s.dashboardTemplate, err = template.New("dashboard.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/*.html")
+	if err != nil {
+		return fmt.Errorf("failed to parse dashboard template: %w", err)
+	}
+
+	s.positionsTemplate, err = template.New("positions.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/positions.html")
+	if err != nil {
+		return fmt.Errorf("failed to parse positions template: %w", err)
+	}
+
+	s.statsTemplate, err = template.New("stats.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/stats.html")
+	if err != nil {
+		return fmt.Errorf("failed to parse stats template: %w", err)
+	}
+
+	s.positionDetailTemplate, err = template.New("position-detail.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/position-detail.html")
+	if err != nil {
+		return fmt.Errorf("failed to parse position detail template: %w", err)
+	}
+
+	return nil
+}
+
 func (s *Server) setupRoutes() {
+	s.router.Use(middleware.RequestID)
+	s.router.Use(middleware.RealIP)
 	s.router.Use(s.requestLoggerMiddleware)
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(middleware.Timeout(60 * time.Second))
+	s.router.Use(middleware.Compress(5))
 
 	// Create a filesystem rooted at the "static" directory for proper embedded filesystem serving
 	sub, err := fs.Sub(staticFS, "web/static")
@@ -186,10 +232,12 @@ func (s *Server) redactTokenFromURL(originalURL *url.URL) *url.URL {
 	// Parse and redact query parameters
 	if originalURL.RawQuery != "" {
 		values := originalURL.Query()
-		if values.Has("token") {
-			values.Set("token", "[REDACTED]")
-			loggedURL.RawQuery = values.Encode()
+		for _, k := range []string{"token", "auth_token"} {
+			if values.Has(k) {
+				values.Set(k, "[REDACTED]")
+			}
 		}
+		loggedURL.RawQuery = values.Encode()
 	}
 	
 	return loggedURL
@@ -252,7 +300,10 @@ func (s *Server) Start() error {
 	}
 
 	s.logger.Infof("Starting dashboard server on port %d", s.port)
-	return s.server.ListenAndServe()
+	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
@@ -263,20 +314,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	funcMap := template.FuncMap{
-		"mul": func(a, b float64) float64 { return a * b },
-		"div": func(a, b float64) float64 { 
-			if b == 0 { return 0 } // Prevent division by zero
-			return a / b 
-		},
-	}
-	tmpl, err := template.New("dashboard.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/dashboard.html")
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to parse dashboard template")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	data, err := s.getDashboardData()
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to get dashboard data")
@@ -284,7 +321,8 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tmpl.Execute(w, data); err != nil {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.dashboardTemplate.Execute(w, data); err != nil {
 		s.logger.WithError(err).Error("Failed to execute dashboard template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -295,7 +333,7 @@ func (s *Server) handleGetPositions(w http.ResponseWriter, r *http.Request) {
 
 	views := s.convertPositionsToViews(positions)
 	
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(views); err != nil {
 		s.logger.WithError(err).Error("Failed to encode positions")
 	}
@@ -309,7 +347,7 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(stats); err != nil {
 		s.logger.WithError(err).Error("Failed to encode statistics")
 	}
@@ -320,14 +358,14 @@ func (s *Server) handleGetPosition(w http.ResponseWriter, r *http.Request) {
 	
 	position, found := s.storage.GetPositionByID(id)
 	if !found {
-		s.logger.WithField("position_id", id).Error("Position not found")
+		s.logger.WithField("position_id", id).Warn("Position not found")
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
 
 	view := s.convertPositionToView(&position)
 	
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(view); err != nil {
 		s.logger.WithError(err).Error("Failed to encode position")
 	}
@@ -339,52 +377,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().Unix(),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(health); err != nil {
 		s.logger.WithError(err).Error("Failed to encode health response")
 	}
 }
 
 func (s *Server) handlePositionsPartial(w http.ResponseWriter, r *http.Request) {
-	funcMap := template.FuncMap{
-		"mul": func(a, b float64) float64 { return a * b },
-		"div": func(a, b float64) float64 { 
-			if b == 0 { return 0 } // Prevent division by zero
-			return a / b 
-		},
-	}
-	tmpl, err := template.New("positions.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/positions.html")
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to parse positions template")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	positions := s.storage.GetCurrentPositions()
-
 	views := s.convertPositionsToViews(positions)
 	
-	if err := tmpl.Execute(w, views); err != nil {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.positionsTemplate.ExecuteTemplate(w, "positions-content", views); err != nil {
 		s.logger.WithError(err).Error("Failed to execute positions template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
 
 func (s *Server) handleStatsPartial(w http.ResponseWriter, r *http.Request) {
-	funcMap := template.FuncMap{
-		"mul": func(a, b float64) float64 { return a * b },
-		"div": func(a, b float64) float64 { 
-			if b == 0 { return 0 } // Prevent division by zero
-			return a / b 
-		},
-	}
-	tmpl, err := template.New("stats.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/stats.html")
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to parse stats template")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	stats, err := s.calculateStatistics()
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to calculate statistics")
@@ -392,38 +402,26 @@ func (s *Server) handleStatsPartial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tmpl.Execute(w, stats); err != nil {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.statsTemplate.ExecuteTemplate(w, "stats-content", stats); err != nil {
 		s.logger.WithError(err).Error("Failed to execute stats template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
 
 func (s *Server) handlePositionDetailPartial(w http.ResponseWriter, r *http.Request) {
-	funcMap := template.FuncMap{
-		"mul": func(a, b float64) float64 { return a * b },
-		"div": func(a, b float64) float64 { 
-			if b == 0 { return 0 } // Prevent division by zero
-			return a / b 
-		},
-	}
-	tmpl, err := template.New("position-detail.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/position-detail.html")
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to parse position detail template")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
 	id := chi.URLParam(r, "id")
 	position, found := s.storage.GetPositionByID(id)
 	if !found {
-		s.logger.WithField("position_id", id).Error("Position not found")
+		s.logger.WithField("position_id", id).Warn("Position not found")
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
 
 	view := s.convertPositionToView(&position)
 	
-	if err := tmpl.Execute(w, view); err != nil {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.positionDetailTemplate.Execute(w, view); err != nil {
 		s.logger.WithError(err).Error("Failed to execute position detail template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -460,11 +458,11 @@ func (s *Server) getDashboardData() (*DashboardData, error) {
 func (s *Server) convertPositionsToViews(positions []models.Position) []PositionView {
 	views := make([]PositionView, 0, len(positions))
 	
-	for _, pos := range positions {
-		if pos.State == models.StateClosed {
+	for i := range positions {
+		if positions[i].State == models.StateClosed {
 			continue
 		}
-		views = append(views, s.convertPositionToView(&pos))
+		views = append(views, s.convertPositionToView(&positions[i]))
 	}
 	
 	return views
@@ -561,8 +559,8 @@ func isMarketOpen() bool {
 	now := time.Now()
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		// Fallback to UTC if timezone loading fails
-		loc = time.UTC
+		// Approximate fallback (no DST): EST (UTC-5)
+		loc = time.FixedZone("EST", -5*60*60)
 	}
 	nyTime := now.In(loc)
 	

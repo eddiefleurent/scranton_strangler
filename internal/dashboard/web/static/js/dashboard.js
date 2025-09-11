@@ -2,10 +2,11 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Scranton Strangler Dashboard loaded');
     
     document.addEventListener('htmx:beforeRequest', function(event) {
-        const url = event.detail.requestConfig?.path || 
-                   event.detail.requestConfig?.url || 
-                   event.detail.xhr?.responseURL || 
-                   'unknown';
+        const url = event.detail.requestConfig?.path ||
+                    event.detail.requestConfig?.url ||
+                    event.detail.path || // htmx 1.x
+                    event.detail.xhr?.responseURL ||
+                    'unknown';
         console.log('HTMX request starting:', url);
     });
     
@@ -36,6 +37,9 @@ document.addEventListener('DOMContentLoaded', function() {
             errorDiv = document.createElement('div');
             errorDiv.id = 'error-message';
             errorDiv.className = 'error-banner';
+            errorDiv.setAttribute('role', 'alert');
+            errorDiv.setAttribute('aria-live', 'assertive');
+            errorDiv.setAttribute('aria-atomic', 'true');
             document.body.appendChild(errorDiv);
         }
         
@@ -65,7 +69,9 @@ function hidePositionDetail() {
 }
 
 document.addEventListener('click', function(e) {
-    if (e.target.dataset.action === 'close-detail') {
+    const btn = e.target.closest('[data-action="close-detail"]');
+    if (btn) {
+        e.preventDefault();
         hidePositionDetail();
     }
 });

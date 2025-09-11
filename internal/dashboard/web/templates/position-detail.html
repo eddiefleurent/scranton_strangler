@@ -1,5 +1,5 @@
 <div class="position-detail">
-    <button class="close-detail" data-action="close-detail">×</button>
+    <button type="button" class="close-detail" data-action="close-detail" aria-label="Close details">×</button>
     
     <h3>Position: {{.Symbol}}</h3>
     
@@ -11,7 +11,7 @@
         
         <div class="detail-item">
             <label>State:</label>
-            <span class="state-badge state-{{.State}}">{{.State}}</span>
+            <span class="state-badge state-{{if eq .State "idle"}}idle{{else if eq .State "submitted"}}submitted{{else if eq .State "open"}}open{{else if eq .State "closed"}}closed{{else if eq .State "error"}}error{{else if eq .State "first_down"}}first-down{{else if eq .State "second_down"}}second-down{{else if eq .State "third_down"}}third-down{{else if eq .State "fourth_down"}}fourth-down{{else if eq .State "adjusting"}}adjusting{{else if eq .State "rolling"}}rolling{{else}}unknown{{end}}">{{.State}}</span>
         </div>
         
         <div class="detail-item">
@@ -68,7 +68,7 @@
         <div class="progress-bar-container">
             <label>Risk Level:</label>
             <div class="progress-bar">
-                <div class="progress-fill loss" style="width: {{printf "%.0f" .RiskLevelPercent}}%"></div>
+                <div class="progress-fill loss" style="width: {{if lt .RiskLevelPercent 0}}0{{else if gt .RiskLevelPercent 100}}100{{else}}{{printf "%.0f" .RiskLevelPercent}}{{end}}%"></div>
             </div>
         </div>
     </div>
