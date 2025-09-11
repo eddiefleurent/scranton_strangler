@@ -4,7 +4,7 @@
 - **Product**: SPY (S&P 500 ETF)
 - **Strategy**: Short Strangle (sell OTM put + OTM call)
 - **Target Win Rate**: 80-90% (with proper management)
-- **Typical Duration**: 21-30 days (from 45 DTE entry)
+- **Typical Duration**: ~24 days (entered ≈45 DTE, exited at ≈21 DTE remaining)
 - **Profit Target**: 50% of initial credit
 - **Capital Allocation**: 30-35% of account max
 
@@ -13,14 +13,14 @@
 ## Entry Checklist
 
 ### Pre-Entry Requirements
-1. **Check IV Rank (IVR)**
-   - IVR > 30: Proceed normally
-   - IVR > 40: High IV - consider shorter DTE (30 days)
-   - IVR < 30: Low IV - consider longer DTE (60 days) or skip
+1. **Check SPY Implied Volatility (IV) Level**
+   - SPY ATM IV ≥ 15%: Proceed with entry (MVP threshold)
+   - SPY ATM IV ≥ 20%: High IV - excellent entry conditions
+   - SPY ATM IV < 15%: Skip entry - insufficient premium
 
 2. **Market Conditions**
    - No major events in next 48 hours
-   - VIX ideally > 20 (higher premiums)
+   - SPY ATM IV reflects adequate volatility premium
    - SPY not at extreme technical levels
 
 ### Entry Parameters
@@ -100,20 +100,106 @@ If Experienced/Active Management:
 ## Exit Rules
 
 ### Standard Exits
-1. **Profit Target Hit**: 50% of initial credit
-2. **Time Exit**: 21 DTE remaining (avoid gamma risk)
+1. **Profit Target Hit**: 50% of initial credit (GTC limit order when using OTOCO)
+2. **Time Exit**: MaxDTE (21) remaining (avoid gamma risk)
 3. **Whichever comes first**
 
-### Emergency Exits
-- Loss exceeds 200% of collected premium
+### Profit Taking Mechanics
+- **With OTOCO**: Automatically places GTC limit order at entry
+- **Without OTOCO**: Monitor daily for 50% profit opportunity
+- **Target**: Buy to close at 50% of credit received
+- **Example**: Collected $3.00 credit → Exit at $1.50 debit
+
+### Emergency Exits (Manual Intervention Only)
+- Loss exceeds EscalateLossPct (2.0 = 200%) of collected premium (escalate/prepare for action)
+- Loss reaches StopLossPct (2.5 = 250%) of collected premium (position must be immediately closed)
 - Black swan event (market drops/rises >8% in day)
 - Major unexpected news event
 - Assignment risk becomes imminent
 
-### No Stop Loss Policy
-- Tastytrade research shows stops don't improve returns
-- Manage through rolling instead
-- Exception: Catastrophic moves (>2x expected move)
+### Automated Management Policy
+- **Research**: Tastytrade studies show mechanical stops can reduce returns ([Options Backtesting](https://www.tastytrade.com/tools/options/backtesting), [Research](https://www.tastytrade.com/tools/options/backtesting/research))
+- **Philosophy**: Manage through rolling and adjustments with hard limits
+- **Automated System**: Must have definitive stop conditions
+- **Never**: Let losses exceed defined thresholds without action
+- **Rationale**: Balance management benefits with automation requirements
+
+---
+
+## Automated Management Rules
+
+### Management Sequence (Football System - Automated)
+
+#### First Down (Initial Position)
+- **Goal**: 50% profit via OTOCO exit order
+- **Monitor**: Position delta, time decay, price movement
+- **Action**: None - let theta work
+- **Trigger Next**: Stock within 5 points of either strike
+
+#### Second Down (Strike Challenged)
+- **Trigger**: SPY within 5 points of put or call strike
+- **Action**: Roll untested side closer (1st adjustment)
+- **OCO Order**: Close untested side at 70% profit OR roll to new strike
+- **Count**: Strike adjustments = 1
+- **Trigger Next**: Original strike breached
+
+#### Third Down (Strike Breached) 
+- **Trigger**: SPY breaks through original strike price
+- **Action**: Roll untested side to same strike (2nd adjustment = straddle)
+- **OCO Order**: Take 25% total profit OR continue to Fourth Down
+- **Count**: Strike adjustments = 2
+- **Limit**: Hold straddle maximum 7 days
+- **Trigger Next**: Loss exceeds EscalateLossPct (200%) of credit
+
+#### Fourth Down (Critical Decision) - AUTOMATED STOPS
+- **Trigger**: Loss > EscalateLossPct (200%) of credit received
+- **Three Actions** (Bot selects based on conditions):
+
+##### Option A — Field Goal (Inverted Strangle)
+- Roll untested strike below tested strike (3rd adjustment)
+- **Count**: Strike adjustments = 3 (FINAL ADJUSTMENT)
+- **STOP**: Close at any profit OR at EscalateLossPct (200%) loss (whichever first)
+- **Time Limit**: 5 days maximum
+
+##### Option B — Go For It (Hold Straddle) 
+- Keep current straddle, wait for recovery (no additional roll)
+- **Count**: Strike adjustments remain at 2
+- **STOP**: Close at 25% profit OR EscalateLossPct (200%) loss (whichever first)
+- **Time Limit**: 3 days maximum
+
+##### Option C — Punt (Time Roll)
+- Roll entire position to next expiration (time adjustment, not strike)
+- **Count**: Strike adjustments reset to 0, but trade marked as "punted"
+- **STOP**: Close at 50% profit OR MaxDTE (21) OR EscalateLossPct (200%) total loss
+- **LIMIT**: Maximum 1 punt per original trade
+- **RESET**: New expiration cycle allows fresh First→Fourth Down sequence
+
+### Hard Stop Conditions (Non-Negotiable)
+
+1. **Maximum Loss Stop**: StopLossPct (250%) of credit received
+2. **Time Stop**: 5 DTE remaining (assignment risk)
+3. **Delta Stop**: Position delta > |1.0| (directional risk too high)
+4. **Management Stop**: Completed Fourth Down without recovery
+5. **Black Swan Stop**: SPY moves >8% in single day
+6. **Liquidity Stop**: Bid-ask spread >$0.50 on either leg
+
+### Automated Decision Matrix
+
+| Condition | Days Remaining | Loss Level | Action |
+|-----------|---------------|------------|---------|
+| Normal | >MaxDTE (21) | <50% | Continue monitoring |
+| Strike approached | >MaxDTE (21) | <100% | Roll untested side |
+| Strike breached | >14 DTE | <EscalateLossPct (200%) | Create straddle |
+| Critical loss | >7 DTE | >EscalateLossPct (200%) | Execute Fourth Down |
+| **HARD STOP** | Any | >StopLossPct (250%) | **Close immediately** |
+| **HARD STOP** | <5 DTE | Any | **Close immediately** |
+
+### Emergency Exit Triggers (Immediate Close)
+- SPY gap >5% overnight
+- VIX spike >50% in single day  
+- Major market circuit breaker triggered
+- Broker margin call received
+- System error/connectivity loss
 
 ---
 
@@ -136,26 +222,27 @@ $17,500 ÷ $15,000 BPR = 1 contract
 
 ### Realistic Risk Scenarios
 - **Normal Loss**: 50-100% of credit collected
-- **Bad Loss**: 200% of credit (manageable)
+- **Bad Loss**: EscalateLossPct (200%) of credit (manageable)
 - **Worst Case**: 500-700% of credit (black swan)
-- **Protect Against**: Never let loss exceed 300% without action
+- **Protect Against**: Never let loss exceed StopLossPct (250%) without action
 
 ---
 
-## IV Rank Strategy
+## SPY Implied Volatility Strategy (MVP)
 
-### Entry Timing by IVR
-| IVR Range | Action | DTE | Notes |
-|-----------|--------|-----|-------|
-| 0-20 | Skip or 60 DTE | 60 | Very low premium environment |
-| 20-30 | Proceed cautiously | 60 | Below average opportunity |
-| 30-50 | Standard entry | 45 | Normal conditions |
-| 50-70 | Excellent entry | 45 | Above average opportunity |
-| 70+ | Premium entry | 30 | High IV, shorten DTE |
+### Entry Timing by SPY ATM IV
+| SPY IV Range | Action | DTE | Notes |
+|--------------|--------|-----|-------|
+| < 12% | Skip | - | Very low premium environment |
+| 12-15% | Proceed cautiously | 45 | Below threshold, consider waiting |
+| ≥ 15% | **ENTRY SIGNAL** | 45 | MVP threshold met |
+| ≥ 20% | Excellent entry | 45 | Above average opportunity |
+| ≥ 25% | Premium entry | 30-45 | High IV, consider shorter DTE |
 
-### Finding IVR
-- TastyWorks platform
-- ThinkOrSwim
+### Finding SPY ATM IV
+- **Bot Method**: Automated from SPY option chain (ATM call/put)
+- **Manual Verification**: TastyWorks, ThinkOrSwim, or Barchart
+- **Current Implementation**: Real-time from Tradier API
 
 ---
 
@@ -180,10 +267,10 @@ $17,500 ÷ $15,000 BPR = 1 contract
 ## Common Mistakes to Avoid
 
 1. **Over-allocating capital** - Stick to 35% max
-2. **Holding past 21 DTE** - Gamma risk increases exponentially
+2. **Holding past MaxDTE (21)** - Gamma risk increases exponentially
 3. **Not taking 50% profits** - Greed kills returns
 4. **Using on single stocks** - Stick to ETFs for stability
-5. **Ignoring IVR** - Trade when premium is worth it
+5. **Ignoring SPY IV levels** - Trade when premium is worth it
 6. **Aggressive rolling** - Don't chase, defend systematically
 7. **Setting stop losses** - Roll and manage instead
 8. **Trading around events** - Avoid FOMC, CPI releases
@@ -196,7 +283,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 1. Check SPY price vs strikes
 2. Calculate current P&L
 3. Check days remaining
-4. Review IVR for new entries
+4. Review SPY IV level for new entries
 
 ### Midday Check
 1. Assess if management needed
@@ -215,7 +302,7 @@ $17,500 ÷ $15,000 BPR = 1 contract
 ### Based on Backtesting (2005-2023)
 - **Win Rate**: 83% for 16Δ strangles
 - **Average Winner**: 50% of max profit
-- **Average Loser**: 150% of credit collected
+- **Average Loser**: EscalateLossPct (200%) of credit collected
 - **Expected Annual Return**: 25-30% (at 35% allocation)
 - **Worst Drawdown**: -20% (March 2020)
 - **Recovery Time**: 3-6 months from major losses
@@ -261,7 +348,7 @@ Track for each trade:
 - Entry date and DTE
 - Strikes and deltas at entry
 - Initial credit collected
-- IVR at entry
+- SPY ATM IV at entry
 - All adjustments made
 - Exit date and profit/loss
 - Days held
@@ -273,8 +360,8 @@ Track for each trade:
 ## Quick Decision Tree
 
 ```
-Is IVR > 30?
-  No → Wait or use 60 DTE
+Is SPY ATM IV ≥ 15%?
+  No → Wait for higher IV
   Yes ↓
   
 Sell 45 DTE strangle at 16Δ
@@ -285,7 +372,7 @@ At 50% profit?
   Yes → CLOSE
   No ↓
   
-At 21 DTE?
+At MaxDTE (21)?
   Yes → CLOSE
   No ↓
   
@@ -298,11 +385,11 @@ Strike being tested?
 
 ## Final Rules for Success
 
-1. **Patience**: Wait for good IVR setups
+1. **Patience**: Wait for SPY IV ≥ 15% setups
 2. **Discipline**: Take 50% profits religiously
 3. **Defense**: Manage early and often
 4. **Size**: Never over-allocate
-5. **Time**: Exit by 21 DTE always
+5. **Time**: Exit by MaxDTE (21) always
 6. **Simplicity**: Stick to SPY until experienced
 7. **Records**: Track everything for improvement
 8. **Learning**: Each trade teaches something

@@ -8,23 +8,28 @@ environment:
 broker:
   provider: "tradier"
   api_key: "YOUR_SANDBOX_API_KEY_HERE"  # Get from https://developer.tradier.com/
-  api_endpoint: "https://sandbox.tradier.com/v1/"  # Sandbox endpoint
   account_id: "YOUR_ACCOUNT_ID_HERE"  # Get from Tradier dashboard
+  use_otoco: true  # Use OTOCO orders to preset exit at 50% profit
+  otoco_preview: true  # Future: Use /orders/preview?preview=true to validate OTOCO before placement (currently no-op)
+  otoco_fallback: true  # Future: Fall back to separate entry + linked exits if OTOCO validation fails (currently no-op)
   
 strategy:
   symbol: "SPY"
   allocation_pct: 0.35  # 35% of account max
-  
+  escalate_loss_pct: 1.5  # Escalate if loss exceeds 150% of credit (ratio: 1.5 = 150%, must be < exit.stop_loss_pct)
   entry:
-    min_ivr: 30  # Minimum IV rank to enter
+    min_iv_pct: 15.0  # Minimum SPY ATM IV percentage to enter (MVP threshold)
     target_dte: 45  # Target days to expiration
     dte_range: [40, 50]  # Acceptable DTE range
     delta: 16  # Target delta (16 = 0.16)
     min_credit: 2.00  # Minimum credit to receive
+    min_volume: 100  # Minimum daily volume for liquidity (0 to disable, default: 100)
+    min_open_interest: 1000  # Minimum open interest for liquidity (0 to disable, default: 1000)
     
   exit:
     profit_target: 0.50  # Exit at 50% profit
     max_dte: 21  # Exit with 21 days remaining
+    stop_loss_pct: 2.0  # Exit if loss exceeds 200% of credit (ratio: 2.0 = 200%, clamped to risk.max_position_loss)
     
   adjustments:
     enabled: false  # Start with false, enable after MVP proven
@@ -37,6 +42,10 @@ risk:
   
 schedule:
   market_check_interval: "15m"  # How often to check market
+  timezone: "America/New_York"  # Market timezone (handles DST)
   trading_start: "09:45"  # Start 15 min after open
   trading_end: "15:45"  # Stop 15 min before close
   after_hours_check: false
+
+storage:
+  path: "data/positions.json"  # Persistent path; mount as a volume in Docker

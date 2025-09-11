@@ -17,8 +17,7 @@ Automated options trading bot implementing the SPY short strangle strategy with 
 export TRADIER_API_KEY='your_sandbox_token_here'
 
 # Run the test script
-cd scripts
-go run test_tradier_api.go
+go run ./scripts/test_tradier/test_tradier.go
 ```
 
 You should see:
@@ -45,17 +44,18 @@ Key settings to update:
 ### 4. Run the Bot
 
 ```bash
-# Build the bot
-go build -o strangle-bot cmd/bot/main.go
+# Build and run locally
+make build
+make run
 
-# Run in paper trading mode
-./strangle-bot --config=config.yaml
+# Or deploy to Unraid server
+make deploy-unraid
 ```
 
 ## Project Structure
 
 ```
-spy-strangle-bot/
+scranton_strangler/
 ├── cmd/bot/          # Main application entry
 ├── internal/         # Core business logic
 │   ├── broker/       # Tradier API client
@@ -68,31 +68,94 @@ spy-strangle-bot/
 └── config.yaml       # Your configuration (git ignored)
 ```
 
+## Data Formats
+
+### Timestamp Format
+All timestamps in position data (`data/positions.json`) use **UTC with Z suffix**:
+- Format: `YYYY-MM-DDTHH:MM:SSZ` (ISO 8601 UTC)
+- Example: `2024-12-20T21:00:00Z` (December 20, 2024 at 9:00 PM UTC)
+- **Not accepted**: Local time with Z suffix (e.g., `2024-12-20T16:00:00Z` for 4:00 PM ET)
+- **Not accepted**: Explicit offsets (e.g., `2024-12-20T16:00:00-05:00`)
+
+### IV Rank Format
+IV Rank (IVR) values are stored as **integers from 0-100**:
+- Format: Whole numbers (0-100)
+- Example: `18` (not `0.18`)
+- This matches the strategy thresholds and documentation
+- Values represent percentage points (18 = 18% IV rank)
+
 ## Strategy Overview
 
 The bot implements a mechanical short strangle strategy on SPY:
 
 1. **Entry**: Sell 16Δ put and call when IVR > 30
-2. **Exit**: Close at 50% profit or 21 DTE
+2. **Exit**: Close at 50% profit or 21 DTE (automatic with OTOCO orders)
 3. **Risk**: Max 35% account allocation
 4. **Management**: Progressive adjustments (Phase 2)
+
+### OTOCO Order Support
+
+The bot can use OTOCO (One-Triggers-One-Cancels-Other) orders for automatic profit taking:
+- When enabled via `use_otoco: true` in config
+- Places exit order immediately when opening position
+- Exit order stays active (GTC) until filled at 50% profit
+- No need to monitor positions for profit target
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full system design.
 
 ## Development Phases
 
-- **Phase 1 (Current)**: Basic entry/exit, paper trading
-- **Phase 2**: Full adjustment system
-- **Phase 3**: Multi-asset portfolio
-- **Phase 4**: Production deployment
+- **Phase 1 (MVP)**: Basic entry/exit logic with paper trading ✅
+- **Phase 2**: Full adjustment system ("Football System")
+- **Phase 3**: Multi-asset portfolio support
+- **Phase 4**: Production hardening and monitoring
 
 ## Safety First
 
-⚠️ **IMPORTANT**: 
+⚠️ **IMPORTANT**:
 - Always start with paper trading
 - Test for minimum 30 days
 - Verify all trades match expected behavior
 - Never trade with money you can't afford to lose
+
+## Unraid Deployment
+
+The bot is designed for simple binary deployment to Unraid servers. No Docker containers or runtime dependencies required.
+
+### Prerequisites
+
+1. **SSH Key Authentication**: Ensure passwordless SSH access to your Unraid server:
+   ```bash
+   ssh unraid "echo 'Connection successful'"
+   ```
+
+2. **Configuration**: Create your trading configuration:
+   ```bash
+   make dev-setup  # Creates config.yaml from example
+   # Edit config.yaml with your Tradier API credentials
+   ```
+
+### Deploy to Unraid
+
+```bash
+make deploy-unraid
+```
+
+**What happens automatically:**
+- Builds Go binary for Linux
+- Creates `/mnt/user/appdata/scranton-strangler/` directory structure
+- Copies binary and config to Unraid
+- Creates start/stop service scripts
+- Adds to Unraid's boot sequence for auto-start
+- Starts the bot immediately
+
+### Management Commands
+
+```bash
+make unraid-logs      # View bot logs
+make unraid-status    # Check if bot is running
+make unraid-restart   # Restart the bot service
+```
 
 ## Monitoring
 
@@ -120,16 +183,22 @@ The bot logs all activity to `bot.log`:
 - Check minimum credit requirement ($2)
 - Ensure market hours (9:30 AM - 4:00 PM ET)
 
-## Next Steps
+## Implementation Status
 
-1. [x] Test Tradier API connection
-2. [ ] Implement IVR calculation
-3. [ ] Build entry scanner
-4. [ ] Create position monitor
-5. [ ] Add exit logic
-6. [ ] Start paper trading
-7. [ ] Run for 30 days
-8. [ ] Evaluate results
+**Current Implementation** (Phase 1 MVP):
+- ✅ Tradier API integration with rate limiting
+- ✅ IVR calculation using VXX proxy
+- ✅ Complete option chain processing
+- ✅ Entry signal generation (IVR > 30%, 45 DTE, 16Δ)
+- ✅ Order execution via Tradier API
+- ✅ Position state machine with comprehensive tracking
+- ✅ Paper trading mode for safe testing
+- ✅ Unraid deployment with auto-start
+
+**Next Steps** (Phase 2):
+- [ ] Advanced adjustment logic ("Football System")
+- [ ] Production hardening and monitoring
+- [ ] Multi-asset portfolio support
 
 ## Resources
 

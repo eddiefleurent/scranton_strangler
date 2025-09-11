@@ -1,3 +1,4 @@
+// Package main provides the entry point for the SPY short strangle trading bot.
 package main
 
 import (
@@ -7,20 +8,39 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
-	"github.com/eddie/spy-strangle-bot/internal/broker"
-	"github.com/eddie/spy-strangle-bot/internal/config"
-	"github.com/eddie/spy-strangle-bot/internal/strategy"
+	"github.com/eddiefleurent/scranton_strangler/internal/broker"
+	"github.com/eddiefleurent/scranton_strangler/internal/config"
+	"github.com/eddiefleurent/scranton_strangler/internal/orders"
+	"github.com/eddiefleurent/scranton_strangler/internal/retry"
+	"github.com/eddiefleurent/scranton_strangler/internal/storage"
+	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 )
 
+// Bot represents the main trading bot instance.
 type Bot struct {
-	config   *config.Config
-	broker   *broker.TradierClient
-	strategy *strategy.StrangleStrategy
-	logger   *log.Logger
-	stop     chan struct{}
+	config        *config.Config
+	broker        broker.Broker
+	strategy      *strategy.StrangleStrategy
+	storage       storage.Interface
+	logger        *log.Logger
+	stop          chan struct{}
+	ctx           context.Context // Main bot context for operations
+	orderManager  *orders.Manager
+	retryClient   *retry.Client
+	nyLocation    *time.Location // Cached NY timezone location
+	lastPnLUpdate time.Time      // Last time P&L was persisted to reduce write amplification
+	pnlThrottle   time.Duration  // Minimum interval between P&L updates
+	calendarMu    sync.RWMutex   // protects market calendar cache
+
+	// Market calendar caching
+	marketCalendar     *broker.MarketCalendarResponse
+	calendarCacheMonth int
+	calendarCacheYear  int
 }
 
 func main() {
@@ -36,43 +56,89 @@ func main() {
 
 	// Create logger
 	logger := log.New(os.Stdout, "[BOT] ", log.LstdFlags|log.Lshortfile)
-	
+
 	logger.Printf("Starting SPY Strangle Bot in %s mode", cfg.Environment.Mode)
 	if cfg.IsPaperTrading() {
 		logger.Println("🏳️ PAPER TRADING MODE - No real money at risk")
 	} else {
 		logger.Println("💰 LIVE TRADING MODE - Real money at risk!")
-		logger.Println("Waiting 10 seconds to confirm...")
-		time.Sleep(10 * time.Second)
+		if os.Getenv("BOT_SKIP_LIVE_WAIT") != "1" {
+			logger.Println("Waiting 10 seconds to confirm... (set BOT_SKIP_LIVE_WAIT=1 to skip)")
+			time.Sleep(10 * time.Second)
+		}
 	}
 
 	// Initialize bot
 	bot := &Bot{
-		config: cfg,
-		logger: logger,
-		stop:   make(chan struct{}),
+		config:        cfg,
+		logger:        logger,
+		stop:          make(chan struct{}),
+		pnlThrottle:   30 * time.Second,           // Throttle P&L updates to every 30 seconds minimum
+		lastPnLUpdate: time.Now().Add(-time.Hour), // Initialize to past time to allow immediate first update
+	}
+
+	// Cache NY timezone location
+	if loc, err := time.LoadLocation("America/New_York"); err != nil {
+		log.Fatalf("Failed to load NY timezone: %v", err)
+	} else {
+		bot.nyLocation = loc
 	}
 
 	// Initialize broker client
-	bot.broker = broker.NewTradierClient(
+	tradierClient, err := broker.NewTradierClient(
 		cfg.Broker.APIKey,
-		cfg.Broker.APIEndpoint,
 		cfg.Broker.AccountID,
 		cfg.IsPaperTrading(),
+		cfg.Broker.UseOTOCO,
+		cfg.Strategy.Exit.ProfitTarget,
 	)
+	if err != nil {
+		log.Fatalf("Failed to create Tradier client: %v", err)
+	}
+
+	// Wrap with circuit breaker for resilience
+	bot.broker = broker.NewCircuitBreakerBroker(tradierClient)
+
+	// Initialize storage
+	storagePath := cfg.Storage.Path
+	store, err := storage.NewStorage(storagePath)
+	if err != nil {
+		log.Fatalf("Failed to initialize storage: %v", err)
+	}
+	bot.storage = store
 
 	// Initialize strategy
-	strategyConfig := &strategy.StrategyConfig{
-		Symbol:        cfg.Strategy.Symbol,
-		DTETarget:     cfg.Strategy.Entry.TargetDTE,
-		DeltaTarget:   cfg.Strategy.Entry.Delta / 100, // Convert from percentage
-		ProfitTarget:  cfg.Strategy.Exit.ProfitTarget,
-		MaxDTE:        cfg.Strategy.Exit.MaxDTE,
-		AllocationPct: cfg.Strategy.AllocationPct,
-		MinIVR:        cfg.Strategy.Entry.MinIVR,
-		MinCredit:     cfg.Strategy.Entry.MinCredit,
+	strategyConfig := &strategy.Config{
+		Symbol:              cfg.Strategy.Symbol,
+		DTETarget:           cfg.Strategy.Entry.TargetDTE,
+		DTERange:            cfg.Strategy.Entry.DTERange,
+		DeltaTarget:         cfg.Strategy.Entry.Delta / 100, // Convert from percentage
+		ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
+		MaxDTE:              cfg.Strategy.Exit.MaxDTE,
+		AllocationPct:       cfg.Strategy.AllocationPct,
+		MinIVPct:            cfg.Strategy.Entry.MinIVPct,
+		MinCredit:           cfg.Strategy.Entry.MinCredit,
+		EscalateLossPct:     cfg.Strategy.EscalateLossPct,
+		StopLossPct:         cfg.Strategy.Exit.StopLossPct,
+		MaxPositionLoss:     cfg.Risk.MaxPositionLoss,
+		MaxContracts:        cfg.Risk.MaxContracts,
+		MinVolume:           cfg.Strategy.Entry.MinVolume,
+		MinOpenInterest:     cfg.Strategy.Entry.MinOpenInterest,
 	}
-	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig)
+	bot.strategy = strategy.NewStrangleStrategy(bot.broker, strategyConfig, logger, bot.storage)
+
+	// Initialize order manager
+	bot.orderManager = orders.NewManager(bot.broker, bot.storage, logger, bot.stop)
+
+	// Initialize retry client
+	bot.retryClient = retry.NewClient(bot.broker, logger)
+
+	// Pre-fetch this month's market calendar for caching
+	logger.Println("Fetching market calendar for this month...")
+	_, calErr := bot.getMarketCalendar(0, 0) // Current month/year
+	if calErr != nil {
+		logger.Printf("Warning: Could not fetch market calendar: %v (will fallback to real-time checks)", calErr)
+	}
 
 	// Set up signal handling for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -96,19 +162,35 @@ func main() {
 	logger.Println("Bot stopped successfully")
 }
 
+// Run starts the bot's main execution loop.
 func (b *Bot) Run(ctx context.Context) error {
+	b.ctx = ctx // Store context for use in operations
 	b.logger.Println("Bot starting main loop...")
-	
-	// Verify broker connection
+
+	// Verify broker connection with timeout
 	b.logger.Println("Verifying broker connection...")
-	balance, err := b.broker.GetAccountBalance()
+	ctxBal, cancelBal := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelBal()
+	
+	bal, err := b.broker.GetAccountBalanceCtx(ctxBal)
 	if err != nil {
-		return fmt.Errorf("failed to connect to broker: %w", err)
+		if ctxBal.Err() != nil {
+			return fmt.Errorf("broker health check timed out: %w", ctxBal.Err())
+		} else if ctx.Err() != nil {
+			return fmt.Errorf("broker health check cancelled: %w", ctx.Err())
+		} else {
+			return fmt.Errorf("failed to connect to broker: %w", err)
+		}
 	}
-	b.logger.Printf("Connected to broker. Account balance: $%.2f", balance)
+	b.logger.Printf("Connected to broker. Account balance: $%.2f", bal)
 
 	// Main trading loop
-	ticker := time.NewTicker(b.config.GetCheckInterval())
+	interval := b.config.GetCheckInterval()
+	if interval <= 0 {
+		b.logger.Printf("Warning: invalid check interval %v; defaulting to 30s", interval)
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// Run immediately on start
@@ -127,104 +209,125 @@ func (b *Bot) Run(ctx context.Context) error {
 }
 
 func (b *Bot) runTradingCycle() {
+	// Use the new TradingCycle handler
+	tradingCycle := NewTradingCycle(b)
+	tradingCycle.Run()
+}
+
+
+
+
+
+
+
+// Utility functions have been moved to utils.go
+
+// getMarketCalendar gets the market calendar for a given month/year, with caching
+func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	// Use current month/year if not specified
+	// Use NY timezone when defaulting month/year for calendar cache
 	now := time.Now()
-	
-	// Check if within trading hours
-	if !b.config.IsWithinTradingHours(now) {
-		b.logger.Printf("Outside trading hours (%s - %s), skipping cycle",
-			b.config.Schedule.TradingStart, b.config.Schedule.TradingEnd)
-		return
+	if b.nyLocation != nil {
+		now = now.In(b.nyLocation)
+	}
+	if month == 0 {
+		month = int(now.Month())
+	}
+	if year == 0 {
+		year = now.Year()
 	}
 
-	b.logger.Println("Starting trading cycle...")
+	// Check if we have cached data for this month/year
+	b.calendarMu.RLock()
+	if b.marketCalendar != nil &&
+		b.calendarCacheMonth == month &&
+		b.calendarCacheYear == year {
+		cal := b.marketCalendar
+		b.calendarMu.RUnlock()
+		return cal, nil
+	}
+	b.calendarMu.RUnlock()
 
-	// Check for existing position
-	hasPosition := b.checkExistingPosition()
+	// Fetch new calendar data
+	b.logger.Printf("Fetching market calendar for %d/%d", month, year)
 	
-	if hasPosition {
-		// Check exit conditions
-		b.logger.Println("Position exists, checking exit conditions...")
-		shouldExit, reason := b.strategy.CheckExitConditions()
-		if shouldExit {
-			b.logger.Printf("Exit signal: %s", reason)
-			b.executeExit(reason)
-		} else {
-			b.logger.Println("No exit conditions met, continuing to monitor")
-		}
-		
-		// Check for adjustments (Phase 2)
-		if b.config.Strategy.Adjustments.Enabled {
-			b.checkAdjustments()
-		}
+	// Use context with timeout for the API call
+	ctx := b.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	
+	calendar, err := b.broker.GetMarketCalendarCtx(ctx, month, year)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get market calendar: %w", err)
+	}
+
+	// Cache the result (note: nil does not count as a cache hit)
+	b.calendarMu.Lock()
+	b.marketCalendar = calendar
+	b.calendarCacheMonth = month
+	b.calendarCacheYear = year
+	b.calendarMu.Unlock()
+
+	// Compute safe daysCount with proper checks
+	daysCount := 0
+	if calendar != nil && calendar.Calendar.Days.Day != nil {
+		daysCount = len(calendar.Calendar.Days.Day)
+	}
+
+	b.logger.Printf("Cached market calendar: %d days for %d/%d", 
+		daysCount, month, year)
+
+	return calendar, nil
+}
+
+// getTodaysMarketSchedule gets today's market schedule from the cached calendar
+func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
+	var now time.Time
+	if b.nyLocation != nil {
+		now = time.Now().In(b.nyLocation)
 	} else {
-		// Check entry conditions
-		b.logger.Println("No position, checking entry conditions...")
-		canEnter, reason := b.strategy.CheckEntryConditions()
-		if canEnter {
-			b.logger.Printf("Entry signal: %s", reason)
-			b.executeEntry()
-		} else {
-			b.logger.Printf("Entry conditions not met: %s", reason)
+		now = time.Now().In(time.UTC)
+	}
+	calendar, err := b.getMarketCalendar(int(now.Month()), now.Year())
+	if err != nil {
+		return nil, err
+	}
+
+	// Find today's schedule
+	today := now.Format("2006-01-02")
+	if calendar == nil || calendar.Calendar.Days.Day == nil || len(calendar.Calendar.Days.Day) == 0 {
+		return nil, fmt.Errorf("broker returned empty calendar payload for %s", today)
+	}
+	for _, day := range calendar.Calendar.Days.Day {
+		if day.Date == today {
+			return &day, nil
 		}
 	}
-	
-	b.logger.Println("Trading cycle complete")
-}
 
-func (b *Bot) checkExistingPosition() bool {
-	// Check for saved position state
-	// In MVP, this reads from positions.json
-	// TODO: Implement position state management
-	return false
-}
+	// Today's data not found in cache - force refresh and try again
+	b.logger.Printf("Today's date %s not found in cached calendar, forcing refresh", today)
+	b.calendarMu.Lock()
+	b.marketCalendar = nil // Clear cache to force refresh
+	b.calendarMu.Unlock()
 
-func (b *Bot) executeEntry() {
-	b.logger.Println("Executing entry...")
-	
-	// Find strikes
-	order, err := b.strategy.FindStrangleStrikes()
+	calendar, err = b.getMarketCalendar(int(now.Month()), now.Year())
 	if err != nil {
-		b.logger.Printf("Failed to find strikes: %v", err)
-		return
+		return nil, fmt.Errorf("failed to refresh calendar: %w", err)
 	}
-	
-	b.logger.Printf("Found strangle: Put %.0f / Call %.0f, Credit: $%.2f",
-		order.PutStrike, order.CallStrike, order.Credit)
-	
-	// Risk check
-	if order.Quantity > b.config.Risk.MaxContracts {
-		order.Quantity = b.config.Risk.MaxContracts
-		b.logger.Printf("Position size limited to %d contracts", order.Quantity)
+
+	// Try again with fresh data
+	if calendar == nil || calendar.Calendar.Days.Day == nil || len(calendar.Calendar.Days.Day) == 0 {
+		return nil, fmt.Errorf("broker returned empty calendar payload for %s after refresh", today)
 	}
-	
-	// Place order
-	b.logger.Printf("Placing strangle order for %d contracts...", order.Quantity)
-	placedOrder, err := b.broker.PlaceStrangleOrder(
-		order.Symbol,
-		order.PutStrike,
-		order.CallStrike,
-		order.Expiration,
-		order.Quantity,
-		order.Credit,
-	)
-	
-	if err != nil {
-		b.logger.Printf("Failed to place order: %v", err)
-		return
+	for _, day := range calendar.Calendar.Days.Day {
+		if day.Date == today {
+			return &day, nil
+		}
 	}
-	
-	b.logger.Printf("Order placed successfully: %s", placedOrder.ID)
-	
-	// Save position state
-	// TODO: Implement position persistence
+
+	return nil, fmt.Errorf("today's date %s still not found after calendar refresh", today)
 }
 
-func (b *Bot) executeExit(reason string) {
-	b.logger.Printf("Executing exit: %s", reason)
-	// TODO: Implement exit logic
-}
-
-func (b *Bot) checkAdjustments() {
-	b.logger.Println("Checking for adjustments...")
-	// TODO: Implement adjustment logic (Phase 2)
-}
