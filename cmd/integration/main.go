@@ -314,9 +314,9 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Br
 	logger.Printf("Max allocation (%.0f%%): $%.2f", allocationPct*100, maxAllocation)
 	
 	// Test that we can retrieve buying power (sandbox may have different limits)
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel2()
-	buyingPower, err := broker.GetOptionBuyingPowerCtx(ctx2)
+	bpCtx, bpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bpCancel()
+	buyingPower, err := broker.GetOptionBuyingPowerCtx(bpCtx)
 	if err != nil {
 		logger.Printf("Failed to get buying power: %v", err)
 		return false
@@ -325,22 +325,29 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Br
 	logger.Printf("Option buying power: $%.2f", buyingPower)
 	
 	// Validate basic risk parameters are reasonable
-	if allocationPct <= 0 || allocationPct > 1 {
-		logger.Printf("Invalid allocation percentage: %.2f", allocationPct)
+	if math.IsNaN(allocationPct) || math.IsInf(allocationPct, 0) || allocationPct <= 0 || allocationPct > 1 {
+		logger.Printf("Invalid allocation percentage: %v", allocationPct)
 		return false
 	}
 	
-	if maxAllocation <= 0 {
+	if math.IsNaN(maxAllocation) || math.IsInf(maxAllocation, 0) || maxAllocation <= 0 {
 		logger.Printf("Invalid max allocation: $%.2f", maxAllocation)
 		return false
 	}
 	
-	if buyingPower < 0 {
+	if math.IsNaN(buyingPower) || math.IsInf(buyingPower, 0) || buyingPower < 0 {
 		logger.Printf("Invalid buying power: $%.2f", buyingPower)
 		return false
 	}
 	
 	// In sandbox, buying power restrictions may not reflect live trading conditions
+	// If buying power is positive, ensure it covers the intended max allocation.
+	if buyingPower > 0 && maxAllocation > 0 {
+		if buyingPower < maxAllocation {
+			logger.Printf("Insufficient buying power: need >= $%.2f, have $%.2f", maxAllocation, buyingPower)
+			return false
+		}
+	}
 	// Test passes if we can retrieve valid values and calculate risk parameters
 	logger.Printf("Risk management validation successful")
 	return true
