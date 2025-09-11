@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
+	"math"
 	"net/http"
 	"time"
 
@@ -24,18 +26,24 @@ var templateFS embed.FS
 var staticFS embed.FS
 
 type Server struct {
-	router     *chi.Mux
-	server     *http.Server
-	storage    storage.Interface
-	broker     broker.Broker
-	logger     *logrus.Logger
-	port       int
-	authToken  string
+	router              *chi.Mux
+	server              *http.Server
+	storage             storage.Interface
+	broker              broker.Broker
+	logger              *logrus.Logger
+	port                int
+	authToken           string
+	allocationThreshold float64
+	profitTarget        float64
+	stopLossPct         float64
 }
 
 type Config struct {
-	Port      int
-	AuthToken string
+	Port                int
+	AuthToken           string
+	AllocationThreshold float64 // Allocation threshold percentage (0-100)
+	ProfitTarget        float64 // Strategy profit target (0-1, e.g., 0.5 for 50%)
+	StopLossPct         float64 // Strategy stop loss percentage (e.g., 2.5 for 250%)
 }
 
 type DashboardData struct {
@@ -47,41 +55,47 @@ type DashboardData struct {
 }
 
 type PositionView struct {
-	ID             string
-	Symbol         string
-	State          string
-	EntryDate      time.Time
-	DTE            int
-	CallStrike     float64
-	PutStrike      float64
-	CreditReceived float64
-	CurrentPnL     float64
-	PnLPercent     float64
-	ProfitTarget   float64
-	StopLoss       float64
-	IsProfit       bool
+	ID               string
+	Symbol           string
+	State            string
+	EntryDate        time.Time
+	DTE              int
+	CallStrike       float64
+	PutStrike        float64
+	CreditReceived   float64
+	CurrentPnL       float64
+	PnLPercent       float64
+	ProfitTarget     float64
+	StopLoss         float64
+	RiskLevelPercent float64
+	IsProfit         bool
 }
 
 type Statistics struct {
-	TotalTrades     int
-	WinningTrades   int
-	LosingTrades    int
-	WinRate         float64
-	TotalPnL        float64
-	AveragePnL      float64
-	CurrentOpen     int
-	TotalAllocated  float64
-	AllocationPct   float64
+	TotalTrades         int
+	WinningTrades       int
+	LosingTrades        int
+	WinRate             float64
+	TotalPnL            float64
+	AveragePnL          float64
+	CurrentOpen         int
+	TotalAllocated      float64
+	AllocationPct       float64
+	AllocationThreshold float64
+	IsAllocationHigh    bool
 }
 
 func NewServer(cfg Config, storage storage.Interface, broker broker.Broker, logger *logrus.Logger) *Server {
 	s := &Server{
-		router:    chi.NewRouter(),
-		storage:   storage,
-		broker:    broker,
-		logger:    logger,
-		port:      cfg.Port,
-		authToken: cfg.AuthToken,
+		router:              chi.NewRouter(),
+		storage:             storage,
+		broker:              broker,
+		logger:              logger,
+		port:                cfg.Port,
+		authToken:           cfg.AuthToken,
+		allocationThreshold: cfg.AllocationThreshold,
+		profitTarget:        cfg.ProfitTarget,
+		stopLossPct:         cfg.StopLossPct,
 	}
 
 	s.setupRoutes()
@@ -97,7 +111,12 @@ func (s *Server) setupRoutes() {
 		s.router.Use(s.authMiddleware)
 	}
 
-	s.router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	// Create a filesystem rooted at the "static" directory for proper embedded filesystem serving
+	sub, err := fs.Sub(staticFS, "web/static")
+	if err != nil {
+		s.logger.WithError(err).Fatal("Failed to create static filesystem")
+	}
+	s.router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 
 	s.router.Get("/", s.handleDashboard)
 	s.router.Get("/api/positions", s.handleGetPositions)
@@ -153,7 +172,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.ParseFS(templateFS, "web/templates/dashboard.html")
+	funcMap := template.FuncMap{
+		"mul": func(a, b float64) float64 { return a * b },
+		"div": func(a, b float64) float64 { 
+			if b == 0 { return 0 } // Prevent division by zero
+			return a / b 
+		},
+	}
+	tmpl, err := template.New("dashboard.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/dashboard.html")
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to parse dashboard template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -203,7 +229,7 @@ func (s *Server) handleGetPosition(w http.ResponseWriter, r *http.Request) {
 	
 	position, found := s.storage.GetPositionByID(id)
 	if !found {
-		s.logger.Error("Position not found")
+		s.logger.WithField("position_id", id).Error("Position not found")
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
@@ -229,7 +255,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePositionsPartial(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.ParseFS(templateFS, "web/templates/positions.html")
+	funcMap := template.FuncMap{
+		"mul": func(a, b float64) float64 { return a * b },
+		"div": func(a, b float64) float64 { 
+			if b == 0 { return 0 } // Prevent division by zero
+			return a / b 
+		},
+	}
+	tmpl, err := template.New("positions.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/positions.html")
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to parse positions template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -237,11 +270,6 @@ func (s *Server) handlePositionsPartial(w http.ResponseWriter, r *http.Request) 
 	}
 
 	positions := s.storage.GetCurrentPositions()
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to get positions")
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
 
 	views := s.convertPositionsToViews(positions)
 	
@@ -252,7 +280,14 @@ func (s *Server) handlePositionsPartial(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleStatsPartial(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.ParseFS(templateFS, "web/templates/stats.html")
+	funcMap := template.FuncMap{
+		"mul": func(a, b float64) float64 { return a * b },
+		"div": func(a, b float64) float64 { 
+			if b == 0 { return 0 } // Prevent division by zero
+			return a / b 
+		},
+	}
+	tmpl, err := template.New("stats.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/stats.html")
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to parse stats template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -273,7 +308,14 @@ func (s *Server) handleStatsPartial(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePositionDetailPartial(w http.ResponseWriter, r *http.Request) {
-	tmpl, err := template.ParseFS(templateFS, "web/templates/position-detail.html")
+	funcMap := template.FuncMap{
+		"mul": func(a, b float64) float64 { return a * b },
+		"div": func(a, b float64) float64 { 
+			if b == 0 { return 0 } // Prevent division by zero
+			return a / b 
+		},
+	}
+	tmpl, err := template.New("position-detail.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/position-detail.html")
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to parse position detail template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -283,7 +325,7 @@ func (s *Server) handlePositionDetailPartial(w http.ResponseWriter, r *http.Requ
 	id := chi.URLParam(r, "id")
 	position, found := s.storage.GetPositionByID(id)
 	if !found {
-		s.logger.Error("Position not found")
+		s.logger.WithField("position_id", id).Error("Position not found")
 		http.Error(w, "Not Found", http.StatusNotFound)
 		return
 	}
@@ -339,6 +381,9 @@ func (s *Server) convertPositionsToViews(positions []models.Position) []Position
 
 func (s *Server) convertPositionToView(pos *models.Position) PositionView {
 	dte := int(time.Until(pos.Expiration).Hours() / 24)
+	if dte < 0 {
+		dte = 0
+	}
 	
 	currentPnL := pos.CurrentPnL
 	pnlPercent := 0.0
@@ -346,23 +391,33 @@ func (s *Server) convertPositionToView(pos *models.Position) PositionView {
 		pnlPercent = (currentPnL / pos.CreditReceived) * 100
 	}
 
-	profitTarget := pos.CreditReceived * 0.5
-	stopLoss := pos.CreditReceived * -2.5
+	profitTarget := pos.CreditReceived * s.profitTarget
+	stopLoss := pos.CreditReceived * -s.stopLossPct
+	
+	// Calculate risk level percentage
+	riskLevelPercent := 0.0
+	if currentPnL < 0 && stopLoss < 0 {
+		riskLevelPercent = (math.Abs(currentPnL) / math.Abs(stopLoss)) * 100
+		if riskLevelPercent > 100 {
+			riskLevelPercent = 100
+		}
+	}
 
 	return PositionView{
-		ID:             pos.ID,
-		Symbol:         pos.Symbol,
-		State:          string(pos.State),
-		EntryDate:      pos.EntryDate,
-		DTE:            dte,
-		CallStrike:     pos.CallStrike,
-		PutStrike:      pos.PutStrike,
-		CreditReceived: pos.CreditReceived,
-		CurrentPnL:     currentPnL,
-		PnLPercent:     pnlPercent,
-		ProfitTarget:   profitTarget,
-		StopLoss:       stopLoss,
-		IsProfit:       currentPnL > 0,
+		ID:               pos.ID,
+		Symbol:           pos.Symbol,
+		State:            string(pos.State),
+		EntryDate:        pos.EntryDate,
+		DTE:              dte,
+		CallStrike:       pos.CallStrike,
+		PutStrike:        pos.PutStrike,
+		CreditReceived:   pos.CreditReceived,
+		CurrentPnL:       currentPnL,
+		PnLPercent:       pnlPercent,
+		ProfitTarget:     profitTarget,
+		StopLoss:         stopLoss,
+		RiskLevelPercent: riskLevelPercent,
+		IsProfit:         currentPnL > 0,
 	}
 }
 
@@ -373,8 +428,11 @@ func (s *Server) calculateStatistics() (*Statistics, error) {
 	stats := &Statistics{}
 	var totalAllocated float64
 	
-	// Count current open positions
+	// Count current open positions (skip closed positions)
 	for _, pos := range positions {
+		if pos.State == models.StateClosed {
+			continue
+		}
 		stats.CurrentOpen++
 		totalAllocated += pos.CreditReceived * 100
 	}
@@ -401,12 +459,20 @@ func (s *Server) calculateStatistics() (*Statistics, error) {
 		stats.AllocationPct = (totalAllocated / accountBalance) * 100
 	}
 
+	// Set allocation threshold and warning flag
+	stats.AllocationThreshold = s.allocationThreshold
+	stats.IsAllocationHigh = stats.AllocationPct > s.allocationThreshold
+
 	return stats, nil
 }
 
 func isMarketOpen() bool {
 	now := time.Now()
-	loc, _ := time.LoadLocation("America/New_York")
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		loc = time.UTC
+	}
 	nyTime := now.In(loc)
 	
 	if nyTime.Weekday() == time.Saturday || nyTime.Weekday() == time.Sunday {
