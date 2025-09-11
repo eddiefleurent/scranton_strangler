@@ -42,7 +42,15 @@ func (m *mockBrokerForStrategy) GetOptionBuyingPower() (float64, error) {
 	return 5000.0, nil
 }
 
+func (m *mockBrokerForStrategy) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	return 5000.0, nil
+}
+
 func (m *mockBrokerForStrategy) GetPositions() ([]broker.PositionItem, error) {
+	return []broker.PositionItem{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
 	return []broker.PositionItem{}, nil
 }
 
@@ -123,6 +131,10 @@ func (m *mockBrokerForStrategy) GetHistoricalData(symbol string, interval string
 }
 
 func (m *mockBrokerForStrategy) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetMarketCalendarCtx(ctx context.Context, month, year int) (*broker.MarketCalendarResponse, error) {
 	return &broker.MarketCalendarResponse{}, nil
 }
 
@@ -922,6 +934,10 @@ func (m *mockBroker) GetPositions() ([]broker.PositionItem, error) {
 	return nil, nil
 }
 
+func (m *mockBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
+	return nil, nil
+}
+
 func (m *mockBroker) GetQuote(_ string) (*broker.QuoteItem, error) {
 	return &broker.QuoteItem{Last: 420.0}, nil
 }
@@ -1134,6 +1150,11 @@ func (m *mockBroker) GetOptionBuyingPower() (float64, error) {
 	return m.balance * 0.8, nil
 }
 
+func (m *mockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	// Return a mock option buying power (typically less than account balance)
+	return m.balance * 0.8, nil
+}
+
 func (m *mockBroker) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]broker.HistoricalDataPoint, error) {
 	return []broker.HistoricalDataPoint{
 		{Date: time.Now().AddDate(0, 0, -1), Close: 35.0},
@@ -1142,5 +1163,9 @@ func (m *mockBroker) GetHistoricalData(symbol string, interval string, startDate
 }
 
 func (m *mockBroker) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
+func (m *mockBroker) GetMarketCalendarCtx(ctx context.Context, month, year int) (*broker.MarketCalendarResponse, error) {
 	return &broker.MarketCalendarResponse{}, nil
 }

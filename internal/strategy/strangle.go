@@ -23,8 +23,8 @@ type optionChainCacheEntry struct {
 	timestamp time.Time
 }
 
-// Cache TTL for option chains
-const optionChainCacheTTL = 1 * time.Minute
+// Default cache TTL for option chains (can be overridden in config)
+const defaultOptionChainCacheTTL = 1 * time.Minute
 
 // Number of shares per options contract
 const sharesPerContract = 100.0
@@ -38,6 +38,7 @@ type StrangleStrategy struct {
 	cacheMutex sync.RWMutex                      // Protects concurrent access to chainCache
 	sf         singleflight.Group                // Singleflight to dedupe concurrent identical calls
 	storage    storage.Interface                 // Storage for historical IV data
+	nyLocation *time.Location                    // Cached America/New_York location
 }
 
 // Config contains configuration parameters for the strangle strategy.
@@ -55,9 +56,10 @@ type Config struct {
 	StopLossPct     float64 // e.g., 2.5 (250% loss triggers hard stop)
 	MaxPositionLoss float64 // Maximum position loss percentage from risk config
 	MaxContracts    int     // Maximum number of contracts per position
-	BPRMultiplier   float64 // Buying power requirement multiplier for margin estimation (default: 10.0, based on industry standard 20% of underlying + premium)
+	BPRMultiplier   float64 // Optional extra safety multiplier applied as a floor over the Reg-T estimate; set 0 to disable
 	MinVolume       int64   // Minimum daily volume for liquidity filtering (default: 100, 0 to disable)
 	MinOpenInterest int64   // Minimum open interest for liquidity filtering (default: 1000, 0 to disable)
+	CacheTTL        time.Duration // Cache TTL for option chains (default: 1 minute, 0 disables caching)
 }
 
 // ExitReason represents the reason for exiting a position
@@ -91,6 +93,12 @@ func NewStrangleStrategy(b broker.Broker, config *Config, logger *log.Logger, st
 		logger:     logger,
 		chainCache: make(map[string]*optionChainCacheEntry),
 		storage:    storage,
+		nyLocation: func() *time.Location {
+			if loc, err := time.LoadLocation("America/New_York"); err == nil {
+				return loc
+			}
+			return time.UTC
+		}(),
 	}
 }
 
@@ -278,11 +286,8 @@ func (s *StrangleStrategy) storeCurrentIVReading(iv float64) {
 	// Create IV reading for today's date
 	utcNow := time.Now().UTC()
 
-	// Load America/New_York location with fallback to UTC
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		loc = time.UTC
-	}
+	// Use cached America/New_York location (fallback already set in constructor)
+	loc := s.nyLocation
 
 	// Get current time in NY timezone
 	nyNow := utcNow.In(loc)
@@ -332,7 +337,7 @@ func (s *StrangleStrategy) getCachedOptionChainWithFetcher(symbol, expiration st
 	// Check cache first (read lock)
 	s.cacheMutex.RLock()
 	if entry, exists := s.chainCache[cacheKey]; exists {
-		if time.Since(entry.timestamp) < optionChainCacheTTL {
+		if time.Since(entry.timestamp) < s.getCacheTTL() {
 			s.cacheMutex.RUnlock()
 			return entry.chain, nil
 		}
@@ -376,7 +381,7 @@ func (s *StrangleStrategy) cleanupExpiredCacheEntries() {
 
 	// Find expired entries
 	for key, entry := range s.chainCache {
-		if now.Sub(entry.timestamp) >= optionChainCacheTTL {
+		if now.Sub(entry.timestamp) >= s.getCacheTTL() {
 			expiredKeys = append(expiredKeys, key)
 		}
 	}
@@ -619,6 +624,14 @@ func (s *StrangleStrategy) findTargetExpiration(targetDTE int) string {
 	return originalTarget.Format("2006-01-02")
 }
 
+// getCacheTTL returns the configured cache TTL or default if not set
+func (s *StrangleStrategy) getCacheTTL() time.Duration {
+	if s.config.CacheTTL > 0 {
+		return s.config.CacheTTL
+	}
+	return defaultOptionChainCacheTTL
+}
+
 func (s *StrangleStrategy) findStrikeByDelta(options []broker.Option, targetDelta float64, isPut bool) float64 {
 	// Find strike closest to target delta
 	bestStrike := 0.0
@@ -719,6 +732,17 @@ func (s *StrangleStrategy) calculateExpectedCredit(options []broker.Option, putS
 			put.Ask-put.Bid, putMinSpread, call.Ask-call.Bid, callMinSpread)
 		return 0
 	}
+	// Guard against excessively wide spreads (e.g., >50% of mid)
+	putMid := (put.Bid + put.Ask) / 2
+	callMid := (call.Bid + call.Ask) / 2
+	if putMid > 0 && (put.Ask-put.Bid)/putMid > 0.5 {
+		s.logger.Printf("DEBUG: Put spread too wide relative to mid: %.4f on mid %.4f", put.Ask-put.Bid, putMid)
+		return 0
+	}
+	if callMid > 0 && (call.Ask-call.Bid)/callMid > 0.5 {
+		s.logger.Printf("DEBUG: Call spread too wide relative to mid: %.4f on mid %.4f", call.Ask-call.Bid, callMid)
+		return 0
+	}
 	// Guard against stale/invalid quotes
 	if put.Bid <= 0 || put.Ask <= 0 || call.Bid <= 0 || call.Ask <= 0 || put.Bid > put.Ask || call.Bid > call.Ask {
 		s.logger.Printf("DEBUG: Invalid quotes - put bid/ask: %.4f/%.4f, call bid/ask: %.4f/%.4f",
@@ -780,11 +804,14 @@ func (s *StrangleStrategy) calculatePositionSize(creditPerShare, spotPrice, putS
 	}
 
 	// Try to use option buying power first (more accurate for options trading)
-	buyingPower, err := s.broker.GetOptionBuyingPower()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
+	buyingPower, err := s.broker.GetOptionBuyingPowerCtx(ctx)
 	if err != nil {
 		s.logger.Printf("Warning: Could not get option buying power, falling back to account balance: %v", err)
 		// Fall back to account balance
-		balance, err := s.broker.GetAccountBalance()
+		balance, err := s.broker.GetAccountBalanceCtx(ctx)
 		if err != nil {
 			s.logger.Printf("Error getting account balance for sizing: %v", err)
 			return 0
@@ -873,7 +900,9 @@ func (s *StrangleStrategy) CheckExitConditions(position *models.Position) (bool,
 		} // Default to 250% to match old behavior
 		// Respect account-equity risk cap by converting it to "credit units"
 		if s.config.MaxPositionLoss > 0 {
-			if equity, err := s.broker.GetAccountBalance(); err == nil && equity > 0 && absTotalNetCredit > 0 {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if equity, err := s.broker.GetAccountBalanceCtx(ctx); err == nil && equity > 0 && absTotalNetCredit > 0 {
 				riskDollars := equity * (s.config.MaxPositionLoss / 100.0)
 				riskStopLossPct := riskDollars / absTotalNetCredit
 				sl = math.Min(sl, riskStopLossPct)
