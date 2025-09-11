@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -356,23 +357,23 @@ func TestPlaceStrangleOrder_NormalizesAndBuildsRequest(t *testing.T) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		// Expect duration normalized to "gtc"
-		got := string(body)
+		got := prettyForm(string(body))
 		for _, expect := range []string{
 			"class=multileg",
 			"symbol=AAPL",
 			"duration=gtc",
 			"type=credit",
-			"side%5B0%5D=sell_to_open",
-			"side%5B1%5D=sell_to_open",
-			"quantity%5B0%5D=2",
-			"quantity%5B1%5D=2",
+			"side[0]=sell_to_open",
+			"side[1]=sell_to_open",
+			"quantity[0]=2",
+			"quantity[1]=2",
 		} {
 			if !strings.Contains(got, expect) {
 				t.Fatalf("request body missing %q; body=%s", expect, got)
 			}
 		}
 		// Quick sanity: presence of OCC-like leg symbols
-		if !strings.Contains(got, "option_symbol%5B0%5D=AAPL") || !strings.Contains(got, "option_symbol%5B1%5D=AAPL") {
+		if !strings.Contains(got, "option_symbol[0]=AAPL") || !strings.Contains(got, "option_symbol[1]=AAPL") {
 			t.Fatalf("missing leg symbols: %s", got)
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -418,7 +419,7 @@ func TestPlaceStrangleOrder_ExtendedHoursDurations(t *testing.T) {
 					t.Fatalf("path = %s", got)
 				}
 				body, _ := io.ReadAll(r.Body)
-				got := string(body)
+				got := prettyForm(string(body))
 				
 				// Verify expected duration is in request
 				expectedParam := fmt.Sprintf("duration=%s", tc.expectedDuration)
@@ -431,10 +432,10 @@ func TestPlaceStrangleOrder_ExtendedHoursDurations(t *testing.T) {
 					"class=multileg",
 					"symbol=SPY",
 					"type=credit",
-					"side%5B0%5D=sell_to_open",
-					"side%5B1%5D=sell_to_open",
-					"quantity%5B0%5D=1",
-					"quantity%5B1%5D=1",
+					"side[0]=sell_to_open",
+					"side[1]=sell_to_open",
+					"quantity[0]=1",
+					"quantity[1]=1",
 				} {
 					if !strings.Contains(got, expect) {
 						t.Fatalf("request body missing %q; body=%s", expect, got)
@@ -442,7 +443,7 @@ func TestPlaceStrangleOrder_ExtendedHoursDurations(t *testing.T) {
 				}
 				
 				// Verify option symbols are present
-				if !strings.Contains(got, "option_symbol%5B0%5D=SPY") || !strings.Contains(got, "option_symbol%5B1%5D=SPY") {
+				if !strings.Contains(got, "option_symbol[0]=SPY") || !strings.Contains(got, "option_symbol[1]=SPY") {
 					t.Fatalf("missing leg symbols: %s", got)
 				}
 				
@@ -927,14 +928,26 @@ func TestGetQuote_GreeksFalseParam(t *testing.T) {
 
 // Ensure GetOrderStatusCtx propagates context cancellation (simulate by hanging server and canceling)
 func TestGetOrderStatusCtx_ContextCancel(t *testing.T) {
-	// Use a server that never responds to force client to respect context; since we can't hook transport timeout,
-	// we simulate by canceling before request and ensuring an error is returned from makeRequestCtx.
-	api := NewTradierAPIWithBaseURL("k", "ACC", false, "http://127.0.0.1:0") // invalid URL to force error
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	// Create a server that deliberately hangs by blocking on a channel
+	hangChannel := make(chan struct{})
+	api, srv := newTestAPIWithServer(func(w http.ResponseWriter, r *http.Request) {
+		<-hangChannel // Block indefinitely until channel is closed
+	})
+	defer srv.Close()
+	defer close(hangChannel) // Ensure goroutines don't leak
+	
+	// Create a context with a short timeout to ensure cancellation
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	
 	_, err := api.GetOrderStatusCtx(ctx, 1)
 	if err == nil {
 		t.Fatalf("expected error due to canceled context")
+	}
+	
+	// Assert the error is specifically due to context cancellation, not transport error
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context cancellation error, got: %v", err)
 	}
 }
 
