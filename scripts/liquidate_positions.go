@@ -2,17 +2,17 @@
 // via market orders through the Tradier API.
 //
 // Usage:
-//   # Option A: use env vars, no config required
+//   # Option A: use env vars, no config file required
 //   export TRADIER_API_KEY="your_key_here"
 //   export TRADIER_ACCOUNT_ID="your_account_here"
-//   go run scripts/liquidate_positions.go -config=./config.yaml
+//   go run scripts/liquidate_positions.go
 //   
-//   # Option B: use via Makefile:
+//   # Option B: via Makefile:
 //   make liquidate
 //
 // This tool will:
 // 1. Fetch all current positions from the broker
-// 2. Place aggressive buy-to-close orders at market prices
+// 2. Place market close orders for immediate execution
 // 3. Report order placement status
 //
 // Note: In Tradier sandbox, orders may not fill reliably due to platform limitations.
@@ -62,14 +62,53 @@ func main() {
 	}
 
 	// Create broker client
+	if apiKey == "" || accountID == "" {
+		log.Fatalf("❌ Missing Tradier credentials: TRADIER_API_KEY and TRADIER_ACCOUNT_ID must be set via config or env")
+	}
 	client, err := broker.NewTradierClient(apiKey, accountID, true, false, 0.5)
 	if err != nil {
 		log.Fatalf("Failed to create Tradier client: %v", err)
 	}
 
-	fmt.Println("💥 LIQUIDATE ALL POSITIONS - MARKET ORDERS ONLY 💥")
-	fmt.Println("⚠️  WARNING: This will close ALL positions at MARKET PRICES")
+	fmt.Println("💥 LIQUIDATE ALL POSITIONS - MARKET ORDERS 💥")
+	fmt.Println("⚠️  WARNING: This will close ALL positions using market orders")
 	fmt.Println("🔒 Proceeding with liquidation via API...")
+	
+	// Cancel ALL pending orders first
+	fmt.Println("🔍 Checking for pending orders to cancel...")
+	ordersResp, err := client.GetOrders()
+	if err != nil {
+		log.Printf("⚠️  Warning: Could not retrieve orders: %v", err)
+	} else {
+		pendingCount := 0
+		cancelledCount := 0
+		
+		for _, order := range ordersResp.Orders.Order {
+			// Cancel orders that are still pending (not filled, cancelled, or expired)
+			if order.Status == "pending" || order.Status == "open" || order.Status == "submitted" {
+				pendingCount++
+				fmt.Printf("📋 Cancelling pending order: %s %s %s (ID: %d)\n", 
+					order.Side, order.Symbol, order.Type, order.ID)
+				
+				_, cancelErr := client.CancelOrder(order.ID)
+				if cancelErr != nil {
+					fmt.Printf("❌ Failed to cancel order %d: %v\n", order.ID, cancelErr)
+				} else {
+					fmt.Printf("✅ Successfully cancelled order %d\n", order.ID)
+					cancelledCount++
+				}
+			}
+		}
+		
+		if pendingCount == 0 {
+			fmt.Println("✅ No pending orders found")
+		} else {
+			fmt.Printf("📊 Cancelled %d of %d pending orders\n", cancelledCount, pendingCount)
+			if cancelledCount < pendingCount {
+				fmt.Printf("⚠️  %d orders failed to cancel - proceeding with liquidation anyway\n", pendingCount-cancelledCount)
+			}
+		}
+	}
 	
 	// Get current positions first
 	positions, err := client.GetPositions()
@@ -79,10 +118,10 @@ func main() {
 	
 	fmt.Printf("Found %d positions to close:\n", len(positions))
 	for i, pos := range positions {
-		fmt.Printf("  %d. %s: %.0f contracts @ $%.2f\n", i+1, pos.Symbol, math.Abs(pos.Quantity), pos.CostBasis)
+		fmt.Printf("  %d. %s: %.0f units @ $%.2f\n", i+1, pos.Symbol, math.Abs(pos.Quantity), pos.CostBasis)
 	}
 	
-	// Close each position individually using market orders (aggressive pricing)
+	// Close each position individually using market orders
 	for _, pos := range positions {
 		if pos.Symbol == "SPY" {
 			continue // Skip underlying
@@ -92,36 +131,23 @@ func main() {
 		quantity := int(math.Abs(math.Round(pos.Quantity)))
 		isShort := pos.Quantity < 0
 		
-		orderType := "buy-to-close LIMIT"
+		orderType := "buy-to-close MARKET"
 		if !isShort {
-			orderType = "sell-to-close LIMIT"
+			orderType = "sell-to-close MARKET"
 		}
 		
-		fmt.Printf("\n📝 Closing %s (%d contracts) using %s order...\n", pos.Symbol, quantity, orderType)
-		fmt.Printf("💥 AGGRESSIVE LIMIT: Will fill quickly with generous pricing\n")
+		fmt.Printf("\n📝 Closing %s (%d units) using %s order...\n", pos.Symbol, quantity, orderType)
 		
-		// Get current option quote for aggressive limit pricing
-		quote, err := client.GetQuote(pos.Symbol)
-		if err != nil {
-			fmt.Printf("❌ Failed to get quote for %s: %v\n", pos.Symbol, err)
-			continue
-		}
-		
-		// Use aggressive limit pricing (150% of ask for buy-to-close, 75% of bid for sell-to-close)
-		var limitPrice float64
+		// Place market order for immediate execution
 		var orderResp *broker.OrderResponse
 		if isShort {
-			// Buy-to-close: use 150% of ask price for aggressive fill
-			limitPrice = quote.Ask * 1.5
-			if limitPrice < 0.01 { limitPrice = 0.01 } // Minimum tick
-			fmt.Printf("💰 Using aggressive buy limit: $%.2f (150%% of ask: $%.2f)\n", limitPrice, quote.Ask)
-			orderResp, err = client.PlaceBuyToCloseOrder(pos.Symbol, quantity, limitPrice, string(broker.DurationDay), "emergency-liquidation")
+			// Buy-to-close market order
+			fmt.Printf("💰 Using market order for immediate execution\n")
+			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, quantity, string(broker.DurationDay), "emergency-liquidation")
 		} else {
-			// Sell-to-close: use 75% of bid price for aggressive fill
-			limitPrice = quote.Bid * 0.75
-			if limitPrice < 0.01 { limitPrice = 0.01 } // Minimum tick
-			fmt.Printf("💰 Using aggressive sell limit: $%.2f (75%% of bid: $%.2f)\n", limitPrice, quote.Bid)
-			orderResp, err = client.PlaceSellToCloseOrder(pos.Symbol, quantity, limitPrice, string(broker.DurationDay), "emergency-liquidation")
+			// Sell-to-close market order
+			fmt.Printf("💰 Using market order for immediate execution\n")
+			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, quantity, string(broker.DurationDay), "emergency-liquidation")
 		}
 		if err != nil {
 			fmt.Printf("❌ Failed to close %s: %v\n", pos.Symbol, err)

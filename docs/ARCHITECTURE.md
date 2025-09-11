@@ -759,8 +759,8 @@ go run scripts/liquidate_positions.go
 
 The liquidation tool:
 - Fetches current broker positions
-- Places aggressive buy-to-close orders at 200% above ask price
-- Provides market order equivalent behavior for emergency situations
+- Places market orders for immediate execution
+- Provides emergency position closure capability
 
 #### Common Sync Issues Fixed
 
