@@ -45,7 +45,15 @@ func (f *fakeBroker) GetOptionBuyingPower() (float64, error) {
 	return 5000.0, nil
 }
 
+func (f *fakeBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	return 5000.0, nil
+}
+
 func (f *fakeBroker) GetPositions() ([]broker.PositionItem, error) {
+	return []broker.PositionItem{}, nil
+}
+
+func (f *fakeBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
 	return []broker.PositionItem{}, nil
 }
 
@@ -89,6 +97,10 @@ func (f *fakeBroker) GetHistoricalData(symbol string, interval string, startDate
 }
 
 func (f *fakeBroker) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
+func (f *fakeBroker) GetMarketCalendarCtx(ctx context.Context, month, year int) (*broker.MarketCalendarResponse, error) {
 	return &broker.MarketCalendarResponse{}, nil
 }
 

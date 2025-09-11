@@ -254,7 +254,7 @@ func testOrderPreview(broker broker.Broker, logger *log.Logger, cfg *config.Conf
 		cfg.Strategy.Entry.MinCredit, // limit price from config
 		true,  // preview mode
 		"day",
-		"integration-test",
+		fmt.Sprintf("integration-test-%d", time.Now().Unix()%100000),
 	)
 	
 	if err != nil {
@@ -314,7 +314,9 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker broker.Broke
 	logger.Printf("Max allocation (%.0f%%): $%.2f", allocationPct*100, maxAllocation)
 	
 	// Test that we have sufficient buying power
-	buyingPower, err := broker.GetOptionBuyingPower()
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel2()
+	buyingPower, err := broker.GetOptionBuyingPowerCtx(ctx2)
 	if err != nil {
 		logger.Printf("Failed to get buying power: %v", err)
 		return false
