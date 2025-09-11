@@ -44,6 +44,7 @@ type Server struct {
 	positionsTemplate       *template.Template
 	statsTemplate           *template.Template
 	positionDetailTemplate  *template.Template
+	historyTemplate         *template.Template
 }
 
 type Config struct {
@@ -145,6 +146,11 @@ func (s *Server) parseTemplates() error {
 		return fmt.Errorf("failed to parse position detail template: %w", err)
 	}
 
+	s.historyTemplate, err = template.New("history.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/history.html")
+	if err != nil {
+		return fmt.Errorf("failed to parse history template: %w", err)
+	}
+
 	return nil
 }
 
@@ -172,8 +178,10 @@ func (s *Server) setupRoutes() {
 			r.Get("/api/positions", s.handleGetPositions)
 			r.Get("/api/stats", s.handleGetStats)
 			r.Get("/api/position/{id}", s.handleGetPosition)
+			r.Get("/api/history", s.handleGetHistory)
 			r.Get("/partials/positions", s.handlePositionsPartial)
 			r.Get("/partials/stats", s.handleStatsPartial)
+			r.Get("/partials/history", s.handleHistoryPartial)
 			r.Get("/partials/position/{id}", s.handlePositionDetailPartial)
 		})
 	} else {
@@ -181,8 +189,10 @@ func (s *Server) setupRoutes() {
 		s.router.Get("/api/positions", s.handleGetPositions)
 		s.router.Get("/api/stats", s.handleGetStats)
 		s.router.Get("/api/position/{id}", s.handleGetPosition)
+		s.router.Get("/api/history", s.handleGetHistory)
 		s.router.Get("/partials/positions", s.handlePositionsPartial)
 		s.router.Get("/partials/stats", s.handleStatsPartial)
+		s.router.Get("/partials/history", s.handleHistoryPartial)
 		s.router.Get("/partials/position/{id}", s.handlePositionDetailPartial)
 	}
 
@@ -423,6 +433,28 @@ func (s *Server) handlePositionDetailPartial(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.positionDetailTemplate.Execute(w, view); err != nil {
 		s.logger.WithError(err).Error("Failed to execute position detail template")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
+	history := s.storage.GetHistory()
+
+	views := s.convertPositionsToViews(history)
+	
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if err := json.NewEncoder(w).Encode(views); err != nil {
+		s.logger.WithError(err).Error("Failed to encode history")
+	}
+}
+
+func (s *Server) handleHistoryPartial(w http.ResponseWriter, r *http.Request) {
+	history := s.storage.GetHistory()
+	views := s.convertPositionsToViews(history)
+	
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.historyTemplate.ExecuteTemplate(w, "history-content", views); err != nil {
+		s.logger.WithError(err).Error("Failed to execute history template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }

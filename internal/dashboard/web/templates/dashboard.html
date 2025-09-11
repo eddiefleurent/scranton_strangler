@@ -21,13 +21,13 @@
         </header>
 
         <main>
-            <section id="stats-section" class="dashboard-section">
-                <h2>Performance Statistics</h2>
-                <div id="stats-container" 
-                     hx-get="/partials/stats" 
+            <section id="history-section" class="dashboard-section">
+                <h2>Completed Trades</h2>
+                <div id="history-container"
+                     hx-get="/partials/history"
                      hx-trigger="load, every 30s"
                      hx-swap="innerHTML">
-                    {{template "stats-content" .Stats}}
+                    Loading trade history...
                 </div>
             </section>
 
@@ -38,6 +38,16 @@
                      hx-trigger="load, every 15s"
                      hx-swap="innerHTML">
                     {{template "positions-content" .Positions}}
+                </div>
+            </section>
+
+            <section id="stats-section" class="dashboard-section compact">
+                <h3>Performance Summary</h3>
+                <div id="stats-container" 
+                     hx-get="/partials/stats" 
+                     hx-trigger="load, every 30s"
+                     hx-swap="innerHTML">
+                    {{template "stats-content" .Stats}}
                 </div>
             </section>
 

@@ -61,14 +61,14 @@
         <div class="progress-bar-container">
             <label>Progress to Target:</label>
             <div class="progress-bar">
-                <div class="progress-fill profit" style="width: {{if and (gt .CurrentPnL 0) (gt .ProfitTarget 0)}}{{$pct := mul (div .CurrentPnL .ProfitTarget) 100}}{{if gt $pct 100}}100{{else}}{{printf "%.0f" $pct}}{{end}}{{else}}0{{end}}%"></div>
+                <div class="progress-fill profit" style="width: {{if and (gt .CurrentPnL 0.0) (gt .ProfitTarget 0.0)}}{{$pct := mul (div .CurrentPnL .ProfitTarget) 100}}{{if gt $pct 100}}100{{else}}{{printf "%.0f" $pct}}{{end}}{{else}}0{{end}}%"></div>
             </div>
         </div>
         
         <div class="progress-bar-container">
             <label>Risk Level:</label>
             <div class="progress-bar">
-                <div class="progress-fill loss" style="width: {{if lt .RiskLevelPercent 0}}0{{else if gt .RiskLevelPercent 100}}100{{else}}{{printf "%.0f" .RiskLevelPercent}}{{end}}%"></div>
+                <div class="progress-fill loss" style="width: {{if lt .RiskLevelPercent 0.0}}0{{else if gt .RiskLevelPercent 100.0}}100{{else}}{{printf "%.0f" .RiskLevelPercent}}{{end}}%"></div>
             </div>
         </div>
     </div>
