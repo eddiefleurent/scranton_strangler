@@ -322,7 +322,7 @@ func (tc *TradingCycle) placeStrangleOrder(order *strategy.StrangleOrder) (*brok
 		order.Quantity,
 		px,
 		false,
-		"day",
+		string(broker.DurationGTC),
 		clientOrderID,
 	)
 }

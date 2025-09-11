@@ -240,14 +240,14 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 func (t *TradierClient) CloseStranglePosition(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToClose(symbol, putStrike, callStrike,
-		expiration, quantity, maxDebit, string(DurationDay), tag)
+		expiration, quantity, maxDebit, string(DurationGTC), tag)
 }
 
 // CloseStranglePositionCtx closes an existing strangle position with a buy-to-close order with context support
 func (t *TradierClient) CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, maxDebit float64, tag string) (*OrderResponse, error) {
 	return t.PlaceStrangleBuyToCloseCtx(ctx, symbol, putStrike, callStrike,
-		expiration, quantity, maxDebit, string(DurationDay), tag)
+		expiration, quantity, maxDebit, string(DurationGTC), tag)
 }
 
 // GetOrderStatus retrieves the status of an existing order
@@ -353,6 +353,8 @@ type DurationType string
 const (
 	// DurationDay represents a day order duration
 	DurationDay DurationType = "day"
+	// DurationGTC represents a good-till-cancelled order duration  
+	DurationGTC DurationType = "gtc"
 )
 
 // Use OptionTypePut/OptionTypeCall everywhere to avoid duplication.
