@@ -41,7 +41,7 @@ type Broker interface {
 	PlaceStrangleOrder(symbol string, putStrike, callStrike float64, expiration string,
 		quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error)
 	PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
-		quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error)
+		quantity int, credit, profitTarget float64, preview bool, duration string, tag string) (*OrderResponse, error)
 
 	// Order status
 	GetOrderStatus(orderID int) (*OrderResponse, error)
@@ -53,13 +53,13 @@ type Broker interface {
 	CloseStranglePositionCtx(ctx context.Context, symbol string, putStrike, callStrike float64, expiration string,
 		quantity int, maxDebit float64, tag string) (*OrderResponse, error)
 	PlaceBuyToCloseOrder(optionSymbol string, quantity int,
-		maxPrice float64, duration string) (*OrderResponse, error)
+		maxPrice float64, duration string, tag string) (*OrderResponse, error)
 	PlaceSellToCloseOrder(optionSymbol string, quantity int,
-		maxPrice float64, duration string) (*OrderResponse, error)
+		maxPrice float64, duration string, tag string) (*OrderResponse, error)
 	PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int,
-		duration string) (*OrderResponse, error)
+		duration string, tag string) (*OrderResponse, error)
 	PlaceSellToCloseMarketOrder(optionSymbol string, quantity int,
-		duration string) (*OrderResponse, error)
+		duration string, tag string) (*OrderResponse, error)
 }
 
 // TradierClient wraps TradierAPI to implement the Broker interface
@@ -100,7 +100,7 @@ func WithHTTPClient(client *http.Client) TradierClientOption {
 func WithTransport(transport http.RoundTripper) TradierClientOption {
 	return func(config *TradierClientConfig) {
 		if config.httpClient == nil {
-			config.httpClient = &http.Client{Transport: transport, Timeout: 10 * time.Second}
+			config.httpClient = &http.Client{Transport: transport}
 		} else {
 			config.httpClient.Transport = transport
 		}
@@ -111,7 +111,7 @@ func WithTransport(transport http.RoundTripper) TradierClientOption {
 // profitTarget should be a ratio between 0.0 and 1.0 (e.g., 0.5 for 50% profit target)
 func NewTradierClient(apiKey, accountID string, sandbox bool,
 	useOTOCO bool, profitTarget float64, opts ...TradierClientOption) (*TradierClient, error) {
-	if profitTarget < 0 || profitTarget > 1 {
+	if useOTOCO && (profitTarget < 0 || profitTarget > 1) {
 		return nil, fmt.Errorf("profitTarget %.3f is outside valid range [0.0, 1.0]", profitTarget)
 	}
 
@@ -124,7 +124,13 @@ func NewTradierClient(apiKey, accountID string, sandbox bool,
 	// Create TradierAPI with custom client if provided
 	var tradierAPI *TradierAPI
 	if config.httpClient != nil {
-		tradierAPI = NewTradierAPIWithClient(apiKey, accountID, sandbox, config.httpClient)
+		// Make a shallow copy of the client to avoid mutating the caller's instance
+		clientCopy := *config.httpClient
+		// Set a sane default timeout if not set (0 means no timeout)
+		if clientCopy.Timeout == 0 {
+			clientCopy.Timeout = 30 * time.Second
+		}
+		tradierAPI = NewTradierAPIWithClient(apiKey, accountID, sandbox, &clientCopy)
 	} else {
 		tradierAPI = NewTradierAPI(apiKey, accountID, sandbox)
 	}
@@ -194,7 +200,7 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 	if t.useOTOCO {
 		// Try OTOCO order with configurable profit target
 		orderResp, err := t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
-			expiration, quantity, limitPrice, t.profitTarget, preview)
+			expiration, quantity, limitPrice, t.profitTarget, preview, duration, tag)
 		if err != nil {
 			// Only fall back to regular strangle order for explicit OTOCO unsupported signals
 			if errors.Is(err, ErrOTOCOUnsupported) || isNotImplementedError(err) {
@@ -216,7 +222,7 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 
 // PlaceStrangleOTOCO implements the Broker interface for OTOCO orders
 func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64,
-	expiration string, quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error) {
+	expiration string, quantity int, credit, profitTarget float64, preview bool, duration string, tag string) (*OrderResponse, error) {
 	if quantity <= 0 {
 		return nil, fmt.Errorf("quantity must be > 0")
 	}
@@ -227,7 +233,7 @@ func (t *TradierClient) PlaceStrangleOTOCO(symbol string, putStrike, callStrike 
 		return nil, fmt.Errorf("profitTarget %.3f is outside valid range [0.0, 1.0]", profitTarget)
 	}
 	return t.TradierAPI.PlaceStrangleOTOCO(symbol, putStrike, callStrike,
-		expiration, quantity, credit, profitTarget, preview)
+		expiration, quantity, credit, profitTarget, preview, duration, tag)
 }
 
 // CloseStranglePosition closes an existing strangle position with a buy-to-close order
@@ -256,26 +262,26 @@ func (t *TradierClient) GetOrderStatusCtx(ctx context.Context, orderID int) (*Or
 
 // PlaceBuyToCloseOrder places a buy-to-close order for a specific option
 func (t *TradierClient) PlaceBuyToCloseOrder(optionSymbol string, quantity int,
-	maxPrice float64, duration string) (*OrderResponse, error) {
-	return t.TradierAPI.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice, duration)
+	maxPrice float64, duration string, tag string) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice, duration, tag)
 }
 
 // PlaceSellToCloseOrder places a sell-to-close order for a specific option
 func (t *TradierClient) PlaceSellToCloseOrder(optionSymbol string, quantity int,
-	maxPrice float64, duration string) (*OrderResponse, error) {
-	return t.TradierAPI.PlaceSellToCloseOrder(optionSymbol, quantity, maxPrice, duration)
+	maxPrice float64, duration string, tag string) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceSellToCloseOrder(optionSymbol, quantity, maxPrice, duration, tag)
 }
 
 // PlaceBuyToCloseMarketOrder places a buy-to-close market order for a specific option
 func (t *TradierClient) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int,
-	duration string) (*OrderResponse, error) {
-	return t.TradierAPI.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration)
+	duration string, tag string) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 }
 
 // PlaceSellToCloseMarketOrder places a sell-to-close market order for a specific option
 func (t *TradierClient) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int,
-	duration string) (*OrderResponse, error) {
-	return t.TradierAPI.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration)
+	duration string, tag string) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 }
 
 // GetMarketClock retrieves the current market clock status
@@ -311,64 +317,13 @@ func (t *TradierClient) GetTickSize(symbol string) (float64, error) {
 	return 0.01, nil
 }
 
-// CalculateIVR calculates Implied Volatility Rank from historical data
-func CalculateIVR(currentIV float64, historicalIVs []float64) float64 {
-	if math.IsNaN(currentIV) {
-		return 0
-	}
-	if math.IsInf(currentIV, 1) { // Positive infinity
-		return 100
-	}
-	if math.IsInf(currentIV, -1) { // Negative infinity
-		return 0
-	}
-
-	// Filter invalid historical values
-	clean := make([]float64, 0, len(historicalIVs))
-	for _, v := range historicalIVs {
-		if !math.IsNaN(v) && !math.IsInf(v, 0) {
-			clean = append(clean, v)
-		}
-	}
-
-	if len(clean) == 0 {
-		return 0
-	}
-
-	// Find min and max IV over the period
-	minIV := clean[0]
-	maxIV := clean[0]
-
-	for _, iv := range clean {
-		if iv < minIV {
-			minIV = iv
-		}
-		if iv > maxIV {
-			maxIV = iv
-		}
-	}
-
-	// IVR = (Current IV - period low) / (period high - period low) * 100
-	if maxIV == minIV {
-		return 0
-	}
-	r := ((currentIV - minIV) / (maxIV - minIV)) * 100
-	// IVR should be bounded between 0-100
-	if r < 0 {
-		return 0
-	}
-	if r > 100 {
-		return 100
-	}
-	return r
-}
 
 // GetOptionByStrike finds an option with a specific strike price
 // Note: Option.OptionType is defined as string for JSON compatibility,
 // so we convert optionType (OptionType) to string for comparison
 func GetOptionByStrike(options []Option, strike float64, optionType OptionType) *Option {
 	for i := range options {
-		if math.Abs(options[i].Strike-strike) <= 1e-4 && options[i].OptionType == string(optionType) {
+		if math.Abs(options[i].Strike-strike) <= strikeEpsilon && options[i].OptionType == string(optionType) {
 			return &options[i]
 		}
 	}
@@ -383,6 +338,9 @@ func OptionTypeMatches(optionType string, expectedType OptionType) bool {
 
 // OptionType represents the type of option contract
 type OptionType string
+
+// Strike comparison epsilon for floating-point precision
+const strikeEpsilon = 1e-4
 
 const (
 	// OptionTypePut represents a put option contract
@@ -580,9 +538,9 @@ func (c *CircuitBreakerBroker) PlaceStrangleOrder(symbol string, putStrike, call
 
 // PlaceStrangleOTOCO wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string,
-	quantity int, credit, profitTarget float64, preview bool) (*OrderResponse, error) {
+	quantity int, credit, profitTarget float64, preview bool, duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, credit, profitTarget, preview)
+		return b.PlaceStrangleOTOCO(symbol, putStrike, callStrike, expiration, quantity, credit, profitTarget, preview, duration, tag)
 	})
 }
 
@@ -618,33 +576,33 @@ func (c *CircuitBreakerBroker) CloseStranglePositionCtx(ctx context.Context, sym
 
 // PlaceBuyToCloseOrder wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int,
-	maxPrice float64, duration string) (*OrderResponse, error) {
+	maxPrice float64, duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice, duration)
+		return b.PlaceBuyToCloseOrder(optionSymbol, quantity, maxPrice, duration, tag)
 	})
 }
 
 // PlaceSellToCloseOrder wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceSellToCloseOrder(optionSymbol string, quantity int,
-	maxPrice float64, duration string) (*OrderResponse, error) {
+	maxPrice float64, duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.PlaceSellToCloseOrder(optionSymbol, quantity, maxPrice, duration)
+		return b.PlaceSellToCloseOrder(optionSymbol, quantity, maxPrice, duration, tag)
 	})
 }
 
 // PlaceBuyToCloseMarketOrder wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int,
-	duration string) (*OrderResponse, error) {
+	duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration)
+		return b.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 	})
 }
 
 // PlaceSellToCloseMarketOrder wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int,
-	duration string) (*OrderResponse, error) {
+	duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
-		return b.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration)
+		return b.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 	})
 }
 

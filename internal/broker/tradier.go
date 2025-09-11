@@ -270,10 +270,15 @@ type PositionsWrapper struct {
 }
 
 func (pw *PositionsWrapper) UnmarshalJSON(b []byte) error {
-	// Handle "null" string case
-	if bytes.Equal(b, []byte(`"null"`)) {
+	// Trim whitespace from input
+	trimmed := bytes.TrimSpace(b)
+
+	// Handle both bare null and quoted "null" cases
+	if bytes.Equal(trimmed, []byte(`null`)) || bytes.Equal(trimmed, []byte(`"null"`)) {
+		*pw = PositionsWrapper{}
 		return nil
 	}
+
 	// Handle normal object case
 	type normalWrapper PositionsWrapper
 	return json.Unmarshal(b, (*normalWrapper)(pw))
@@ -1140,6 +1145,8 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	quantity int,
 	credit, profitTarget float64,
 	preview bool,
+	duration string,
+	tag string,
 ) (*OrderResponse, error) {
 	// For testing purposes, we'll place a regular strangle order but include profitTarget
 	// in a way that can be verified by tests (e.g., in the tag or as a custom parameter)
@@ -1147,11 +1154,18 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	// Use profitTarget to modify the tag or include it in the order somehow for verification
 	// Tradier API doesn't allow periods/decimals in tag, so convert to integer cents
 	profitCents := int(profitTarget * 1000) // Convert to thousandths to avoid decimals
-	tag := fmt.Sprintf("otoco-profit-%d", profitCents)
+	
+	// Merge profit target info with the provided tag
+	var finalTag string
+	if tag != "" {
+		finalTag = fmt.Sprintf("%s-otoco-profit-%d", tag, profitCents)
+	} else {
+		finalTag = fmt.Sprintf("otoco-profit-%d", profitCents)
+	}
 
 	// Place the strangle order with the modified tag that includes profitTarget
 	return t.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration,
-		quantity, credit, preview, "day", tag)
+		quantity, credit, preview, duration, finalTag)
 }
 
 // Helper method for making HTTP requests
