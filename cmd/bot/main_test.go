@@ -218,7 +218,7 @@ func createTestBot(t *testing.T) *TestBot {
 		},
 		Strategy: config.StrategyConfig{
 			Symbol:       "SPY",
-			AllocationPct: 35,
+			AllocationPct: 0.35,
 			Entry: config.EntryConfig{
 				TargetDTE:  45,
 				DTERange:   []int{40, 50},

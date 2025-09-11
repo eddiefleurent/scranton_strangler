@@ -309,9 +309,9 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker broker.Broke
 	}
 	
 	// Test position sizing calculation
-	allocationFrac := cfg.Strategy.AllocationPct
-	maxAllocation := balance * allocationFrac
-	logger.Printf("Max allocation (%.0f%%): $%.2f", allocationFrac*100, maxAllocation)
+	allocationPct := cfg.Strategy.AllocationPct
+	maxAllocation := balance * allocationPct
+	logger.Printf("Max allocation (%.0f%%): $%.2f", allocationPct*100, maxAllocation)
 	
 	// Test that we have sufficient buying power
 	buyingPower, err := broker.GetOptionBuyingPower()
