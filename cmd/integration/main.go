@@ -135,7 +135,7 @@ func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrate
 	// Test 4: Order preview functionality
 	fmt.Println("Test 4: Order Preview")
 	fmt.Println("======================")
-	if testOrderPreview(broker, logger) {
+	if testOrderPreview(broker, logger, cfg) {
 		testsPassed++
 		fmt.Println("✅ PASSED")
 	} else {
@@ -169,7 +169,7 @@ func runIntegrationTests(broker broker.Broker, strategy *strategy.StrangleStrate
 	fmt.Println("=== Integration Test Results ===")
 	fmt.Printf("Tests Passed: %d/%d\n", testsPassed, totalTests)
 	if testsPassed == totalTests {
-		fmt.Println("🎉 ALL TESTS PASSED - Bot ready for live trading!")
+		fmt.Println("🎉 ALL TESTS PASSED - Bot ready for paper trading validation!")
 	} else {
 		fmt.Printf("⚠️  %d test(s) failed - review issues before live trading\n", totalTests-testsPassed)
 		os.Exit(1)
@@ -191,6 +191,9 @@ func testBrokerConnectivity(broker broker.Broker, logger *log.Logger) bool {
 }
 
 func testMarketDataRetrieval(broker broker.Broker, logger *log.Logger) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	// Test SPY quote
 	quote, err := broker.GetQuote("SPY")
 	if err != nil {
@@ -200,7 +203,7 @@ func testMarketDataRetrieval(broker broker.Broker, logger *log.Logger) bool {
 	logger.Printf("SPY Last: $%.2f", quote.Last)
 
 	// Test option expirations
-	expirations, err := broker.GetExpirations("SPY")
+	expirations, err := broker.GetExpirationsCtx(ctx, "SPY")
 	if err != nil {
 		logger.Printf("Failed to get expirations: %v", err)
 		return false
@@ -228,27 +231,27 @@ func testEntryConditions(strategy *strategy.StrangleStrategy, logger *log.Logger
 	return reason != ""
 }
 
-func testOrderPreview(broker broker.Broker, logger *log.Logger) bool {
+func testOrderPreview(broker broker.Broker, logger *log.Logger, cfg *config.Config) bool {
 	// Get current SPY quote to compute realistic strikes
 	quote, err := broker.GetQuote("SPY")
 	if err != nil {
 		logger.Printf("Failed to get SPY quote for strike calculation: %v", err)
 		return false
 	}
-	
+
 	// Compute strikes as quote ±10%, rounded to nearest $5
-	putStrike := math.Round((quote.Last * 0.90) / 5) * 5
-	callStrike := math.Round((quote.Last * 1.10) / 5) * 5
-	
+	putStrike := math.Floor((quote.Last*0.90)/5) * 5
+	callStrike := math.Ceil((quote.Last*1.10)/5) * 5
+
 	expiration := time.Now().Add(45 * 24 * time.Hour).Format("2006-01-02")
-	
+
 	order, err := broker.PlaceStrangleOrder(
 		"SPY",
 		putStrike,  // put strike (computed)
 		callStrike, // call strike (computed)
 		expiration,
 		1,     // quantity
-		2.50,  // limit price
+		cfg.Strategy.Entry.MinCredit, // limit price from config
 		true,  // preview mode
 		"day",
 		"integration-test",
@@ -263,10 +266,8 @@ func testOrderPreview(broker broker.Broker, logger *log.Logger) bool {
 		logger.Printf("Preview order status: '%s'", order.Order.Status)
 		logger.Printf("Preview order class: '%s'", order.Order.Class)
 		logger.Printf("Preview order price: $%.2f", order.Order.Price)
-		
-		// Consider test successful if we got an order response without error
-		// Status might be empty in sandbox preview mode
-		return order.Order.Status == "ok" || order.Order.Status == ""
+		status := order.Order.Status
+		return status == "ok" || status == ""
 	}
 	
 	logger.Printf("Order preview returned nil response")
@@ -308,9 +309,9 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker broker.Broke
 	}
 	
 	// Test position sizing calculation
-	allocationPct := cfg.Strategy.AllocationPct / 100.0
-	maxAllocation := balance * allocationPct
-	logger.Printf("Max allocation (%.0f%%): $%.2f", cfg.Strategy.AllocationPct, maxAllocation)
+	allocationFrac := cfg.Strategy.AllocationPct
+	maxAllocation := balance * allocationFrac
+	logger.Printf("Max allocation (%.0f%%): $%.2f", allocationFrac*100, maxAllocation)
 	
 	// Test that we have sufficient buying power
 	buyingPower, err := broker.GetOptionBuyingPower()

@@ -96,6 +96,9 @@ const (
 
 	// Error recovery
 	ConditionManualIntervention = "manual_intervention"
+	
+	// Recovery from external state
+	ConditionRecoveredPosition = "recovered_position"
 )
 
 // StateTransition defines valid state transitions
@@ -111,6 +114,7 @@ var ValidTransitions = []StateTransition{
 	// Position lifecycle
 	{StateIdle, StateSubmitted, ConditionOrderPlaced, "Order submitted to broker"},
 	{StateIdle, StateFirstDown, ConditionSkipOrderEntry, "Skipping order entry, going directly to management"},
+	{StateIdle, StateOpen, ConditionRecoveredPosition, "Position recovered from broker (orphaned position)"},
 	{StateSubmitted, StateOpen, ConditionOrderFilled, "Order filled successfully"},
 	{StateSubmitted, StateError, ConditionOrderFailed, "Order failed or canceled"},
 	{StateSubmitted, StateClosed, ConditionOrderTimeout, "Order timed out without fill"},

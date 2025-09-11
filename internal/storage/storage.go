@@ -534,10 +534,11 @@ func (s *JSONStorage) GetHistory() []models.Position {
 	// Return a deep copy to prevent external mutation of internal state
 	history := make([]models.Position, len(s.data.History))
 	for i := range s.data.History {
-		// Create a deep copy of each position
-		cloned := clonePosition(&s.data.History[i])
-		if cloned != nil {
-			history[i] = *cloned
+		if cp := clonePosition(&s.data.History[i]); cp != nil {
+			history[i] = *cp
+		} else {
+			// Fallback to original to avoid zero-value holes
+			history[i] = s.data.History[i]
 		}
 	}
 	return history
@@ -689,9 +690,10 @@ func (s *JSONStorage) GetCurrentPositions() []models.Position {
 
 	positions := make([]models.Position, len(s.data.CurrentPositions))
 	for i := range s.data.CurrentPositions {
-		cloned := clonePosition(&s.data.CurrentPositions[i])
-		if cloned != nil {
-			positions[i] = *cloned
+		if cp := clonePosition(&s.data.CurrentPositions[i]); cp != nil {
+			positions[i] = *cp
+		} else {
+			positions[i] = s.data.CurrentPositions[i]
 		}
 	}
 	return positions
@@ -764,16 +766,17 @@ func (s *JSONStorage) UpdatePosition(pos *models.Position) error {
 func (s *JSONStorage) GetPositionByID(id string) (models.Position, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	for i := range s.data.CurrentPositions {
 		if s.data.CurrentPositions[i].ID == id {
-			cloned := clonePosition(&s.data.CurrentPositions[i])
-			if cloned != nil {
-				return *cloned, true
+			if cp := clonePosition(&s.data.CurrentPositions[i]); cp != nil {
+				return *cp, true
 			}
+			// Fallback to original to avoid a false "not found"
+			return s.data.CurrentPositions[i], true
 		}
 	}
-	
+
 	return models.Position{}, false
 }
 

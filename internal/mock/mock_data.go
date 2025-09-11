@@ -12,6 +12,14 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 )
 
+// strikeInterval is the standard strike interval for SPY options
+const strikeInterval = 5.0
+
+// snapToStrikeGrid rounds a strike to the nearest strike interval
+func snapToStrikeGrid(strike float64) float64 {
+	return math.Round(strike/strikeInterval) * strikeInterval
+}
+
 // DataProvider provides mock market data for testing.
 //
 // Note: DataProvider isn't goroutine-safe.
@@ -243,13 +251,13 @@ func (m *DataProvider) Find16DeltaStrikes(options []broker.Option) (putStrike, c
 	
 	// Use best strikes when available, otherwise apply 16Δ heuristic
 	if bestPutStrike == 0 {
-		putStrike = spot * 0.9  // ~16Δ put strike
+		putStrike = snapToStrikeGrid(spot * 0.9)  // ~16Δ put strike, snapped to grid
 	} else {
 		putStrike = bestPutStrike
 	}
 	
 	if bestCallStrike == 0 {
-		callStrike = spot * 1.1  // ~16Δ call strike
+		callStrike = snapToStrikeGrid(spot * 1.1)  // ~16Δ call strike, snapped to grid
 	} else {
 		callStrike = bestCallStrike
 	}

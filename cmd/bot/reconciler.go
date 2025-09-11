@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -187,7 +186,7 @@ func (r *Reconciler) createRecoveryPosition(orphan orphanedStrangle) *models.Pos
 	position.EntryIV = 0        // We don't know the original IV
 
 	// Transition to Open state (assume it's already filled)
-	if err := position.TransitionState(models.StateOpen, "recovered_position"); err != nil {
+	if err := position.TransitionState(models.StateOpen, models.ConditionRecoveredPosition); err != nil {
 		r.logger.Printf("Failed to set recovery position state: %v", err)
 		return nil
 	}
@@ -249,31 +248,30 @@ func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPos
 // For OPRA format: SPY240315C00610000 -> "SPY"
 // For stock symbols: "SPY" -> "SPY"
 func extractUnderlyingFromSymbol(symbol string) string {
-	// Handle stock symbols (just return as-is)
-	if !strings.Contains(symbol, "240") && !strings.Contains(symbol, "250") && !strings.Contains(symbol, "260") {
-		// Simple heuristic: if it doesn't contain typical year prefixes, treat as stock
-		return symbol
-	}
-	
 	// For option symbols, extract the ticker part before the date
 	// OPRA format: TICKER[YYMMDD][C/P][STRIKE]
-	// Look for the pattern where we have 6 consecutive digits (YYMMDD)
-	for i := 0; i < len(symbol)-5; i++ {
+	// Scan for a run of six consecutive digits (YYMMDD) to detect the option date
+	
+	// Only iterate while there are at least 6 characters remaining to check
+	for i := 0; i <= len(symbol)-6; i++ {
 		// Check if we have 6 consecutive digits starting at position i
 		allDigits := true
-		for j := i; j < i+6 && j < len(symbol); j++ {
+		for j := i; j < i+6; j++ {
 			if symbol[j] < '0' || symbol[j] > '9' {
 				allDigits = false
 				break
 			}
 		}
+		
+		// If we found 6 consecutive digits and they're not at the start (index > 0),
+		// return the substring before them as the underlying ticker
 		if allDigits && i > 0 {
-			// Found the date part, return everything before it
 			return symbol[:i]
 		}
 	}
 	
-	// Fallback: if we can't parse it as an option, return the whole symbol
+	// Fallback: if no 6-digit sequence was found, return the whole symbol
+	// (likely a stock symbol, not an option)
 	return symbol
 }
 
