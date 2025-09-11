@@ -12,7 +12,7 @@
 //
 // This tool will:
 // 1. Fetch all current positions from the broker
-// 2. Place market close orders for immediate execution
+// 2. Place market orders for immediate execution
 // 3. Report order placement status
 //
 // Note: In Tradier sandbox, orders may not fill reliably due to platform limitations.
@@ -80,17 +80,33 @@ func main() {
 	ordersResp, err := client.GetOrders()
 	if err != nil {
 		log.Printf("⚠️  Warning: Could not retrieve orders: %v", err)
+	} else if ordersResp == nil || len(ordersResp.Orders.Order) == 0 {
+		fmt.Println("✅ No pending orders found")
 	} else {
 		pendingCount := 0
 		cancelledCount := 0
 		
+		// Define all active order statuses that should be cancelled
+		activeStatuses := map[string]struct{}{
+			"pending":        {},
+			"open":           {},
+			"submitted":      {},
+			"accepted":       {},
+			"partially_filled": {},
+			"new":            {},
+			"queued":         {},
+			"working":        {},
+			"pending_cancel": {},
+			"replaced":       {},
+		}
+		
 		for _, order := range ordersResp.Orders.Order {
 			// Cancel orders that are still active (not filled/canceled/expired/rejected)
 			status := strings.ToLower(order.Status)
-			if status == "pending" || status == "open" || status == "submitted" || status == "accepted" || status == "partially_filled" {
+			if _, isActive := activeStatuses[status]; isActive {
 				pendingCount++
-				fmt.Printf("📋 Cancelling pending order: %s %s %s (ID: %d)\n", 
-					order.Side, order.Symbol, order.Type, order.ID)
+				fmt.Printf("📋 Cancelling %s order: %s %s %s (ID: %d)\n", 
+					status, order.Side, order.Symbol, order.Type, order.ID)
 				
 				_, cancelErr := client.CancelOrder(order.ID)
 				if cancelErr != nil {
