@@ -10,6 +10,13 @@
 //   # Option B: via Makefile:
 //   make liquidate
 //
+//   # Skip confirmation prompt:
+//   go run scripts/liquidate_positions.go --yes
+//   go run scripts/liquidate_positions.go -y
+//
+//   # Force liquidation outside market hours:
+//   go run scripts/liquidate_positions.go --force
+//
 // This tool will:
 // 1. Fetch all current positions from the broker
 // 2. Place market orders for immediate execution
@@ -19,21 +26,29 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
 	"math"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
 
 func main() {
-	// Load configuration
+	// Command line flags
 	cfgPath := flag.String("config", "./config.yaml", "Path to config.yaml")
+	yes := flag.Bool("yes", false, "Skip confirmation prompt")
+	y := flag.Bool("y", false, "Skip confirmation prompt (shorthand)")
+	force := flag.Bool("force", false, "Force liquidation even outside market hours")
 	flag.Parse()
+	
+	// Combine yes flags
+	skipConfirm := *yes || *y
 	
 	var cfg *config.Config
 	if *cfgPath != "" {
@@ -70,9 +85,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create Tradier client: %v", err)
 	}
+	
+	// Check market session before proceeding (unless forced)
+	if !*force {
+		if !checkMarketSession(client) {
+			fmt.Println("💡 Use --force flag to override market session check")
+			os.Exit(1)
+		}
+	}
 
 	fmt.Println("💥 LIQUIDATE ALL POSITIONS - MARKET ORDERS 💥")
+	fmt.Printf("🏦 Account: %s\n", accountID)
 	fmt.Println("⚠️  WARNING: This will close ALL positions using market orders")
+	
+	if !skipConfirm {
+		fmt.Print("\n❓ Are you sure you want to proceed? (yes/no): ")
+		reader := bufio.NewReader(os.Stdin)
+		response, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatalf("Failed to read confirmation: %v", err)
+		}
+		response = strings.ToLower(strings.TrimSpace(response))
+		if response != "yes" && response != "y" {
+			fmt.Println("❌ Liquidation cancelled")
+			os.Exit(0)
+		}
+	}
+	
 	fmt.Println("🔒 Proceeding with liquidation via API...")
 	
 	// Cancel ALL pending orders first
@@ -105,14 +144,14 @@ func main() {
 			status := strings.ToLower(order.Status)
 			if _, isActive := activeStatuses[status]; isActive {
 				pendingCount++
-				fmt.Printf("📋 Cancelling %s order: %s %s %s (ID: %d)\n", 
+				fmt.Printf("📋 Cancelling %s order: %s %s %s (ID: %v)\n",
 					status, order.Side, order.Symbol, order.Type, order.ID)
 				
 				_, cancelErr := client.CancelOrder(order.ID)
 				if cancelErr != nil {
-					fmt.Printf("❌ Failed to cancel order %d: %v\n", order.ID, cancelErr)
+					fmt.Printf("❌ Failed to cancel order %v: %v\n", order.ID, cancelErr)
 				} else {
-					fmt.Printf("✅ Successfully cancelled order %d\n", order.ID)
+					fmt.Printf("✅ Successfully cancelled order %v\n", order.ID)
 					cancelledCount++
 				}
 			}
@@ -150,7 +189,13 @@ func main() {
 		}
 		
 		// Determine position direction and appropriate close order type
-		quantity := int(math.Abs(math.Round(pos.Quantity)))
+		absQty := math.Abs(pos.Quantity)
+		rounded := int(math.Round(absQty))
+		if math.Abs(absQty-float64(rounded)) > 1e-6 {
+			fmt.Printf("⏭️  Skipping %s: fractional quantity %.4f not supported by market liquidation; close manually\n", pos.Symbol, absQty)
+			continue
+		}
+		quantity := rounded
 		if quantity <= 0 {
 			fmt.Printf("⏭️  Skipping %s: computed quantity is 0\n", pos.Symbol)
 			continue
@@ -190,4 +235,68 @@ func main() {
 	fmt.Println("\n🎯 All close orders submitted!")
 	fmt.Println("⏳ Orders may take a few minutes to fill in sandbox environment")
 	fmt.Println("🔍 Monitor with: make test-api")
+}
+
+// checkMarketSession verifies if market is open using Tradier API
+func checkMarketSession(client broker.Broker) bool {
+	fmt.Println("🕒 Checking market session...")
+	
+	clock, err := client.GetMarketClock(false)
+	if err != nil {
+		fmt.Printf("⚠️  Could not get market status: %v\n", err)
+		fmt.Println("💡 Falling back to basic time check...")
+		return isWithinETHours()
+	}
+	
+	if clock == nil {
+		fmt.Println("⚠️  No market clock data received")
+		return isWithinETHours()
+	}
+	
+	state := clock.Clock.State
+	fmt.Printf("📊 Market status: %s\n", state)
+	
+	if state == "open" {
+		return true
+	}
+	
+	// Market is closed - warn about DAY order behavior
+	fmt.Printf("🔴 Market is currently %s\n", state)
+	fmt.Println("⚠️  DAY market orders may queue or be rejected outside RTH")
+	return false
+}
+
+// isWithinETHours provides basic ET trading hours check (9:30 AM - 4:00 PM ET, Mon-Fri)
+func isWithinETHours() bool {
+	now := time.Now()
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		// Fallback to EST approximation
+		loc = time.FixedZone("EST", -5*60*60)
+	}
+	etTime := now.In(loc)
+	
+	// Check if it's a weekday
+	weekday := etTime.Weekday()
+	if weekday == time.Saturday || weekday == time.Sunday {
+		fmt.Println("📅 Weekend - market closed")
+		return false
+	}
+	
+	// Check trading hours (9:30 AM - 4:00 PM ET)
+	hour := etTime.Hour()
+	minute := etTime.Minute()
+	currentMinutes := hour*60 + minute
+	
+	openMinutes := 9*60 + 30   // 9:30 AM
+	closeMinutes := 16*60      // 4:00 PM
+	
+	if currentMinutes >= openMinutes && currentMinutes < closeMinutes {
+		fmt.Printf("🟢 Within regular trading hours (%02d:%02d ET)\n", hour, minute)
+		return true
+	}
+	
+	fmt.Printf("🔴 Outside trading hours (%02d:%02d ET)\n", hour, minute)
+	fmt.Println("📋 Regular hours: 9:30 AM - 4:00 PM ET, Monday-Friday")
+	return false
 }
