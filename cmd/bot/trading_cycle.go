@@ -169,20 +169,15 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 		maxPositions = 1
 	}
 
-	// CRITICAL: Always run reconciliation first to discover broker positions
-	tc.bot.logger.Printf("Running comprehensive reconcile check before entry conditions...")
-	positions = tc.reconciler.ReconcilePositions(positions)
-
-	// Count active positions after reconciliation
+	// Count active positions (already reconciled in Run())
 	activeCount := len(positions)
-	tc.bot.logger.Printf("After reconciliation: %d/%d active positions", activeCount, maxPositions)
 
 	if activeCount >= maxPositions {
-		tc.bot.logger.Printf("Maximum positions (%d) reached after reconciliation, not checking for new entries", maxPositions)
+		tc.bot.logger.Printf("Maximum positions (%d) reached, not checking for new entries", maxPositions)
 		return
 	}
 
-	tc.bot.logger.Printf("Have %d/%d positions after reconciliation, checking entry conditions...", activeCount, maxPositions)
+	tc.bot.logger.Printf("Have %d/%d positions; checking entry conditions...", activeCount, maxPositions)
 
 	// Check buying power
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -210,7 +205,7 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 	tc.bot.logger.Printf("Entry signal: %s", reason)
 
 	// Open new positions
-	remainingSlots := maxPositions - len(positions)
+	remainingSlots := maxPositions - activeCount
 	maxNewPositions := tc.bot.config.Strategy.MaxNewPositionsPerCycle
 	if maxNewPositions <= 0 {
 		maxNewPositions = 1

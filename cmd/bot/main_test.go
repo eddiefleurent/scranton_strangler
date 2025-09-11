@@ -511,7 +511,7 @@ func TestReconcilePositions_EmptyPositions(t *testing.T) {
 	storedPositions := []models.Position{}
 	
 	// Broker has no positions
-	tb.mockBroker.On("GetPositions").Return([]broker.PositionItem{}, nil)
+	tb.mockBroker.On("GetPositionsCtx", mock.AnythingOfType("*context.timerCtx")).Return([]broker.PositionItem{}, nil)
 	
 	// Run reconciliation
 	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger)

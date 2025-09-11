@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"strconv"
 	"time"
 
@@ -33,10 +35,13 @@ func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.
 // It handles three cases:
 // 1. Positions in storage but closed in broker (manual closes)
 // 2. Positions in broker but missing from storage (timeout-related sync issues)
-// 3. Cold start: no storage file but broker positions exist (production recovery)
+// 3. Cold start: stored positions are empty while broker has positions.
+//    We log this and rely on the orphan-detection pass below to create recovery positions.
 func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []models.Position {
-	// Get current broker positions
-	brokerPositions, err := r.broker.GetPositions()
+	// Get current broker positions with timeout to prevent stuck cycles
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	brokerPositions, err := r.broker.GetPositionsCtx(ctx)
 	if err != nil {
 		r.logger.Printf("Failed to get broker positions for reconciliation: %v", err)
 		return storedPositions // Return unchanged on error
@@ -49,7 +54,7 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 	// this is likely a production restart without positions.json file
 	if len(storedPositions) == 0 && len(brokerPositions) > 0 {
 		r.logger.Printf("COLD START DETECTED: No stored positions but %d broker positions exist", len(brokerPositions))
-		r.logger.Printf("Creating recovery positions for existing broker positions...")
+		r.logger.Printf("Cold start: will attempt recovery via orphan-detection pass...")
 	}
 
 	var activePositions []models.Position
@@ -319,37 +324,68 @@ func extractExpirationFromSymbol(symbol string) string {
 func identifyStranglesFromPositions(positions []broker.PositionItem, expiration string) []orphanedStrangle {
 	var strangles []orphanedStrangle
 
-	// Group positions by strike for this expiration
-	callStrikes := make(map[float64]int) // strike -> quantity
+	callStrikes := make(map[float64]int)
 	putStrikes := make(map[float64]int)
+
+	underlying := ""
 
 	for _, pos := range positions {
 		strike, optionType, err := parseOptionSymbol(pos.Symbol)
 		if err != nil {
 			continue
 		}
-
-		quantity := int(math.Abs(pos.Quantity)) // Use absolute value
-
+		if underlying == "" {
+			underlying = extractUnderlyingFromSymbol(pos.Symbol)
+		}
+		qty := int(math.Abs(pos.Quantity))
+		if qty <= 0 {
+			continue
+		}
 		if optionType == "C" {
-			callStrikes[strike] += quantity
+			callStrikes[strike] += qty
 		} else if optionType == "P" {
-			putStrikes[strike] += quantity
+			putStrikes[strike] += qty
 		}
 	}
 
-	// Find matching call/put pairs (simple approach - assumes same quantity)
-	for callStrike, callQty := range callStrikes {
-		for putStrike, putQty := range putStrikes {
-			if callQty == putQty && callQty > 0 {
-				strangles = append(strangles, orphanedStrangle{
-					putStrike:  putStrike,
-					callStrike: callStrike,
-					expiration: expiration,
-					quantity:   callQty,
-					symbol:     "SPY",
-				})
+	// deterministic ordering
+	callKeys := make([]float64, 0, len(callStrikes))
+	for k := range callStrikes {
+		callKeys = append(callKeys, k)
+	}
+	putKeys := make([]float64, 0, len(putStrikes))
+	for k := range putStrikes {
+		putKeys = append(putKeys, k)
+	}
+	sort.Float64s(callKeys)
+	sort.Float64s(putKeys)
+
+	// greedy 1:1 pairing without reuse
+	for _, ck := range callKeys {
+		cRem := callStrikes[ck]
+		if cRem == 0 {
+			continue
+		}
+		for pi := 0; pi < len(putKeys) && cRem > 0; pi++ {
+			pk := putKeys[pi]
+			pRem := putStrikes[pk]
+			if pRem == 0 {
+				continue
 			}
+			n := cRem
+			if pRem < n {
+				n = pRem
+			}
+			strangles = append(strangles, orphanedStrangle{
+				putStrike:  pk,
+				callStrike: ck,
+				expiration: expiration,
+				quantity:   n,
+				symbol:     underlying,
+			})
+			cRem -= n
+			pRem -= n
+			putStrikes[pk] = pRem
 		}
 	}
 
