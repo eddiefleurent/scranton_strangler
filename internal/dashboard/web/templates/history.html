@@ -23,8 +23,8 @@
                 hx-on:htmx:after-swap="showPositionDetail()">
                 <td>{{.Symbol}}</td>
                 <td>{{.EntryDate.Format "01/02/06"}}</td>
-                <td>{{if .EntryDate.IsZero}}--{{else}}{{.EntryDate.AddDate 0 0 30}}.Format "01/02/06"}}{{end}}</td>
-                <td>{{if .EntryDate.IsZero}}--{{else}}30{{end}}</td>
+                <td>{{if .ExitDate.IsZero}}--{{else}}{{.ExitDate.Format "01/02/06"}}{{end}}</td>
+                <td>{{if .ExitDate.IsZero}}--{{else}}{{.HoldDays}}{{end}}</td>
                 <td><span aria-label="Put strike: {{printf "%.0f" .PutStrike}}, Call strike: {{printf "%.0f" .CallStrike}}">{{printf "%.0f" .PutStrike}}/{{printf "%.0f" .CallStrike}}</span></td>
                 <td>${{printf "%.2f" .CreditReceived}}</td>
                 <td class="{{if .IsProfit}}positive{{else}}negative{{end}}">

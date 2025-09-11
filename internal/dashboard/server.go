@@ -68,6 +68,8 @@ type PositionView struct {
 	Symbol           string
 	State            string
 	EntryDate        time.Time
+	ExitDate         time.Time
+	HoldDays         int
 	DTE              int
 	CallStrike       float64
 	PutStrike        float64
@@ -440,7 +442,7 @@ func (s *Server) handlePositionDetailPartial(w http.ResponseWriter, r *http.Requ
 func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 	history := s.storage.GetHistory()
 
-	views := s.convertPositionsToViews(history)
+	views := s.convertPositionsToViewsWithClosed(history, true)
 	
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if err := json.NewEncoder(w).Encode(views); err != nil {
@@ -450,7 +452,7 @@ func (s *Server) handleGetHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHistoryPartial(w http.ResponseWriter, r *http.Request) {
 	history := s.storage.GetHistory()
-	views := s.convertPositionsToViews(history)
+	views := s.convertPositionsToViewsWithClosed(history, true)
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.historyTemplate.ExecuteTemplate(w, "history-content", views); err != nil {
@@ -488,10 +490,14 @@ func (s *Server) getDashboardData() (*DashboardData, error) {
 }
 
 func (s *Server) convertPositionsToViews(positions []models.Position) []PositionView {
+	return s.convertPositionsToViewsWithClosed(positions, false)
+}
+
+func (s *Server) convertPositionsToViewsWithClosed(positions []models.Position, includeClosed bool) []PositionView {
 	views := make([]PositionView, 0, len(positions))
 	
 	for i := range positions {
-		if positions[i].State == models.StateClosed {
+		if !includeClosed && positions[i].State == models.StateClosed {
 			continue
 		}
 		views = append(views, s.convertPositionToView(&positions[i]))
@@ -504,6 +510,21 @@ func (s *Server) convertPositionToView(pos *models.Position) PositionView {
 	dte := int(time.Until(pos.Expiration).Hours() / 24)
 	if dte < 0 {
 		dte = 0
+	}
+	
+	// Calculate ExitDate and HoldDays
+	exitDate := pos.ExitDate
+	holdDays := 0
+	if !pos.EntryDate.IsZero() {
+		var endDate time.Time
+		if !exitDate.IsZero() {
+			// Position is closed, use actual exit date
+			endDate = exitDate
+		} else {
+			// Position is still open, use current time
+			endDate = time.Now()
+		}
+		holdDays = int(endDate.Sub(pos.EntryDate).Hours() / 24)
 	}
 	
 	currentPnL := pos.CurrentPnL
@@ -529,6 +550,8 @@ func (s *Server) convertPositionToView(pos *models.Position) PositionView {
 		Symbol:           pos.Symbol,
 		State:            string(pos.State),
 		EntryDate:        pos.EntryDate,
+		ExitDate:         exitDate,
+		HoldDays:         holdDays,
 		DTE:              dte,
 		CallStrike:       pos.CallStrike,
 		PutStrike:        pos.PutStrike,
