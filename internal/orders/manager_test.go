@@ -3,6 +3,7 @@ package orders
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -89,6 +90,14 @@ func (m *mockBrokerForOrders) CancelOrder(orderID int) (*broker.OrderResponse, e
 
 func (m *mockBrokerForOrders) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) GetOrders() (*broker.OrdersResponse, error) {
+	return &broker.OrdersResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
+	return &broker.OrdersResponse{}, nil
 }
 
 func (m *mockBrokerForOrders) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
@@ -725,6 +734,181 @@ func TestManager_ExitConditionFromReason(t *testing.T) {
 }
 
 // TestManager_IsOrderCompletelyFilled tests the partial fill detection logic
+func TestManager_HandleOrderFill_CreditVsDebitFills(t *testing.T) {
+	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
+
+	tests := []struct {
+		name               string
+		orderType          string
+		avgFillPrice       float64
+		execQuantity       float64
+		expectedCredit     float64
+		expectedQuantity   int
+		expectCreditSet    bool
+		description        string
+	}{
+		{
+			name:            "credit_order_positive_fill_price",
+			orderType:       "credit",
+			avgFillPrice:    2.50,
+			execQuantity:    2.0,
+			expectedCredit:  2.50,
+			expectedQuantity: 2,
+			expectCreditSet: true,
+			description:     "Credit order with positive fill price should set CreditReceived to absolute value",
+		},
+		{
+			name:            "credit_order_negative_fill_price",
+			orderType:       "credit",
+			avgFillPrice:    -2.50,
+			execQuantity:    2.0,
+			expectedCredit:  2.50,
+			expectedQuantity: 2,
+			expectCreditSet: true,
+			description:     "Credit order with negative fill price should set CreditReceived to absolute value",
+		},
+		{
+			name:            "debit_order_positive_fill_price",
+			orderType:       "debit",
+			avgFillPrice:    3.00,
+			execQuantity:    1.5,
+			expectedCredit:  0.0,
+			expectedQuantity: 2, // Rounded from 1.5
+			expectCreditSet: false,
+			description:     "Debit order should not set CreditReceived regardless of fill price",
+		},
+		{
+			name:            "debit_order_negative_fill_price",
+			orderType:       "debit",
+			avgFillPrice:    -1.25,
+			execQuantity:    3.7,
+			expectedCredit:  0.0,
+			expectedQuantity: 4, // Rounded from 3.7
+			expectCreditSet: false,
+			description:     "Debit order with negative fill should not set CreditReceived",
+		},
+		{
+			name:            "multileg_order_type",
+			orderType:       "multileg",
+			avgFillPrice:    1.75,
+			execQuantity:    1.0,
+			expectedCredit:  0.0,
+			expectedQuantity: 1,
+			expectCreditSet: false,
+			description:     "Non-credit order types should not set CreditReceived",
+		},
+		{
+			name:            "market_order_type",
+			orderType:       "market",
+			avgFillPrice:    2.25,
+			execQuantity:    2.3,
+			expectedCredit:  0.0,
+			expectedQuantity: 2, // Rounded from 2.3
+			expectCreditSet: false,
+			description:     "Market orders should not set CreditReceived",
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create fresh storage for each test
+			testStorage := storage.NewMockStorage()
+			
+			// Create a position in StateSubmitted (entry order) with unique ID
+			positionID := fmt.Sprintf("test-pos-%d", i)
+			position := models.NewPosition(positionID, "SPY", 400, 410, time.Now().AddDate(0, 0, 45), 1)
+			position.EntryOrderID = "123"
+			err := position.TransitionState(models.StateSubmitted, "order_placed")
+			if err != nil {
+				t.Fatalf("Failed to set up test position: %v", err)
+			}
+
+			if err := testStorage.AddPosition(position); err != nil {
+				t.Fatalf("Failed to set up test position in storage: %v", err)
+			}
+
+			// Mock broker that returns filled order with specific type and fill price
+			orderResp := &broker.OrderResponse{
+				Order: struct {
+					CreateDate        string  `json:"create_date"`
+					Type              string  `json:"type"`
+					Symbol            string  `json:"symbol"`
+					Side              string  `json:"side"`
+					Class             string  `json:"class"`
+					Status            string  `json:"status"`
+					Duration          string  `json:"duration"`
+					TransactionDate   string  `json:"transaction_date"`
+					AvgFillPrice      float64 `json:"avg_fill_price"`
+					ExecQuantity      float64 `json:"exec_quantity"`
+					LastFillPrice     float64 `json:"last_fill_price"`
+					LastFillQuantity  float64 `json:"last_fill_quantity"`
+					RemainingQuantity float64 `json:"remaining_quantity"`
+					ID                int     `json:"id"`
+					Price             float64 `json:"price"`
+					Quantity          float64 `json:"quantity"`
+				}{
+					ID:           123,
+					Status:       "filled",
+					Type:         tt.orderType,
+					AvgFillPrice: tt.avgFillPrice,
+					ExecQuantity: tt.execQuantity,
+				},
+			}
+
+			mockBroker := &mockBrokerForOrders{
+				orderStatus: orderResp,
+				orderError:  nil,
+			}
+
+			m := NewManager(mockBroker, testStorage, logger, nil, Config{
+				PollInterval: 1 * time.Millisecond,
+				Timeout:      1 * time.Second,
+				CallTimeout:  100 * time.Millisecond,
+			})
+
+			// Start polling in a goroutine
+			done := make(chan bool)
+			go func() {
+				m.PollOrderStatus(positionID, 123, true) // true = entry order
+				done <- true
+			}()
+
+			// Wait for polling to complete
+			select {
+			case <-done:
+				// Success - polling completed
+			case <-time.After(2 * time.Second):
+				t.Fatal("PollOrderStatus did not complete within timeout")
+			}
+
+			// Verify position was transitioned to StateOpen
+			updatedPosition, found := testStorage.GetPositionByID(positionID)
+			if !found {
+				t.Fatal("Expected to find updated position")
+			}
+			if updatedPosition.GetCurrentState() != models.StateOpen {
+				t.Errorf("Expected position state to be %s, got %s", models.StateOpen, updatedPosition.GetCurrentState())
+			}
+
+			// Verify quantity is properly rounded
+			if updatedPosition.Quantity != tt.expectedQuantity {
+				t.Errorf("Expected quantity %d, got %d", tt.expectedQuantity, updatedPosition.Quantity)
+			}
+
+			// Verify credit received handling based on order type
+			if tt.expectCreditSet {
+				if updatedPosition.CreditReceived != tt.expectedCredit {
+					t.Errorf("Expected CreditReceived %.4f, got %.4f", tt.expectedCredit, updatedPosition.CreditReceived)
+				}
+			} else {
+				if updatedPosition.CreditReceived != 0.0 {
+					t.Errorf("Expected CreditReceived to remain 0 for %s order, got %.4f", tt.orderType, updatedPosition.CreditReceived)
+				}
+			}
+		})
+	}
+}
+
 func TestManager_IsOrderCompletelyFilled(t *testing.T) {
 	logger := log.New(os.Stderr, "test: ", log.LstdFlags)
 	mockBroker := &mockBrokerForOrders{}

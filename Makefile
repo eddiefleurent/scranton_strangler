@@ -115,10 +115,10 @@ test-paper:
 # Liquidate all positions via market orders
 liquidate:
 	@echo "🚨 LIQUIDATING ALL POSITIONS 🚨"
-	@echo "This will close ALL open positions using aggressive market pricing"
+	@echo "This will close ALL open positions using market orders"
 	@echo "Uses credentials from environment variables or config.yaml"
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	cd scripts && go run liquidate_positions.go
+	cd scripts && go run liquidate_positions.go -config ../config.yaml
 
 # Build test helper
 build-test-helper:

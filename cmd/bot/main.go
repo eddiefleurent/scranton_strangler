@@ -157,7 +157,7 @@ func main() {
 			StopLossPct:         cfg.Strategy.Exit.StopLossPct,
 		}
 		bot.dashServer = dashboard.NewServer(dashConfig, bot.storage, bot.broker, bot.dashLogger)
-		logger.Printf("Dashboard enabled on port %d", cfg.Dashboard.Port)
+		logger.Printf("Dashboard enabled at http://localhost:%d", cfg.Dashboard.Port)
 	}
 
 	// Pre-fetch this month's market calendar for caching
@@ -179,13 +179,6 @@ func main() {
 		logger.Println("Shutdown signal received, stopping bot...")
 		close(bot.stop)
 		cancel()
-		if bot.dashServer != nil {
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer shutdownCancel()
-			if err := bot.dashServer.Shutdown(shutdownCtx); err != nil {
-				logger.Printf("Error shutting down dashboard: %v", err)
-			}
-		}
 	}()
 
 	// Start dashboard server if enabled
