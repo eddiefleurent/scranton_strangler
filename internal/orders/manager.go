@@ -184,6 +184,35 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 	var transitionReason string
 
 	if isEntryOrder {
+		// For entry orders, try to populate credit received and quantity from the order execution
+		// This is optional - if we can't get order details, we'll proceed with the transition anyway
+		if position.EntryOrderID != "" {
+			orderIDInt, err := parseOrderID(position.EntryOrderID)
+			if err == nil {
+				orderStatus, err := m.broker.GetOrderStatus(orderIDInt)
+				if err == nil && orderStatus != nil && orderStatus.Order.ID != 0 {
+					// Set the actual executed quantity and calculate credit received
+					position.Quantity = int(orderStatus.Order.ExecQuantity)
+					
+					// For credit spreads, the average fill price represents the credit per share
+					// Negative value means we received a credit (which is what we want for short strangles)
+					if orderStatus.Order.AvgFillPrice < 0 {
+						position.CreditReceived = -orderStatus.Order.AvgFillPrice // Convert to positive credit
+					} else if orderStatus.Order.AvgFillPrice > 0 {
+						// If positive, this might be a debit (bad for short strangles) but record it
+						position.CreditReceived = -orderStatus.Order.AvgFillPrice
+					}
+					
+					m.logger.Printf("Position %s filled: qty=%d, credit_per_share=%.4f", 
+						positionID, position.Quantity, position.CreditReceived)
+				} else {
+					m.logger.Printf("Could not fetch order details for position %s, proceeding with transition", positionID)
+				}
+			} else {
+				m.logger.Printf("Failed to parse entry order ID %s: %v", position.EntryOrderID, err)
+			}
+		}
+
 		targetState = models.StateOpen
 		transitionReason = "order_filled"
 
@@ -628,4 +657,12 @@ func (m *Manager) parseOptionSymbol(symbol string) (float64, string, error) {
 // getPositionsWithTimeout wraps Broker.GetPositionsCtx() with a context timeout.
 func (m *Manager) getPositionsWithTimeout(ctx context.Context) ([]broker.PositionItem, error) {
 	return m.broker.GetPositionsCtx(ctx)
+}
+
+// parseOrderID converts a string order ID to integer
+func parseOrderID(orderIDStr string) (int, error) {
+	if orderIDStr == "" {
+		return 0, fmt.Errorf("empty order ID")
+	}
+	return strconv.Atoi(orderIDStr)
 }

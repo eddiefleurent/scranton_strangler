@@ -90,6 +90,14 @@ func (m *mockBrokerForStrategy) GetOrderStatusCtx(ctx context.Context, orderID i
 	return &broker.OrderResponse{}, nil
 }
 
+func (m *mockBrokerForStrategy) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{}, nil
+}
+
 func (m *mockBrokerForStrategy) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
@@ -1083,6 +1091,36 @@ func (m *mockBroker) GetOrderStatus(orderID int) (*broker.OrderResponse, error) 
 
 func (m *mockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*broker.OrderResponse, error) {
 	return m.GetOrderStatus(orderID)
+}
+
+func (m *mockBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{
+		Order: struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		}{
+			ID:     orderID,
+			Status: "cancelled",
+		},
+	}, nil
+}
+
+func (m *mockBroker) CancelOrderCtx(_ context.Context, orderID int) (*broker.OrderResponse, error) {
+	return m.CancelOrder(orderID)
 }
 
 func (m *mockBroker) PlaceBuyToCloseOrder(

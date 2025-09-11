@@ -133,6 +133,22 @@ func (m *MockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broke
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
+func (m *MockBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	args := m.Called(orderID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
+func (m *MockBroker) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	args := m.Called(ctx, orderID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
 func (m *MockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	args := m.Called(optionSymbol, quantity, maxPrice, duration, tag)
 	if args.Get(0) == nil {

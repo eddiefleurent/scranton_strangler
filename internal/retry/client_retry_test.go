@@ -192,6 +192,15 @@ func (f *fakeBroker) CloseStranglePositionCtx(ctx context.Context, symbol string
 	return f.successResponse(), nil
 }
 
+// Add missing CancelOrder methods only
+func (f *fakeBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	return f.successResponse(), nil
+}
+
+func (f *fakeBroker) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return f.successResponse(), nil
+}
+
 func (f *fakeBroker) successResponse() *broker.OrderResponse {
 	if f.resp != nil {
 		return f.resp

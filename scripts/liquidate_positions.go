@@ -92,20 +92,36 @@ func main() {
 		quantity := int(math.Abs(math.Round(pos.Quantity)))
 		isShort := pos.Quantity < 0
 		
-		orderType := "buy-to-close MARKET"
+		orderType := "buy-to-close LIMIT"
 		if !isShort {
-			orderType = "sell-to-close MARKET"
+			orderType = "sell-to-close LIMIT"
 		}
 		
 		fmt.Printf("\n📝 Closing %s (%d contracts) using %s order...\n", pos.Symbol, quantity, orderType)
-		fmt.Printf("💥 MARKET ORDER: Will execute at current market price for immediate fill\n")
+		fmt.Printf("💥 AGGRESSIVE LIMIT: Will fill quickly with generous pricing\n")
 		
-		// Place the appropriate market order type based on position direction
+		// Get current option quote for aggressive limit pricing
+		quote, err := client.GetQuote(pos.Symbol)
+		if err != nil {
+			fmt.Printf("❌ Failed to get quote for %s: %v\n", pos.Symbol, err)
+			continue
+		}
+		
+		// Use aggressive limit pricing (150% of ask for buy-to-close, 75% of bid for sell-to-close)
+		var limitPrice float64
 		var orderResp *broker.OrderResponse
 		if isShort {
-			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, quantity, string(broker.DurationGTC), "emergency-liquidation")
+			// Buy-to-close: use 150% of ask price for aggressive fill
+			limitPrice = quote.Ask * 1.5
+			if limitPrice < 0.01 { limitPrice = 0.01 } // Minimum tick
+			fmt.Printf("💰 Using aggressive buy limit: $%.2f (150%% of ask: $%.2f)\n", limitPrice, quote.Ask)
+			orderResp, err = client.PlaceBuyToCloseOrder(pos.Symbol, quantity, limitPrice, string(broker.DurationDay), "emergency-liquidation")
 		} else {
-			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, quantity, string(broker.DurationGTC), "emergency-liquidation")
+			// Sell-to-close: use 75% of bid price for aggressive fill
+			limitPrice = quote.Bid * 0.75
+			if limitPrice < 0.01 { limitPrice = 0.01 } // Minimum tick
+			fmt.Printf("💰 Using aggressive sell limit: $%.2f (75%% of bid: $%.2f)\n", limitPrice, quote.Bid)
+			orderResp, err = client.PlaceSellToCloseOrder(pos.Symbol, quantity, limitPrice, string(broker.DurationDay), "emergency-liquidation")
 		}
 		if err != nil {
 			fmt.Printf("❌ Failed to close %s: %v\n", pos.Symbol, err)

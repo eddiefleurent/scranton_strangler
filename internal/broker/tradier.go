@@ -978,6 +978,26 @@ func (t *TradierAPI) GetOrderStatusCtx(ctx context.Context, orderID int) (*Order
 	return &response, nil
 }
 
+// CancelOrder cancels an existing order by ID
+func (t *TradierAPI) CancelOrder(orderID int) (*OrderResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
+	var response OrderResponse
+	if err := t.makeRequest("DELETE", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// CancelOrderCtx cancels an existing order by ID with context
+func (t *TradierAPI) CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
+	var response OrderResponse
+	if err := t.makeRequestCtx(ctx, "DELETE", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // PlaceBuyToCloseOrder places a buy-to-close order for an option position.
 func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate price for limit orders

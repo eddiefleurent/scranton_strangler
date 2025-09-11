@@ -837,6 +837,28 @@ func (m *MockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*OrderRe
 	return resp, nil
 }
 
+func (m *MockBroker) CancelOrder(orderID int) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = orderID
+	resp.Order.Status = "cancelled"
+	return resp, nil
+}
+
+func (m *MockBroker) CancelOrderCtx(_ context.Context, orderID int) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = orderID
+	resp.Order.Status = "cancelled"
+	return resp, nil
+}
+
 func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
 	_ int, _ float64, _ string) (*OrderResponse, error) {
 	m.callCount++

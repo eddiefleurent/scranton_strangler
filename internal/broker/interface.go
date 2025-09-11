@@ -47,6 +47,10 @@ type Broker interface {
 	GetOrderStatus(orderID int) (*OrderResponse, error)
 	GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error)
 
+	// Order cancellation
+	CancelOrder(orderID int) (*OrderResponse, error)
+	CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error)
+
 	// Position closing
 	CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string,
 		quantity int, maxDebit float64, tag string) (*OrderResponse, error)
@@ -258,6 +262,16 @@ func (t *TradierClient) GetOrderStatus(orderID int) (*OrderResponse, error) {
 // GetOrderStatusCtx retrieves the status of an existing order with context
 func (t *TradierClient) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
 	return t.TradierAPI.GetOrderStatusCtx(ctx, orderID)
+}
+
+// CancelOrder cancels an existing order
+func (t *TradierClient) CancelOrder(orderID int) (*OrderResponse, error) {
+	return t.TradierAPI.CancelOrder(orderID)
+}
+
+// CancelOrderCtx cancels an existing order with context
+func (t *TradierClient) CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	return t.TradierAPI.CancelOrderCtx(ctx, orderID)
 }
 
 // PlaceBuyToCloseOrder places a buy-to-close order for a specific option
@@ -555,6 +569,20 @@ func (c *CircuitBreakerBroker) GetOrderStatus(orderID int) (*OrderResponse, erro
 func (c *CircuitBreakerBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
 		return b.GetOrderStatusCtx(ctx, orderID)
+	})
+}
+
+// CancelOrder wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) CancelOrder(orderID int) (*OrderResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
+		return b.CancelOrder(orderID)
+	})
+}
+
+// CancelOrderCtx wraps the underlying broker call with circuit breaker
+func (c *CircuitBreakerBroker) CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
+		return b.CancelOrderCtx(ctx, orderID)
 	})
 }
 
