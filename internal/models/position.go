@@ -94,8 +94,8 @@ func (p *Position) GetNetCredit() float64 {
 	return total
 }
 
-// GetTotalCredit returns the total credit received including adjustments.
 // Deprecated: Use GetNetCredit instead for better semantic clarity.
+// GetTotalCredit returns the total credit received including adjustments.
 func (p *Position) GetTotalCredit() float64 {
 	return p.GetNetCredit()
 }
