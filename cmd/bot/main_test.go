@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
-	"os"
 	"testing"
 	"time"
 
@@ -51,11 +51,17 @@ func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 
 func (m *MockBroker) GetPositions() ([]broker.PositionItem, error) {
 	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]broker.PositionItem), args.Error(1)
 }
 
 func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
 	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]broker.PositionItem), args.Error(1)
 }
 
@@ -69,11 +75,17 @@ func (m *MockBroker) GetQuote(symbol string) (*broker.QuoteItem, error) {
 
 func (m *MockBroker) GetExpirations(symbol string) ([]string, error) {
 	args := m.Called(symbol)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]string), args.Error(1)
 }
 
 func (m *MockBroker) GetExpirationsCtx(ctx context.Context, symbol string) ([]string, error) {
 	args := m.Called(ctx, symbol)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]string), args.Error(1)
 }
 
@@ -189,6 +201,9 @@ func (m *MockBroker) GetTickSize(symbol string) (float64, error) {
 
 func (m *MockBroker) GetHistoricalData(symbol, interval string, start, end time.Time) ([]broker.HistoricalDataPoint, error) {
 	args := m.Called(symbol, interval, start, end)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
 	return args.Get(0).([]broker.HistoricalDataPoint), args.Error(1)
 }
 
@@ -275,7 +290,7 @@ func createTestBot(t *testing.T) *TestBot {
 	}
 	
 	// Create logger
-	logger := log.New(os.Stdout, "[TEST] ", log.LstdFlags)
+	logger := log.New(io.Discard, "", 0)
 	
 	// Load NY timezone
 	nyLocation, err := time.LoadLocation("America/New_York")
@@ -379,6 +394,7 @@ func TestRunTradingCycle_MarketClosed(t *testing.T) {
 	// Verify no positions were checked or opened
 	tb.mockBroker.AssertNotCalled(t, "GetPositions")
 	tb.mockBroker.AssertNotCalled(t, "PlaceStrangleOrder")
+	tb.mockBroker.AssertNotCalled(t, "PlaceStrangleOTOCO")
 }
 
 func TestBot_GracefulShutdown(t *testing.T) {

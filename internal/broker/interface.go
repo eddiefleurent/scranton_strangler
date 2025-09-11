@@ -194,8 +194,8 @@ func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike 
 	if quantity <= 0 {
 		return nil, fmt.Errorf("quantity must be > 0")
 	}
-	if limitPrice < 0 {
-		return nil, fmt.Errorf("limitPrice must be >= 0")
+	if limitPrice <= 0 {
+		return nil, fmt.Errorf("limitPrice must be > 0")
 	}
 	if t.useOTOCO {
 		// Try OTOCO order with configurable profit target
@@ -323,7 +323,7 @@ func (t *TradierClient) GetTickSize(symbol string) (float64, error) {
 // so we convert optionType (OptionType) to string for comparison
 func GetOptionByStrike(options []Option, strike float64, optionType OptionType) *Option {
 	for i := range options {
-		if math.Abs(options[i].Strike-strike) <= strikeEpsilon && options[i].OptionType == string(optionType) {
+		if math.Abs(options[i].Strike-strike) <= StrikeMatchEpsilon && options[i].OptionType == string(optionType) {
 			return &options[i]
 		}
 	}
@@ -339,8 +339,6 @@ func OptionTypeMatches(optionType string, expectedType OptionType) bool {
 // OptionType represents the type of option contract
 type OptionType string
 
-// Strike comparison epsilon for floating-point precision
-const strikeEpsilon = 1e-4
 
 const (
 	// OptionTypePut represents a put option contract

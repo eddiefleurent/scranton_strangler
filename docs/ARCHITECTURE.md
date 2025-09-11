@@ -662,9 +662,8 @@ if regime == "high_vol": use 30Δ
 #### Infrastructure Upgrades
 - PostgreSQL for trade history
 - Redis for position cache
-- Grafana dashboard
 - Alert system (Telegram/Discord)
-- Docker deployment
+- Unraid deployment optimization
 
 #### Architecture (Production)
 ```
@@ -958,7 +957,90 @@ func (c *RateLimitedClient) GetQuote(symbol string) (*Quote, error) {
 1. **Multi-Asset Support**
 2. **Event-Driven Architecture**
 3. **PostgreSQL Migration**
-4. **Web Dashboard**
+
+### Integrated Web Dashboard (Current Implementation)
+
+#### HTMX Dashboard Architecture
+The bot includes an integrated web dashboard served alongside the main trading application:
+
+- **Single Binary Deployment**: Dashboard runs as HTTP server within the main bot process
+- **Port Configuration**: Uses configurable esoteric port (default: 9847) for Unraid compatibility
+- **Technology Stack**: Go net/http + HTML templates + HTMX for dynamic updates
+- **Zero Build Step**: Pure server-side rendered HTML with minimal JavaScript
+
+#### Dashboard Components
+
+##### Backend (internal/dashboard/)
+```go
+type DashboardServer struct {
+    storage  storage.Interface  // Existing storage layer integration
+    broker   broker.Interface   // Real-time position data
+    config   *config.Config     // Dashboard configuration
+    server   *http.Server       // HTTP server instance
+}
+
+// HTTP Routes
+GET  /                 # Main dashboard page
+GET  /api/positions    # HTMX endpoint for positions table
+GET  /api/stats        # HTMX endpoint for statistics overview  
+GET  /api/position/{id} # Position detail modal/panel
+GET  /health           # Health check endpoint
+```
+
+##### Frontend Templates (web/templates/)
+- **dashboard.html**: Main layout with auto-refreshing sections
+- **positions.html**: Active positions table (HTMX partial)
+- **stats.html**: Performance statistics cards (HTMX partial)
+- **position-detail.html**: Individual position details modal
+
+##### Key Features
+- **Real-time Updates**: HTMX polling every 15-30 seconds (`hx-trigger="every 15s"`)
+- **Active Positions View**: 
+  - Position ID, symbol, entry date
+  - Strike prices (put/call), days to expiration
+  - Current P&L, profit percentage, profit target progress
+  - Position state (Open, First Down, etc.)
+  - Exit condition indicators
+- **Statistics Dashboard**:
+  - Win rate, current streak, total P&L
+  - Daily P&L tracking, average win/loss
+  - Account allocation usage
+- **Mobile Responsive**: Clean CSS grid/flexbox layout
+- **Interactive Elements**: Click position rows for adjustment history details
+
+#### Configuration Integration
+```yaml
+dashboard:
+  enabled: true
+  port: 9847              # Esoteric port for Unraid
+  host: "0.0.0.0"         # Bind to all interfaces
+  refresh_interval: "15s" # HTMX polling interval
+  auth:
+    enabled: false        # Optional basic auth
+    username: ""
+    password: ""
+```
+
+#### Deployment Integration
+
+**Unraid Deployment**: 
+- Dashboard accessible at `http://your-unraid-ip:9847`
+- Single binary includes both bot and dashboard
+- No additional containers or services required
+
+**Makefile Updates**:
+```bash
+# Updated deployment includes dashboard port mapping
+make deploy-unraid     # Deploys bot with integrated dashboard
+make unraid-dashboard  # Show dashboard URL and status
+```
+
+#### Implementation Benefits
+- **Zero Infrastructure**: No separate web server or database required
+- **Real-time Monitoring**: Live position updates without manual refresh
+- **Mobile Access**: Monitor trades from anywhere with responsive design
+- **Minimal Overhead**: ~200 lines of Go code, negligible performance impact
+- **Development Speed**: HTMX eliminates complex JavaScript build processes
 
 ---
 
@@ -977,40 +1059,14 @@ go build -ldflags "-X main.version=$(git describe --tags)" \
 
 ### Production Deployment
 
-#### Option 1: Systemd (Linux VPS)
-```ini
-[Unit]
-Description=SPY Strangle Bot
-After=network.target
+#### Unraid Deployment
+```bash
+# Single command deploys bot with integrated dashboard
+make deploy-unraid
 
-[Service]
-Type=simple
-User=trading
-WorkingDirectory=/opt/strangle-bot
-ExecStart=/opt/strangle-bot/strangle-bot
-Restart=on-failure
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-# Alternative (newer systemd): append:/var/log/strangle-bot/{output,error}.log
-
-[Install]
-WantedBy=multi-user.target
-```
-
-#### Option 2: Docker
-```dockerfile
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o strangle-bot cmd/bot/main.go
-
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /app/strangle-bot .
-COPY config.yaml .
-CMD ["./strangle-bot"]
+# Access dashboard at http://unraid-ip:9847
+# Monitor via: make unraid-dashboard
+# View logs: make unraid-logs
 ```
 
 ### Monitoring & Alerting

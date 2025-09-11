@@ -112,17 +112,23 @@ func TestAbsDaysBetween(t *testing.T) {
 // testTransport redirects all requests to a test server for testing
 type testTransport struct {
 	serverURL string
+	rt        *http.Transport
 }
 
 func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Rewrite the URL to point to our test server
-	testURL, _ := url.Parse(t.serverURL + req.URL.Path + "?" + req.URL.RawQuery)
+	testURL, err := url.Parse(t.serverURL + req.URL.Path + "?" + req.URL.RawQuery)
+	if err != nil {
+		return nil, err
+	}
 	req.URL = testURL
 	req.Host = testURL.Host
 
-	// Use the default transport for the actual request
-	defaultTransport := http.DefaultTransport.(*http.Transport).Clone()
-	return defaultTransport.RoundTrip(req)
+	// Use the default transport for the actual request - reuse cached transport
+	if t.rt == nil {
+		t.rt = http.DefaultTransport.(*http.Transport).Clone()
+	}
+	return t.rt.RoundTrip(req)
 }
 
 func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {

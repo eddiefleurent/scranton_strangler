@@ -112,17 +112,55 @@
   - [x] Recover from network interruptions
   - [x] Validate position state on startup
 
+## Current Implementation: Integrated Dashboard
+
+### Immediate Dashboard Tasks (Single Binary Deployment)
+- [ ] **Backend Infrastructure**
+  - [ ] Create `internal/dashboard/` package with HTTP server
+  - [ ] Implement dashboard server struct with storage/broker integration
+  - [ ] Add dashboard configuration to `config.yaml.example`
+  - [ ] HTTP route handlers for positions, stats, and health endpoints
+- [ ] **Frontend Templates & Static Files**
+  - [ ] Create `web/templates/` directory structure
+  - [ ] Implement `dashboard.html` main layout with HTMX integration
+  - [ ] Create `positions.html` partial for active positions table
+  - [ ] Create `stats.html` partial for performance statistics
+  - [ ] Add `position-detail.html` for individual position views
+  - [ ] Basic CSS styling with responsive grid layout
+- [ ] **HTMX Integration & Real-time Updates**
+  - [ ] Configure HTMX polling for 15-30 second updates
+  - [ ] Position table with live P&L, DTE, and profit target progress
+  - [ ] Statistics cards with win rates and performance metrics
+  - [ ] Interactive elements (clickable rows for position details)
+- [ ] **Main Application Integration**
+  - [ ] Integrate dashboard server startup in `cmd/bot/main.go`
+  - [ ] Graceful shutdown handling for HTTP server
+  - [ ] Configuration validation and port binding
+  - [ ] Error handling and logging for dashboard operations
+- [ ] **Deployment & Testing**
+  - [ ] Update Makefile with `unraid-dashboard` target
+  - [ ] Test dashboard accessibility on Unraid (port 9847)
+  - [ ] Verify single binary includes web assets
+  - [ ] Mobile responsiveness testing
+
 ## Post-MVP Enhancements (Later)
 
 ### Phase 2: Reliability & Monitoring
 - [ ] Better error handling with retries
 - [ ] SQLite for position storage
 - [ ] Structured logging with levels
+- [ ] **Integrated Web Dashboard (HTMX)**
+  - [ ] Dashboard server integration in main bot process
+  - [ ] HTMX-based real-time position monitoring interface
+  - [ ] Active positions table with P&L, DTE, and profit targets
+  - [ ] Statistics overview with win rates and performance metrics
+  - [ ] Configuration integration (port: 9847, auth options)
+  - [ ] Mobile-responsive design for remote monitoring
+  - [ ] Unraid deployment compatibility with single binary
 - [ ] **Trade Monitoring & Alerting**
   - [ ] Discord webhook notifications for trade events (entry/exit/adjustments/alerts)
   - [ ] Simple event logging to append-only JSON file (trades.log)
-  - [ ] Basic web dashboard with HTMX for position viewing
-  - [ ] Real-time position status endpoint for dashboard polling
+  - [ ] Health check endpoint for monitoring systems
   - [ ] Configuration for notification levels and webhook URL
 
 ### Phase 3: Strategy Enhancements  

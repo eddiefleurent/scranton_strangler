@@ -250,6 +250,10 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s in state %s: EntryDate must be set for active positions",
 				p.ID, currentState)
 		}
+		if p.Expiration.IsZero() {
+			return fmt.Errorf("position %s in state %s: Expiration must be set for active positions",
+				p.ID, currentState)
+		}
 		if !p.ExitDate.IsZero() {
 			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
 				p.ID, currentState, p.ExitDate)
@@ -327,6 +331,10 @@ func (p *Position) ValidateState() error {
 			return fmt.Errorf("position %s in state %s: EntryDate must be set for adjusting positions",
 				p.ID, currentState)
 		}
+		if p.Expiration.IsZero() {
+			return fmt.Errorf("position %s in state %s: Expiration must be set for adjusting positions",
+				p.ID, currentState)
+		}
 		if !p.ExitDate.IsZero() {
 			return fmt.Errorf("position %s in state %s: ExitDate must be zero for non-closed positions (current: %v)",
 				p.ID, currentState, p.ExitDate)
@@ -351,6 +359,10 @@ func (p *Position) ValidateState() error {
 		// Rolling state invariants: treat like active state with entry data and positive credit
 		if p.EntryDate.IsZero() {
 			return fmt.Errorf("position %s in state %s: EntryDate must be set for rolling positions",
+				p.ID, currentState)
+		}
+		if p.Expiration.IsZero() {
+			return fmt.Errorf("position %s in state %s: Expiration must be set for rolling positions",
 				p.ID, currentState)
 		}
 		if !p.ExitDate.IsZero() {

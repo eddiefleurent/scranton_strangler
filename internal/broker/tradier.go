@@ -286,7 +286,7 @@ func (pw *PositionsWrapper) UnmarshalJSON(b []byte) error {
 
 // PositionItem represents a single position item from the Tradier API.
 type PositionItem struct {
-	DateAcquired time.Time `json:"date_acquired"`
+	DateAcquired string `json:"date_acquired"`
 	Symbol       string    `json:"symbol"`
 	CostBasis    float64   `json:"cost_basis"`
 	ID           int       `json:"id"`

@@ -169,31 +169,20 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	// Verify broker connection with timeout
 	b.logger.Println("Verifying broker connection...")
-	type balanceResult struct {
-		balance float64
-		err     error
-	}
-	resCh := make(chan balanceResult, 1)
-
-	// Add cancellation for balance fetch to avoid potential startup goroutine leak
 	ctxBal, cancelBal := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelBal()
-	go func() {
-		bal, err := b.broker.GetAccountBalanceCtx(ctxBal)
-		resCh <- balanceResult{balance: bal, err: err}
-	}()
-
-	select {
-	case res := <-resCh:
-		if res.err != nil {
-			return fmt.Errorf("failed to connect to broker: %w", res.err)
+	
+	bal, err := b.broker.GetAccountBalanceCtx(ctxBal)
+	if err != nil {
+		if ctxBal.Err() != nil {
+			return fmt.Errorf("broker health check timed out: %w", ctxBal.Err())
+		} else if ctx.Err() != nil {
+			return fmt.Errorf("broker health check cancelled: %w", ctx.Err())
+		} else {
+			return fmt.Errorf("failed to connect to broker: %w", err)
 		}
-		b.logger.Printf("Connected to broker. Account balance: $%.2f", res.balance)
-	case <-ctxBal.Done():
-		return fmt.Errorf("broker health check timed out: %w", ctxBal.Err())
-	case <-ctx.Done():
-		return fmt.Errorf("broker health check cancelled: %w", ctx.Err())
 	}
+	b.logger.Printf("Connected to broker. Account balance: $%.2f", bal)
 
 	// Main trading loop
 	interval := b.config.GetCheckInterval()
@@ -275,7 +264,7 @@ func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse
 		return nil, fmt.Errorf("failed to get market calendar: %w", err)
 	}
 
-	// Cache the result (including nil)
+	// Cache the result (note: nil does not count as a cache hit)
 	b.calendarMu.Lock()
 	b.marketCalendar = calendar
 	b.calendarCacheMonth = month
