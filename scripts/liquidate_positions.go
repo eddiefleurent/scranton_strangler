@@ -103,9 +103,9 @@ func main() {
 		// Place the appropriate market order type based on position direction
 		var orderResp *broker.OrderResponse
 		if isShort {
-			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, quantity, "day")
+			orderResp, err = client.PlaceBuyToCloseMarketOrder(pos.Symbol, quantity, "day", "emergency-liquidation")
 		} else {
-			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, quantity, "day")
+			orderResp, err = client.PlaceSellToCloseMarketOrder(pos.Symbol, quantity, "day", "emergency-liquidation")
 		}
 		if err != nil {
 			fmt.Printf("❌ Failed to close %s: %v\n", pos.Symbol, err)

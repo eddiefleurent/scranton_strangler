@@ -170,6 +170,8 @@ func main() {
 		credit,
 		0.5, // 50% profit target
 		preview,
+		"day", // duration
+		"test-otoco", // tag
 	)
 
 	if err != nil {
