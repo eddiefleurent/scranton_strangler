@@ -69,7 +69,7 @@ func (m *mockBrokerForOrders) PlaceStrangleOrder(symbol string, putStrike, callS
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForOrders) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
+func (m *mockBrokerForOrders) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
@@ -91,19 +91,19 @@ func (m *mockBrokerForOrders) CloseStranglePositionCtx(ctx context.Context, symb
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForOrders) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForOrders) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForOrders) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForOrders) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForOrders) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForOrders) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForOrders) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForOrders) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 

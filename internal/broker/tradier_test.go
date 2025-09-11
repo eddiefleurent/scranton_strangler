@@ -582,19 +582,19 @@ func TestPlaceBuyToCloseOrder_ValidatesInputsAndBuildsForm(t *testing.T) {
 	defer srv.Close()
 
 	// Valid
-	resp, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 2.75, "day")
+	resp, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 2.75, "day", "test-tag")
 	if err != nil || resp.Order.ID != 9001 {
 		t.Fatalf("PlaceBuyToCloseOrder got (%+v,%v)", resp, err)
 	}
 
 	// Invalids
-	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 0, "day"); err == nil {
+	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 5, 0, "day", ""); err == nil {
 		t.Fatalf("expected error: non-positive price")
 	}
-	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 0, 1, "day"); err == nil {
+	if _, err := api.PlaceBuyToCloseOrder("AAPL250101C00150000", 0, 1, "day", ""); err == nil {
 		t.Fatalf("expected error: non-positive quantity")
 	}
-	if _, err := api.PlaceBuyToCloseOrder("???", 1, 1, "day"); err == nil {
+	if _, err := api.PlaceBuyToCloseOrder("???", 1, 1, "day", ""); err == nil {
 		t.Fatalf("expected error: invalid underlying extraction")
 	}
 }
@@ -626,19 +626,19 @@ func TestPlaceSellToCloseOrder_ValidatesInputsAndBuildsForm(t *testing.T) {
 	defer srv.Close()
 
 	// Valid
-	resp, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 5, 2.75, "day")
+	resp, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 5, 2.75, "day", "test-tag")
 	if err != nil || resp.Order.ID != 9002 {
 		t.Fatalf("PlaceSellToCloseOrder got (%+v,%v)", resp, err)
 	}
 
 	// Invalids
-	if _, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 5, 0, "day"); err == nil {
+	if _, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 5, 0, "day", ""); err == nil {
 		t.Fatalf("expected error: non-positive price")
 	}
-	if _, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 0, 1, "day"); err == nil {
+	if _, err := api.PlaceSellToCloseOrder("AAPL250101C00150000", 0, 1, "day", ""); err == nil {
 		t.Fatalf("expected error: non-positive quantity")
 	}
-	if _, err := api.PlaceSellToCloseOrder("???", 1, 1, "day"); err == nil {
+	if _, err := api.PlaceSellToCloseOrder("???", 1, 1, "day", ""); err == nil {
 		t.Fatalf("expected error: invalid underlying extraction")
 	}
 }
@@ -646,7 +646,7 @@ func TestPlaceSellToCloseOrder_ValidatesInputsAndBuildsForm(t *testing.T) {
 func TestPlaceStrangleOTOCO_ReturnsUnsupported(t *testing.T) {
 	// The function should return ErrOTOCOUnsupported without touching network.
 	api := NewTradierAPI("k", "acc", false)
-	if _, err := api.PlaceStrangleOTOCO("", 0, 0, "", 0, 0, 0, false); err == nil {
+	if _, err := api.PlaceStrangleOTOCO("", 0, 0, "", 0, 0, 0, false, "day", ""); err == nil {
 		t.Fatalf("expected ErrOTOCOUnsupported")
 	}
 }

@@ -108,7 +108,7 @@ func (f *fakeBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike flo
 	return &broker.OrderResponse{}, nil
 }
 
-func (f *fakeBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
+func (f *fakeBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
@@ -120,19 +120,19 @@ func (f *fakeBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broke
 	return &broker.OrderResponse{}, nil
 }
 
-func (f *fakeBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+func (f *fakeBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (f *fakeBroker) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+func (f *fakeBroker) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (f *fakeBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+func (f *fakeBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (f *fakeBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+func (f *fakeBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 

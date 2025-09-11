@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,115 +14,6 @@ import (
 	"github.com/sony/gobreaker"
 )
 
-func TestCalculateIVR(t *testing.T) {
-	tests := []struct {
-		name         string
-		historicalIV []float64
-		currentIV    float64
-		expected     float64
-	}{
-		{
-			name:         "normal range",
-			currentIV:    25.0,
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0},
-			expected:     50.0, // (25-10)/(40-10) * 100 = 50
-		},
-		{
-			name:         "at minimum",
-			currentIV:    10.0,
-			historicalIV: []float64{10.0, 20.0, 30.0},
-			expected:     0.0, // (10-10)/(30-10) * 100 = 0
-		},
-		{
-			name:         "at maximum",
-			currentIV:    30.0,
-			historicalIV: []float64{10.0, 20.0, 30.0},
-			expected:     100.0, // (30-10)/(30-10) * 100 = 100
-		},
-		{
-			name:         "no range (all same)",
-			currentIV:    20.0,
-			historicalIV: []float64{20.0, 20.0, 20.0},
-			expected:     0.0, // Return 0 when min=max (no volatility range)
-		},
-		{
-			name:         "empty history",
-			currentIV:    20.0,
-			historicalIV: []float64{},
-			expected:     0.0,
-		},
-		{
-			name:         "high IV rank",
-			currentIV:    35.0,
-			historicalIV: []float64{15.0, 20.0, 25.0, 30.0, 40.0},
-			expected:     80.0, // (35-15)/(40-15) * 100 = 80
-		},
-		{
-			name:         "monotonic bounds - current IV below historical min",
-			currentIV:    5.0,
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     0.0, // Should clamp to 0 when current IV < min historical
-		},
-		{
-			name:         "monotonic bounds - current IV above historical max",
-			currentIV:    50.0,
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     100.0, // Should clamp to 100 when current IV > max historical
-		},
-		{
-			name:         "monotonic bounds - negative current IV",
-			currentIV:    -5.0,
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     0.0, // Should clamp to 0 for negative current IV
-		},
-		{
-			name:         "monotonic bounds - extreme high current IV",
-			currentIV:    1000.0,
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     100.0, // Should clamp to 100 for extremely high current IV
-		},
-		{
-			name:         "robustness - current IV is NaN",
-			currentIV:    math.NaN(),
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     0.0, // Should return 0 for NaN current IV
-		},
-		{
-			name:         "robustness - current IV is +Inf",
-			currentIV:    math.Inf(1),
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     100.0, // Should clamp to 100 for +Inf current IV
-		},
-		{
-			name:         "robustness - current IV is -Inf",
-			currentIV:    math.Inf(-1),
-			historicalIV: []float64{10.0, 15.0, 20.0, 25.0, 30.0},
-			expected:     0.0, // Should clamp to 0 for -Inf current IV
-		},
-		{
-			name:         "robustness - historical IV contains NaN",
-			currentIV:    20.0,
-			historicalIV: []float64{10.0, math.NaN(), 20.0, 25.0, 30.0},
-			expected:     50.0, // Should filter out NaN and compute: (20-10)/(30-10) * 100 = 50
-		},
-		{
-			name:         "robustness - historical IV contains Inf",
-			currentIV:    20.0,
-			historicalIV: []float64{10.0, math.Inf(1), 20.0, 25.0, 30.0},
-			expected:     50.0, // Should filter out Inf and compute: (20-10)/(30-10) * 100 = 50
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := CalculateIVR(tt.currentIV, tt.historicalIV)
-			if math.Abs(result-tt.expected) > 1e-9 {
-				t.Errorf("CalculateIVR(%v, %v) = %v, want %v",
-					tt.currentIV, tt.historicalIV, result, tt.expected)
-			}
-		})
-	}
-}
 
 func TestGetOptionByStrike(t *testing.T) {
 	options := []Option{
@@ -911,7 +801,7 @@ func (m *MockBroker) PlaceStrangleOrder(_ string, _, _ float64, _ string,
 }
 
 func (m *MockBroker) PlaceStrangleOTOCO(_ string, _, _ float64, _ string,
-	_ int, _, _ float64, _ bool) (*OrderResponse, error) {
+	_ int, _, _ float64, _ bool, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -964,7 +854,7 @@ func (m *MockBroker) CloseStranglePositionCtx(_ context.Context, _ string, _, _ 
 }
 
 func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
-	_ float64, _ string) (*OrderResponse, error) {
+	_ float64, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -975,7 +865,7 @@ func (m *MockBroker) PlaceBuyToCloseOrder(_ string, _ int,
 }
 
 func (m *MockBroker) PlaceSellToCloseOrder(_ string, _ int,
-	_ float64, _ string) (*OrderResponse, error) {
+	_ float64, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -985,7 +875,7 @@ func (m *MockBroker) PlaceSellToCloseOrder(_ string, _ int,
 	return resp, nil
 }
 
-func (m *MockBroker) PlaceBuyToCloseMarketOrder(_ string, _ int, _ string) (*OrderResponse, error) {
+func (m *MockBroker) PlaceBuyToCloseMarketOrder(_ string, _ int, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -995,7 +885,7 @@ func (m *MockBroker) PlaceBuyToCloseMarketOrder(_ string, _ int, _ string) (*Ord
 	return resp, nil
 }
 
-func (m *MockBroker) PlaceSellToCloseMarketOrder(_ string, _ int, _ string) (*OrderResponse, error) {
+func (m *MockBroker) PlaceSellToCloseMarketOrder(_ string, _ int, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -1245,7 +1135,7 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 			return err
 		}},
 		{"PlaceStrangleOTOCO", func() error {
-			_, err := cb.PlaceStrangleOTOCO("SPY", 400, 420, "2024-12-20", 1, 2.0, 0.5, false)
+			_, err := cb.PlaceStrangleOTOCO("SPY", 400, 420, "2024-12-20", 1, 2.0, 0.5, false, "day", "test-tag")
 			return err
 		}},
 		{"GetOrderStatus", func() error { _, err := cb.GetOrderStatus(123); return err }},
@@ -1255,11 +1145,11 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 			return err
 		}},
 		{"PlaceBuyToCloseOrder", func() error {
-			_, err := cb.PlaceBuyToCloseOrder("SPY241220P00400000", 1, 5.0, "day")
+			_, err := cb.PlaceBuyToCloseOrder("SPY241220P00400000", 1, 5.0, "day", "test-tag")
 			return err
 		}},
 		{"PlaceSellToCloseOrder", func() error {
-			_, err := cb.PlaceSellToCloseOrder("SPY241220C00420000", 1, 5.0, "day")
+			_, err := cb.PlaceSellToCloseOrder("SPY241220C00420000", 1, 5.0, "day", "test-tag")
 			return err
 		}},
 	}

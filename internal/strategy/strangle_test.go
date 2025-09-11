@@ -78,7 +78,7 @@ func (m *mockBrokerForStrategy) PlaceStrangleOrder(symbol string, putStrike, cal
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForStrategy) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
+func (m *mockBrokerForStrategy) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, credit, profitTarget float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
@@ -98,19 +98,19 @@ func (m *mockBrokerForStrategy) CloseStranglePositionCtx(ctx context.Context, sy
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForStrategy) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForStrategy) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForStrategy) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForStrategy) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForStrategy) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForStrategy) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
-func (m *mockBrokerForStrategy) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
+func (m *mockBrokerForStrategy) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
 
@@ -1026,6 +1026,8 @@ func (m *mockBroker) PlaceStrangleOTOCO(
 	_ int,
 	_, _ float64,
 	_ bool,
+	_ string,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -1088,6 +1090,7 @@ func (m *mockBroker) PlaceBuyToCloseOrder(
 	_ int,
 	_ float64,
 	_ string,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -1097,6 +1100,7 @@ func (m *mockBroker) PlaceSellToCloseOrder(
 	_ int,
 	_ float64,
 	_ string,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -1105,6 +1109,7 @@ func (m *mockBroker) PlaceBuyToCloseMarketOrder(
 	_ string,
 	_ int,
 	_ string,
+	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
 }
@@ -1112,6 +1117,7 @@ func (m *mockBroker) PlaceBuyToCloseMarketOrder(
 func (m *mockBroker) PlaceSellToCloseMarketOrder(
 	_ string,
 	_ int,
+	_ string,
 	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil

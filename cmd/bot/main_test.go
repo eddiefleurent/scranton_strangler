@@ -101,8 +101,8 @@ func (m *MockBroker) PlaceStrangleOrder(symbol string, putStrike, callStrike flo
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
-func (m *MockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, price, profitTarget float64, preview bool) (*broker.OrderResponse, error) {
-	args := m.Called(symbol, putStrike, callStrike, expiration, quantity, price, profitTarget, preview)
+func (m *MockBroker) PlaceStrangleOTOCO(symbol string, putStrike, callStrike float64, expiration string, quantity int, price, profitTarget float64, preview bool, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(symbol, putStrike, callStrike, expiration, quantity, price, profitTarget, preview, duration, tag)
 	v := args.Get(0)
 	if v == nil {
 		return nil, args.Error(1)
@@ -121,8 +121,8 @@ func (m *MockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broke
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
-func (m *MockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
-	args := m.Called(optionSymbol, quantity, maxPrice, duration)
+func (m *MockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(optionSymbol, quantity, maxPrice, duration, tag)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -145,24 +145,24 @@ func (m *MockBroker) CloseStranglePositionCtx(ctx context.Context, symbol string
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
-func (m *MockBroker) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string) (*broker.OrderResponse, error) {
-	args := m.Called(optionSymbol, quantity, maxPrice, duration)
+func (m *MockBroker) PlaceSellToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(optionSymbol, quantity, maxPrice, duration, tag)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
-func (m *MockBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
-	args := m.Called(optionSymbol, quantity, duration)
+func (m *MockBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(optionSymbol, quantity, duration, tag)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
-func (m *MockBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string) (*broker.OrderResponse, error) {
-	args := m.Called(optionSymbol, quantity, duration)
+func (m *MockBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(optionSymbol, quantity, duration, tag)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
