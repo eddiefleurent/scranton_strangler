@@ -49,3 +49,8 @@ schedule:
 
 storage:
   path: "data/positions.json"  # Persistent path; mount as a volume in Docker
+
+dashboard:
+  enabled: false  # Enable web dashboard (OPTIONAL)
+  port: 9847  # Dashboard HTTP server port  
+  auth_token: ""  # Optional authentication token for dashboard access

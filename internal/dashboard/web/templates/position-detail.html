@@ -1,0 +1,75 @@
+<div class="position-detail">
+    <button class="close-detail" onclick="hidePositionDetail()">×</button>
+    
+    <h3>Position: {{.Symbol}}</h3>
+    
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>Position ID:</label>
+            <span>{{.ID}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>State:</label>
+            <span class="state-badge state-{{.State}}">{{.State}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Entry Date:</label>
+            <span>{{.EntryDate.Format "2006-01-02 15:04"}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Days to Expiration:</label>
+            <span class="{{if lt .DTE 21}}warning{{end}}">{{.DTE}} days</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Call Strike:</label>
+            <span>${{printf "%.2f" .CallStrike}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Put Strike:</label>
+            <span>${{printf "%.2f" .PutStrike}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Credit Received:</label>
+            <span>${{printf "%.2f" .CreditReceived}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Current P&L:</label>
+            <span class="{{if .IsProfit}}positive{{else}}negative{{end}}">
+                ${{printf "%.2f" .CurrentPnL}} ({{printf "%.1f" .PnLPercent}}%)
+            </span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Profit Target (50%):</label>
+            <span class="target">${{printf "%.2f" .ProfitTarget}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Stop Loss (250%):</label>
+            <span class="stop">${{printf "%.2f" .StopLoss}}</span>
+        </div>
+    </div>
+    
+    <div class="progress-bars">
+        <div class="progress-bar-container">
+            <label>Progress to Target:</label>
+            <div class="progress-bar">
+                <div class="progress-fill profit" style="width: {{if gt .CurrentPnL 0}}{{printf "%.0f" (mul (div .CurrentPnL .ProfitTarget) 100)}}{{else}}0{{end}}%"></div>
+            </div>
+        </div>
+        
+        <div class="progress-bar-container">
+            <label>Risk Level:</label>
+            <div class="progress-bar">
+                <div class="progress-fill loss" style="width: {{if lt .CurrentPnL 0}}{{printf "%.0f" (mul (div (mul .CurrentPnL -1) (mul .StopLoss -1)) 100)}}{{else}}0{{end}}%"></div>
+            </div>
+        </div>
+    </div>
+</div>

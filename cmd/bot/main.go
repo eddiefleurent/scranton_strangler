@@ -15,10 +15,12 @@ import (
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
+	"github.com/eddiefleurent/scranton_strangler/internal/dashboard"
 	"github.com/eddiefleurent/scranton_strangler/internal/orders"
 	"github.com/eddiefleurent/scranton_strangler/internal/retry"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
+	"github.com/sirupsen/logrus"
 )
 
 // Bot represents the main trading bot instance.
@@ -28,6 +30,8 @@ type Bot struct {
 	strategy      *strategy.StrangleStrategy
 	storage       storage.Interface
 	logger        *log.Logger
+	dashLogger    *logrus.Logger
+	dashServer    *dashboard.Server
 	stop          chan struct{}
 	ctx           context.Context // Main bot context for operations
 	orderManager  *orders.Manager
@@ -133,6 +137,24 @@ func main() {
 	// Initialize retry client
 	bot.retryClient = retry.NewClient(bot.broker, logger)
 
+	// Initialize dashboard if enabled
+	if cfg.Dashboard.Enabled {
+		// Create logrus logger for dashboard
+		dashLogger := logrus.New()
+		dashLogger.SetOutput(os.Stdout)
+		dashLogger.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp: true,
+		})
+		bot.dashLogger = dashLogger
+
+		dashConfig := dashboard.Config{
+			Port:      cfg.Dashboard.Port,
+			AuthToken: cfg.Dashboard.AuthToken,
+		}
+		bot.dashServer = dashboard.NewServer(dashConfig, bot.storage, bot.broker, bot.dashLogger)
+		logger.Printf("Dashboard enabled on port %d", cfg.Dashboard.Port)
+	}
+
 	// Pre-fetch this month's market calendar for caching
 	logger.Println("Fetching market calendar for this month...")
 	_, calErr := bot.getMarketCalendar(0, 0) // Current month/year
@@ -153,6 +175,26 @@ func main() {
 		close(bot.stop)
 		cancel()
 	}()
+
+	// Start dashboard server if enabled
+	if bot.dashServer != nil {
+		go func() {
+			if err := bot.dashServer.Start(); err != nil {
+				logger.Printf("Dashboard server error: %v", err)
+			}
+		}()
+		
+		// Ensure dashboard is shutdown gracefully
+		defer func() {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			if err := bot.dashServer.Shutdown(shutdownCtx); err != nil {
+				logger.Printf("Error shutting down dashboard: %v", err)
+			} else {
+				logger.Println("Dashboard server stopped")
+			}
+		}()
+	}
 
 	// Run the bot
 	if err := bot.Run(ctx); err != nil {

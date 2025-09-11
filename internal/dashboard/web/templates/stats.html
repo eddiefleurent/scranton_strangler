@@ -1,0 +1,31 @@
+<div class="stats-grid">
+    <div class="stat-card">
+        <h3>Win Rate</h3>
+        <p class="stat-value {{if gt .WinRate 50.0}}positive{{else}}negative{{end}}">
+            {{printf "%.1f" .WinRate}}%
+        </p>
+        <p class="stat-label">{{.WinningTrades}}/{{.TotalTrades}} trades</p>
+    </div>
+    
+    <div class="stat-card">
+        <h3>Total P&L</h3>
+        <p class="stat-value {{if gt .TotalPnL 0}}positive{{else}}negative{{end}}">
+            ${{printf "%.2f" .TotalPnL}}
+        </p>
+        <p class="stat-label">Avg: ${{printf "%.2f" .AveragePnL}}</p>
+    </div>
+    
+    <div class="stat-card">
+        <h3>Open Positions</h3>
+        <p class="stat-value">{{.CurrentOpen}}</p>
+        <p class="stat-label">Active trades</p>
+    </div>
+    
+    <div class="stat-card">
+        <h3>Allocation</h3>
+        <p class="stat-value {{if gt .AllocationPct 35.0}}warning{{end}}">
+            {{printf "%.1f" .AllocationPct}}%
+        </p>
+        <p class="stat-label">${{printf "%.2f" .TotalAllocated}} allocated</p>
+    </div>
+</div>

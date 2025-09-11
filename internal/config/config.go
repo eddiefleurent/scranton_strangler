@@ -33,6 +33,7 @@ type Config struct {
 	Strategy    StrategyConfig    `yaml:"strategy"`
 	Risk        RiskConfig        `yaml:"risk"`
 	Storage     StorageConfig     `yaml:"storage"`
+	Dashboard   DashboardConfig   `yaml:"dashboard"`
 }
 
 // EnvironmentConfig defines the environment settings.
@@ -109,6 +110,13 @@ type ScheduleConfig struct {
 // StorageConfig defines storage settings for position data.
 type StorageConfig struct {
 	Path string `yaml:"path"`
+}
+
+// DashboardConfig defines web dashboard settings.
+type DashboardConfig struct {
+	Enabled   bool   `yaml:"enabled"`    // Enable web dashboard
+	Port      int    `yaml:"port"`       // HTTP server port
+	AuthToken string `yaml:"auth_token"` // Optional authentication token
 }
 
 // Load reads and parses the configuration file from the specified path.
@@ -307,6 +315,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("storage.path is required")
 	}
 
+	// Dashboard validation
+	if c.Dashboard.Enabled {
+		if c.Dashboard.Port <= 0 || c.Dashboard.Port > 65535 {
+			return fmt.Errorf("dashboard.port must be between 1 and 65535")
+		}
+	}
+
 	return nil
 }
 
@@ -388,6 +403,9 @@ func (c *Config) Normalize() {
 	}
 	if c.Strategy.MaxNewPositionsPerCycle == 0 {
 		c.Strategy.MaxNewPositionsPerCycle = 1 // Default to 1 for safety
+	}
+	if c.Dashboard.Port == 0 {
+		c.Dashboard.Port = 9847 // Default port as specified in tasks
 	}
 }
 
