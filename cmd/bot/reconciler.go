@@ -151,16 +151,20 @@ func (r *Reconciler) findOrphanedStrangles(brokerPositions []broker.PositionItem
 
 		// Check if each strangle is already tracked in our active positions
 		for _, strangle := range strangles {
-			isTracked := false
-			for _, activePos := range activePositions {
-				if strangleMatches(activePos, strangle) {
-					isTracked = true
-					break
+			trackedQty := 0
+			for _, ap := range activePositions {
+				if math.Abs(ap.PutStrike-strangle.putStrike) < 0.01 &&
+					math.Abs(ap.CallStrike-strangle.callStrike) < 0.01 &&
+					ap.Expiration.Format("2006-01-02") == strangle.expiration &&
+					ap.Symbol == strangle.symbol {
+					trackedQty += ap.Quantity
 				}
 			}
-
-			if !isTracked {
-				orphaned = append(orphaned, strangle)
+			missing := strangle.quantity - trackedQty
+			if missing > 0 {
+				s := strangle
+				s.quantity = missing
+				orphaned = append(orphaned, s)
 			}
 		}
 	}
@@ -392,12 +396,6 @@ func identifyStranglesFromPositions(positions []broker.PositionItem, expiration 
 	return strangles
 }
 
-func strangleMatches(position models.Position, strangle orphanedStrangle) bool {
-	return math.Abs(position.PutStrike-strangle.putStrike) < 0.01 &&
-		math.Abs(position.CallStrike-strangle.callStrike) < 0.01 &&
-		position.Expiration.Format("2006-01-02") == strangle.expiration &&
-		position.Quantity == strangle.quantity
-}
 
 // parseOptionSymbol parses an OPRA format option symbol to extract strike and type
 // Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]

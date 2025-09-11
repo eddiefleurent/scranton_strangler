@@ -177,7 +177,7 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 		return
 	}
 
-	tc.bot.logger.Printf("Have %d/%d positions; checking entry conditions...", activeCount, maxPositions)
+	tc.bot.logger.Printf("Have %d/%d active positions; checking entry conditions...", activeCount, maxPositions)
 
 	// Check buying power
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -206,6 +206,9 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 
 	// Open new positions
 	remainingSlots := maxPositions - activeCount
+	if remainingSlots < 0 {
+		remainingSlots = 0
+	}
 	maxNewPositions := tc.bot.config.Strategy.MaxNewPositionsPerCycle
 	if maxNewPositions <= 0 {
 		maxNewPositions = 1
