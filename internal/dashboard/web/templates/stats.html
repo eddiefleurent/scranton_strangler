@@ -23,7 +23,7 @@
     
     <div class="stat-card">
         <h3>Allocation</h3>
-        <p class="stat-value {{if gt .AllocationPct 35.0}}warning{{end}}">
+        <p class="stat-value {{if .IsAllocationHigh}}warning{{end}}">
             {{printf "%.1f" .AllocationPct}}%
         </p>
         <p class="stat-label">${{printf "%.2f" .TotalAllocated}} allocated</p>

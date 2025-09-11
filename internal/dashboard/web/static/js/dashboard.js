@@ -2,14 +2,19 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Scranton Strangler Dashboard loaded');
     
     document.addEventListener('htmx:beforeRequest', function(event) {
-        console.log('HTMX request starting:', event.detail.xhr.requestURL);
+        const url = event.detail.requestConfig?.path || 
+                   event.detail.requestConfig?.url || 
+                   event.detail.xhr?.responseURL || 
+                   'unknown';
+        console.log('HTMX request starting:', url);
     });
     
     document.addEventListener('htmx:afterRequest', function(event) {
-        if (event.detail.xhr.status === 200) {
+        if (event.detail && event.detail.successful === true) {
             console.log('HTMX request completed successfully');
         } else {
-            console.error('HTMX request failed:', event.detail.xhr.status);
+            const status = event.detail && event.detail.xhr && event.detail.xhr.status;
+            console.error('HTMX request failed:', status);
         }
     });
     
@@ -30,18 +35,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!errorDiv) {
             errorDiv = document.createElement('div');
             errorDiv.id = 'error-message';
-            errorDiv.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: #f85149;
-                color: white;
-                padding: 12px 16px;
-                border-radius: 4px;
-                font-size: 14px;
-                z-index: 1000;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            `;
+            errorDiv.className = 'error-banner';
             document.body.appendChild(errorDiv);
         }
         
@@ -69,3 +63,9 @@ function hidePositionDetail() {
         detailSection.classList.add('hidden');
     }
 }
+
+document.addEventListener('click', function(e) {
+    if (e.target.dataset.action === 'close-detail') {
+        hidePositionDetail();
+    }
+});

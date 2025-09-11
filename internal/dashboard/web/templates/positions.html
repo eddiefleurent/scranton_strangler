@@ -19,12 +19,12 @@
                 hx-get="/partials/position/{{.ID}}"
                 hx-target="#position-detail-container"
                 hx-swap="innerHTML"
-                onclick="showPositionDetail()">
+                hx-on:htmx:after-swap="showPositionDetail()">
                 <td>{{.Symbol}}</td>
                 <td><span class="state-badge state-{{.State}}">{{.State}}</span></td>
                 <td>{{.EntryDate.Format "01/02"}}</td>
                 <td class="{{if lt .DTE 21}}warning{{end}}">{{.DTE}}</td>
-                <td>{{printf "%.0f" .PutStrike}}/{{printf "%.0f" .CallStrike}}</td>
+                <td><span aria-label="Put strike: {{printf "%.0f" .PutStrike}}, Call strike: {{printf "%.0f" .CallStrike}}">{{printf "%.0f" .PutStrike}}/{{printf "%.0f" .CallStrike}}</span></td>
                 <td>${{printf "%.2f" .CreditReceived}}</td>
                 <td class="{{if .IsProfit}}positive{{else}}negative{{end}}">
                     ${{printf "%.2f" .CurrentPnL}}
