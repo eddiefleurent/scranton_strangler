@@ -133,8 +133,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) Start() error {
 	s.server = &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
-		Handler: s.router,
+		Addr:           fmt.Sprintf(":%d", s.port),
+		Handler:        s.router,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   15 * time.Second,
+		IdleTimeout:    60 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	s.logger.Infof("Starting dashboard server on port %d", s.port)
