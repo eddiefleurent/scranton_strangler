@@ -30,9 +30,10 @@ func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.
 }
 
 // ReconcilePositions detects position mismatches between broker and storage
-// It handles two cases:
+// It handles three cases:
 // 1. Positions in storage but closed in broker (manual closes)
 // 2. Positions in broker but missing from storage (timeout-related sync issues)
+// 3. Cold start: no storage file but broker positions exist (production recovery)
 func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []models.Position {
 	// Get current broker positions
 	brokerPositions, err := r.broker.GetPositions()
@@ -43,6 +44,13 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 
 	r.logger.Printf("Reconciling %d stored positions with %d broker positions",
 		len(storedPositions), len(brokerPositions))
+
+	// CRITICAL: Cold start scenario - if no stored positions but broker has positions,
+	// this is likely a production restart without positions.json file
+	if len(storedPositions) == 0 && len(brokerPositions) > 0 {
+		r.logger.Printf("COLD START DETECTED: No stored positions but %d broker positions exist", len(brokerPositions))
+		r.logger.Printf("Creating recovery positions for existing broker positions...")
+	}
 
 	var activePositions []models.Position
 
