@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -136,9 +137,13 @@ func (tc *TradingCycle) shouldRunCycle(isMarketOpen bool, marketState string) bo
 
 func (tc *TradingCycle) checkExitConditions(positions []models.Position) {
 	for _, position := range positions {
-		tc.bot.logger.Printf("Checking position %s (%.2f/%.2f, %s DTE)",
-			shortID(position.ID), position.PutStrike, position.CallStrike, 
-			position.Expiration.Format("2006-01-02"))
+		now := time.Now()
+		if tc.bot.nyLocation != nil {
+			now = now.In(tc.bot.nyLocation)
+		}
+		dte := int(position.Expiration.Sub(now).Hours() / 24)
+		tc.bot.logger.Printf("Checking position %s (%.2f/%.2f, %d DTE)",
+			shortID(position.ID), position.PutStrike, position.CallStrike, dte)
 
 		posCopy := position
 		shouldExit, reason := tc.bot.strategy.CheckExitConditions(&posCopy)
@@ -182,7 +187,9 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 	}
 
 	// Check buying power
-	buyingPower, err := tc.bot.broker.GetOptionBuyingPower()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	buyingPower, err := tc.bot.broker.GetOptionBuyingPowerCtx(ctx)
 	if err != nil {
 		tc.bot.logger.Printf("Warning: Could not get option buying power: %v", err)
 		buyingPower = 0
@@ -207,6 +214,9 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 	// Open new positions
 	remainingSlots := maxPositions - len(positions)
 	maxNewPositions := tc.bot.config.Strategy.MaxNewPositionsPerCycle
+	if maxNewPositions <= 0 {
+		maxNewPositions = 1
+	}
 	for i := 0; i < remainingSlots && i < maxNewPositions; i++ {
 		tc.executeEntry()
 	}
@@ -247,6 +257,11 @@ func (tc *TradingCycle) executeEntry() {
 	placedOrder, err := tc.placeStrangleOrder(order)
 	if err != nil {
 		tc.bot.logger.Printf("Failed to place order: %v", err)
+		return
+	}
+
+	if placedOrder == nil {
+		tc.bot.logger.Printf("ERROR: Broker returned nil order despite no error")
 		return
 	}
 
@@ -331,7 +346,13 @@ func (tc *TradingCycle) createPosition(order *strategy.StrangleOrder, expiration
 	position.EntrySpot = order.SpotPrice
 	position.DTE = position.CalculateDTE()
 	position.EntryIV = tc.bot.strategy.GetCurrentIV()
-	position.EntryOrderID = fmt.Sprintf("%d", placedOrder.Order.ID)
+
+	if placedOrder != nil {
+		position.EntryOrderID = fmt.Sprintf("%d", placedOrder.Order.ID)
+	} else {
+		tc.bot.logger.Printf("Warning: Cannot set EntryOrderID due to nil placedOrder")
+		position.EntryOrderID = ""
+	}
 
 	if err := position.TransitionState(models.StateSubmitted, models.ConditionOrderPlaced); err != nil {
 		tc.bot.logger.Printf("Failed to set position state: %v", err)
@@ -374,6 +395,11 @@ func (tc *TradingCycle) executeExit(position *models.Position, reason strategy.E
 
 	if err != nil {
 		tc.bot.logger.Printf("Failed to place close order for position %s: %v", shortID(position.ID), err)
+		return
+	}
+
+	if closeOrder == nil {
+		tc.bot.logger.Printf("ERROR: Close order placement succeeded but returned nil order for position %s", shortID(position.ID))
 		return
 	}
 

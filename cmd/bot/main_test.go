@@ -44,8 +44,18 @@ func (m *MockBroker) GetOptionBuyingPower() (float64, error) {
 	return args.Get(0).(float64), args.Error(1)
 }
 
+func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	args := m.Called(ctx)
+	return args.Get(0).(float64), args.Error(1)
+}
+
 func (m *MockBroker) GetPositions() ([]broker.PositionItem, error) {
 	args := m.Called()
+	return args.Get(0).([]broker.PositionItem), args.Error(1)
+}
+
+func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
+	args := m.Called(ctx)
 	return args.Get(0).([]broker.PositionItem), args.Error(1)
 }
 
@@ -190,6 +200,14 @@ func (m *MockBroker) GetMarketCalendar(month, year int) (*broker.MarketCalendarR
 	return args.Get(0).(*broker.MarketCalendarResponse), args.Error(1)
 }
 
+func (m *MockBroker) GetMarketCalendarCtx(ctx context.Context, month, year int) (*broker.MarketCalendarResponse, error) {
+	args := m.Called(ctx, month, year)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.MarketCalendarResponse), args.Error(1)
+}
+
 // TestBot creates a bot with mocked dependencies for testing
 type TestBot struct {
 	*Bot
@@ -319,7 +337,7 @@ func TestRunTradingCycle_MarketClosed(t *testing.T) {
 	defer tb.cancel()
 	
 	// Setup mock expectations for market closed
-	tb.mockBroker.On("GetMarketCalendar", mock.Anything, mock.Anything).Return(&broker.MarketCalendarResponse{
+	tb.mockBroker.On("GetMarketCalendarCtx", mock.Anything, mock.Anything, mock.Anything).Return(&broker.MarketCalendarResponse{
 		Calendar: struct {
 			Month int `json:"month"`
 			Year  int `json:"year"`
@@ -370,7 +388,7 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	tb.mockBroker.On("GetAccountBalanceCtx", mock.Anything).Return(10000.0, nil)
 	
 	// Setup market calendar (will be called during trading cycle check)
-	tb.mockBroker.On("GetMarketCalendar", mock.Anything, mock.Anything).Return(&broker.MarketCalendarResponse{
+	tb.mockBroker.On("GetMarketCalendarCtx", mock.Anything, mock.Anything, mock.Anything).Return(&broker.MarketCalendarResponse{
 		Calendar: struct {
 			Month int `json:"month"`
 			Year  int `json:"year"`

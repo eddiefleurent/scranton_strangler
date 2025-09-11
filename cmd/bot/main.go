@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -34,7 +35,8 @@ type Bot struct {
 	nyLocation    *time.Location // Cached NY timezone location
 	lastPnLUpdate time.Time      // Last time P&L was persisted to reduce write amplification
 	pnlThrottle   time.Duration  // Minimum interval between P&L updates
-	
+	calendarMu    sync.RWMutex   // protects market calendar cache
+
 	// Market calendar caching
 	marketCalendar     *broker.MarketCalendarResponse
 	calendarCacheMonth int
@@ -60,8 +62,10 @@ func main() {
 		logger.Println("🏳️ PAPER TRADING MODE - No real money at risk")
 	} else {
 		logger.Println("💰 LIVE TRADING MODE - Real money at risk!")
-		logger.Println("Waiting 10 seconds to confirm...")
-		time.Sleep(10 * time.Second)
+		if os.Getenv("BOT_SKIP_LIVE_WAIT") != "1" {
+			logger.Println("Waiting 10 seconds to confirm... (set BOT_SKIP_LIVE_WAIT=1 to skip)")
+			time.Sleep(10 * time.Second)
+		}
 	}
 
 	// Initialize bot
@@ -185,8 +189,8 @@ func (b *Bot) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to connect to broker: %w", res.err)
 		}
 		b.logger.Printf("Connected to broker. Account balance: $%.2f", res.balance)
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("broker health check timed out after 10 seconds")
+	case <-ctxBal.Done():
+		return fmt.Errorf("broker health check timed out: %w", ctxBal.Err())
 	case <-ctx.Done():
 		return fmt.Errorf("broker health check cancelled: %w", ctx.Err())
 	}
@@ -245,26 +249,48 @@ func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse
 	}
 
 	// Check if we have cached data for this month/year
-	if b.marketCalendar != nil && 
-		b.calendarCacheMonth == month && 
+	b.calendarMu.RLock()
+	if b.marketCalendar != nil &&
+		b.calendarCacheMonth == month &&
 		b.calendarCacheYear == year {
-		return b.marketCalendar, nil
+		cal := b.marketCalendar
+		b.calendarMu.RUnlock()
+		return cal, nil
 	}
+	b.calendarMu.RUnlock()
 
 	// Fetch new calendar data
 	b.logger.Printf("Fetching market calendar for %d/%d", month, year)
-	calendar, err := b.broker.GetMarketCalendar(month, year)
+	
+	// Use context with timeout for the API call
+	ctx := b.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	
+	calendar, err := b.broker.GetMarketCalendarCtx(ctx, month, year)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get market calendar: %w", err)
 	}
 
-	// Cache the result
+	// Cache the result (including nil)
+	b.calendarMu.Lock()
 	b.marketCalendar = calendar
 	b.calendarCacheMonth = month
 	b.calendarCacheYear = year
+	b.calendarMu.Unlock()
+
+	// Compute safe daysCount with nil checks
+	daysCount := 0
+	if calendar != nil && 
+		calendar.Calendar.Days.Day != nil {
+		daysCount = len(calendar.Calendar.Days.Day)
+	}
 
 	b.logger.Printf("Cached market calendar: %d days for %d/%d", 
-		len(calendar.Calendar.Days.Day), month, year)
+		daysCount, month, year)
 
 	return calendar, nil
 }
@@ -292,7 +318,9 @@ func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
 
 	// Today's data not found in cache - force refresh and try again
 	b.logger.Printf("Today's date %s not found in cached calendar, forcing refresh", today)
+	b.calendarMu.Lock()
 	b.marketCalendar = nil // Clear cache to force refresh
+	b.calendarMu.Unlock()
 
 	calendar, err = b.getMarketCalendar(int(now.Month()), now.Year())
 	if err != nil {

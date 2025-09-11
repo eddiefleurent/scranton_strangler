@@ -59,10 +59,11 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 		if !isOpenInBroker {
 			r.logger.Printf("Position %s manually closed - updating storage", shortID(position.ID))
 
-			// Calculate final P&L (use current P&L if available, otherwise use credit received)
+			// Calculate final P&L (use current P&L if available, otherwise default to 0/unknown)
 			finalPnL := position.CurrentPnL
 			if finalPnL == 0 {
-				finalPnL = math.Abs(position.CreditReceived) * float64(position.Quantity) * 100
+				// Broker-close inferred PnL should default to 0/unknown rather than optimistic estimate
+				finalPnL = 0
 			}
 
 			// Close the position with manual close reason
@@ -362,35 +363,58 @@ func parseOptionSymbol(symbol string) (float64, string, error) {
 		return 0, "", fmt.Errorf("option symbol too short: %s", symbol)
 	}
 
-	// Find the option type (C or P) - should be at a fixed position for OPRA format
-	// For SPY format: positions 9-10 should be the expiration date end, position 10 should be C/P
-	var optionTypePos int
-	var optionType string
-
-	// Look for C or P in the expected positions
-	for i := 6; i < len(symbol)-8; i++ {
-		if symbol[i] == 'C' || symbol[i] == 'P' {
-			optionType = string(symbol[i])
-			optionTypePos = i
+	// Find the 6-digit YYMMDD expiration date pattern
+	expirationPos := -1
+	for i := 0; i <= len(symbol)-6; i++ {
+		// Check if we have 6 consecutive digits
+		if isAllDigits(symbol[i:i+6]) {
+			expirationPos = i
 			break
 		}
 	}
 
-	if optionType == "" {
-		return 0, "", fmt.Errorf("no option type (C/P) found in symbol: %s", symbol)
+	if expirationPos == -1 {
+		return 0, "", fmt.Errorf("no 6-digit expiration date (YYMMDD) found in symbol: %s", symbol)
+	}
+
+	// The option type (C/P) should be immediately after the expiration date
+	optionTypePos := expirationPos + 6
+	if optionTypePos >= len(symbol) {
+		return 0, "", fmt.Errorf("symbol too short after expiration date: %s", symbol)
+	}
+
+	optionType := string(symbol[optionTypePos])
+	if optionType != "C" && optionType != "P" {
+		return 0, "", fmt.Errorf("invalid option type '%s' at position %d, expected 'C' or 'P' in symbol: %s", optionType, optionTypePos, symbol)
 	}
 
 	// Extract strike price (8 digits after the option type)
-	if optionTypePos+9 > len(symbol) {
-		return 0, "", fmt.Errorf("symbol too short for strike extraction: %s", symbol)
+	strikeStart := optionTypePos + 1
+	strikeEnd := strikeStart + 8
+	if strikeEnd > len(symbol) {
+		return 0, "", fmt.Errorf("symbol too short for 8-digit strike extraction, need %d characters but only have %d: %s", strikeEnd, len(symbol), symbol)
 	}
 
-	strikeStr := symbol[optionTypePos+1 : optionTypePos+9]
+	strikeStr := symbol[strikeStart:strikeEnd]
+	if !isAllDigits(strikeStr) {
+		return 0, "", fmt.Errorf("invalid strike format, expected 8 digits but got '%s' in symbol: %s", strikeStr, symbol)
+	}
+
 	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
 	if err != nil {
-		return 0, "", fmt.Errorf("invalid strike format in symbol %s: %w", symbol, err)
+		return 0, "", fmt.Errorf("failed to parse strike '%s' in symbol %s: %w", strikeStr, symbol, err)
 	}
 
 	strike := float64(strikeInt) / 1000.0
 	return strike, optionType, nil
+}
+
+// isAllDigits checks if a string contains only digits
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

@@ -5,6 +5,7 @@ import (
 )
 
 func TestExtractUnderlyingFromSymbol(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		symbol   string
@@ -55,6 +56,7 @@ func TestExtractUnderlyingFromSymbol(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := extractUnderlyingFromSymbol(tt.symbol)
 			if result != tt.expected {
 				t.Errorf("extractUnderlyingFromSymbol(%q) = %q, want %q", tt.symbol, result, tt.expected)
@@ -64,6 +66,7 @@ func TestExtractUnderlyingFromSymbol(t *testing.T) {
 }
 
 func TestExtractUnderlyingFromSymbol_BoundaryChecks(t *testing.T) {
+	t.Parallel()
 	// Test that the function doesn't panic with various edge cases
 	edgeCases := []string{
 		"",           // Empty
@@ -79,10 +82,14 @@ func TestExtractUnderlyingFromSymbol_BoundaryChecks(t *testing.T) {
 		"123456ABC",  // 6 digits then chars
 		"12345",      // Only 5 digits
 		"1234567",    // 7 digits
+		" SPY250101C00500000", // Leading space
+		"SPY250101C00500000 ", // Trailing space
+		"BRK.B 250101C00450000", // Space before date (should not panic)
 	}
 	
 	for _, symbol := range edgeCases {
 		t.Run(symbol, func(t *testing.T) {
+			t.Parallel()
 			// This should not panic
 			_ = extractUnderlyingFromSymbol(symbol)
 		})
