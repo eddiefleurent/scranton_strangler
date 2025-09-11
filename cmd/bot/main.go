@@ -282,10 +282,9 @@ func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse
 	b.calendarCacheYear = year
 	b.calendarMu.Unlock()
 
-	// Compute safe daysCount with nil checks
+	// Compute safe daysCount with proper checks
 	daysCount := 0
-	if calendar != nil && 
-		calendar.Calendar.Days.Day != nil {
+	if calendar != nil {
 		daysCount = len(calendar.Calendar.Days.Day)
 	}
 
@@ -310,6 +309,9 @@ func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
 
 	// Find today's schedule
 	today := now.Format("2006-01-02")
+	if calendar == nil || len(calendar.Calendar.Days.Day) == 0 {
+		return nil, fmt.Errorf("broker returned empty calendar payload for %s", today)
+	}
 	for _, day := range calendar.Calendar.Days.Day {
 		if day.Date == today {
 			return &day, nil
@@ -328,6 +330,9 @@ func (b *Bot) getTodaysMarketSchedule() (*broker.MarketDay, error) {
 	}
 
 	// Try again with fresh data
+	if calendar == nil || len(calendar.Calendar.Days.Day) == 0 {
+		return nil, fmt.Errorf("broker returned empty calendar payload for %s after refresh", today)
+	}
 	for _, day := range calendar.Calendar.Days.Day {
 		if day.Date == today {
 			return &day, nil
