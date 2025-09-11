@@ -564,40 +564,9 @@ func clonePosition(pos *models.Position) *models.Position {
 		return nil
 	}
 
-	// Create a new Position and copy all primitive fields
-	cloned := &models.Position{
-		ID:             pos.ID,
-		Symbol:         pos.Symbol,
-		State:          pos.State,
-		PutStrike:      pos.PutStrike,
-		CallStrike:     pos.CallStrike,
-		Expiration:     pos.Expiration,
-		Quantity:       pos.Quantity,
-		CreditReceived: pos.CreditReceived,
-		EntryLimitPrice: pos.EntryLimitPrice,
-		EntryDate:      pos.EntryDate,
-		EntryIV:        pos.EntryIV,
-		EntrySpot:      pos.EntrySpot,
-		CurrentPnL:     pos.CurrentPnL,
-		DTE:            pos.DTE,
-		EntryOrderID:   pos.EntryOrderID,
-		ExitOrderID:    pos.ExitOrderID,
-		ExitReason:     pos.ExitReason,
-		ExitDate:       pos.ExitDate,
-	}
-
-	// Deep copy Adjustments slice
-	if len(pos.Adjustments) > 0 {
-		cloned.Adjustments = make([]models.Adjustment, len(pos.Adjustments))
-		copy(cloned.Adjustments, pos.Adjustments)
-	}
-
-	// Deep copy StateMachine
-	if pos.StateMachine != nil {
-		cloned.StateMachine = pos.StateMachine.Copy()
-	}
-
-	return cloned
+	// Use the new deep copy method from Position
+	clone := pos.Clone()
+	return &clone
 }
 
 // StoreIVReading stores a new IV reading in the storage

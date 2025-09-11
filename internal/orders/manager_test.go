@@ -33,7 +33,15 @@ func (m *mockBrokerForOrders) GetOptionBuyingPower() (float64, error) {
 	return 5000.0, nil
 }
 
+func (m *mockBrokerForOrders) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	return 5000.0, nil
+}
+
 func (m *mockBrokerForOrders) GetPositions() ([]broker.PositionItem, error) {
+	return []broker.PositionItem{}, nil
+}
+
+func (m *mockBrokerForOrders) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
 	return []broker.PositionItem{}, nil
 }
 
@@ -103,6 +111,14 @@ func (m *mockBrokerForOrders) GetMarketClock(delayed bool) (*broker.MarketClockR
 	return &broker.MarketClockResponse{}, nil
 }
 
+func (m *mockBrokerForOrders) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) GetMarketCalendarCtx(ctx context.Context, month, year int) (*broker.MarketCalendarResponse, error) {
+	return &broker.MarketCalendarResponse{}, nil
+}
+
 func (m *mockBrokerForOrders) IsTradingDay(delayed bool) (bool, error) {
 	return true, nil
 }
@@ -113,10 +129,6 @@ func (m *mockBrokerForOrders) GetTickSize(symbol string) (float64, error) {
 
 func (m *mockBrokerForOrders) GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]broker.HistoricalDataPoint, error) {
 	return []broker.HistoricalDataPoint{}, nil
-}
-
-func (m *mockBrokerForOrders) GetMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
-	return &broker.MarketCalendarResponse{}, nil
 }
 
 func TestNewManager_DefaultConfig(t *testing.T) {

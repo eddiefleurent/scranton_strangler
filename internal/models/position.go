@@ -445,3 +445,22 @@ func (p *Position) ExecutePunt() error {
 	p.State = p.StateMachine.GetCurrentState()
 	return nil
 }
+
+// Clone creates a deep copy of the Position for thread safety.
+// This ensures the returned Position can be modified without affecting the original.
+func (p *Position) Clone() Position {
+	clone := *p // Start with shallow copy of all value types
+	
+	// Deep copy the Adjustments slice
+	if p.Adjustments != nil {
+		clone.Adjustments = make([]Adjustment, len(p.Adjustments))
+		copy(clone.Adjustments, p.Adjustments)
+	}
+	
+	// Deep copy the StateMachine if it exists
+	if p.StateMachine != nil {
+		clone.StateMachine = p.StateMachine.Copy()
+	}
+	
+	return clone
+}

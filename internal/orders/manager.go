@@ -625,21 +625,7 @@ func (m *Manager) parseOptionSymbol(symbol string) (float64, string, error) {
 	return 0, "", fmt.Errorf("no valid C/P followed by 8-digit strike found in symbol: %s", symbol)
 }
 
-// getPositionsWithTimeout wraps Broker.GetPositions() with a context timeout.
+// getPositionsWithTimeout wraps Broker.GetPositionsCtx() with a context timeout.
 func (m *Manager) getPositionsWithTimeout(ctx context.Context) ([]broker.PositionItem, error) {
-	type res struct {
-		pos []broker.PositionItem
-		err error
-	}
-	ch := make(chan res, 1)
-	go func() {
-		p, e := m.broker.GetPositions()
-		ch <- res{p, e}
-	}()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case r := <-ch:
-		return r.pos, r.err
-	}
+	return m.broker.GetPositionsCtx(ctx)
 }
