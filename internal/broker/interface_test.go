@@ -839,7 +839,23 @@ func (m *MockBroker) GetOptionBuyingPower() (float64, error) {
 	return 5000.0, nil
 }
 
+func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return 0, errors.New("mock broker error")
+	}
+	return 5000.0, nil
+}
+
 func (m *MockBroker) GetPositions() ([]PositionItem, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return []PositionItem{}, nil
+}
+
+func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]PositionItem, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -1042,6 +1058,14 @@ func (m *MockBroker) GetHistoricalData(_ string, _ string, _, _ time.Time) ([]Hi
 }
 
 func (m *MockBroker) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return &MarketCalendarResponse{}, nil
+}
+
+func (m *MockBroker) GetMarketCalendarCtx(ctx context.Context, month, year int) (*MarketCalendarResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")

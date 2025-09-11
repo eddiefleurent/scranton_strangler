@@ -18,7 +18,9 @@ type Broker interface {
 	GetAccountBalance() (float64, error)
 	GetAccountBalanceCtx(ctx context.Context) (float64, error)
 	GetOptionBuyingPower() (float64, error)
+	GetOptionBuyingPowerCtx(ctx context.Context) (float64, error)
 	GetPositions() ([]PositionItem, error)
+	GetPositionsCtx(ctx context.Context) ([]PositionItem, error)
 
 	// Market data
 	GetQuote(symbol string) (*QuoteItem, error)
@@ -28,6 +30,7 @@ type Broker interface {
 	GetOptionChainCtx(ctx context.Context, symbol, expiration string, withGreeks bool) ([]Option, error)
 	GetMarketClock(delayed bool) (*MarketClockResponse, error)
 	GetMarketCalendar(month, year int) (*MarketCalendarResponse, error)
+	GetMarketCalendarCtx(ctx context.Context, month, year int) (*MarketCalendarResponse, error)
 	IsTradingDay(delayed bool) (bool, error)
 	GetTickSize(symbol string) (float64, error) // Get appropriate tick size for symbol
 	GetHistoricalData(symbol string, interval string, startDate, endDate time.Time) ([]HistoricalDataPoint, error)
@@ -160,6 +163,25 @@ func (t *TradierClient) GetOptionBuyingPower() (float64, error) {
 	return balance.GetOptionBuyingPower()
 }
 
+// GetOptionBuyingPowerCtx returns the option buying power available for options trading with context support
+func (t *TradierClient) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	balance, err := t.GetBalanceCtx(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return balance.GetOptionBuyingPower()
+}
+
+// GetPositions delegates to the embedded TradierAPI
+func (t *TradierClient) GetPositions() ([]PositionItem, error) {
+	return t.TradierAPI.GetPositions()
+}
+
+// GetPositionsCtx delegates to the embedded TradierAPI with context support
+func (t *TradierClient) GetPositionsCtx(ctx context.Context) ([]PositionItem, error) {
+	return t.TradierAPI.GetPositionsCtx(ctx)
+}
+
 // PlaceStrangleOrder places a strangle order, using OTOCO if configured
 func (t *TradierClient) PlaceStrangleOrder(symbol string, putStrike, callStrike float64,
 	expiration string, quantity int, limitPrice float64, preview bool, duration string, tag string) (*OrderResponse, error) {
@@ -264,6 +286,11 @@ func (t *TradierClient) GetMarketClock(delayed bool) (*MarketClockResponse, erro
 // GetMarketCalendar retrieves the market calendar for a specific month/year
 func (t *TradierClient) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
 	return t.TradierAPI.GetMarketCalendar(month, year)
+}
+
+// GetMarketCalendarCtx retrieves the market calendar for a specific month/year with context support
+func (t *TradierClient) GetMarketCalendarCtx(ctx context.Context, month, year int) (*MarketCalendarResponse, error) {
+	return t.TradierAPI.GetMarketCalendarCtx(ctx, month, year)
 }
 
 // IsTradingDay checks if the market is currently open for trading
@@ -493,9 +520,23 @@ func (c *CircuitBreakerBroker) GetOptionBuyingPower() (float64, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) { return b.GetOptionBuyingPower() })
 }
 
+// GetOptionBuyingPowerCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (float64, error) {
+		return b.GetOptionBuyingPowerCtx(ctx)
+	})
+}
+
 // GetPositions wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) GetPositions() ([]PositionItem, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]PositionItem, error) { return b.GetPositions() })
+}
+
+// GetPositionsCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) GetPositionsCtx(ctx context.Context) ([]PositionItem, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]PositionItem, error) {
+		return b.GetPositionsCtx(ctx)
+	})
 }
 
 // GetQuote wraps the underlying broker call with circuit breaker
@@ -618,6 +659,13 @@ func (c *CircuitBreakerBroker) GetMarketClock(delayed bool) (*MarketClockRespons
 func (c *CircuitBreakerBroker) GetMarketCalendar(month, year int) (*MarketCalendarResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*MarketCalendarResponse, error) {
 		return b.GetMarketCalendar(month, year)
+	})
+}
+
+// GetMarketCalendarCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) GetMarketCalendarCtx(ctx context.Context, month, year int) (*MarketCalendarResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*MarketCalendarResponse, error) {
+		return b.GetMarketCalendarCtx(ctx, month, year)
 	})
 }
 

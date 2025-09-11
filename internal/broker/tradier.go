@@ -53,6 +53,7 @@ type TradierAPI struct {
 	accountID  string
 	rateLimits RateLimits
 	sandbox    bool
+	timeout    time.Duration // configurable timeout for HTTP requests
 }
 
 // RateLimits defines API rate limits for different endpoint categories.
@@ -65,6 +66,11 @@ type RateLimits struct {
 // NewTradierAPI creates a new TradierAPI client with default settings.
 func NewTradierAPI(apiKey, accountID string, sandbox bool) *TradierAPI {
 	return NewTradierAPIWithLimits(apiKey, accountID, sandbox, "", RateLimits{})
+}
+
+// NewTradierAPIWithTimeout creates a new TradierAPI client with custom timeout.
+func NewTradierAPIWithTimeout(apiKey, accountID string, sandbox bool, timeout time.Duration) *TradierAPI {
+	return NewTradierAPIWithTimeoutAndLimits(apiKey, accountID, sandbox, "", timeout, RateLimits{})
 }
 
 // NewTradierAPIWithClient creates a new TradierAPI client with a custom HTTP client.
@@ -80,6 +86,17 @@ func NewTradierAPIWithLimits(
 	customLimits RateLimits,
 ) *TradierAPI {
 	return NewTradierAPIWithBaseURL(apiKey, accountID, sandbox, baseURL, customLimits)
+}
+
+// NewTradierAPIWithTimeoutAndLimits creates a new TradierAPI client with custom timeout and rate limits.
+func NewTradierAPIWithTimeoutAndLimits(
+	apiKey, accountID string,
+	sandbox bool,
+	baseURL string,
+	timeout time.Duration,
+	customLimits RateLimits,
+) *TradierAPI {
+	return NewTradierAPIWithBaseURLAndClient(apiKey, accountID, sandbox, baseURL, nil, customLimits).WithTimeout(timeout)
 }
 
 // NewTradierAPIWithClientAndLimits creates a new TradierAPI client with custom HTTP client and rate limits.
@@ -145,9 +162,10 @@ func NewTradierAPIWithBaseURLAndClient(
 		}
 	}
 
-	// Use provided client or create default
+	// Use provided client or create default with configurable timeout
+	var defaultTimeout time.Duration = 10 * time.Second
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: defaultTimeout}
 	}
 
 	return &TradierAPI{
@@ -157,6 +175,7 @@ func NewTradierAPIWithBaseURLAndClient(
 		client:     client,
 		sandbox:    sandbox,
 		rateLimits: limits,
+		timeout:    defaultTimeout,
 	}
 }
 
@@ -164,6 +183,16 @@ func NewTradierAPIWithBaseURLAndClient(
 func (t *TradierAPI) WithHTTPClient(c *http.Client) *TradierAPI {
 	if c != nil {
 		t.client = c
+	}
+	return t
+}
+
+// WithTimeout sets the HTTP client timeout duration.
+// This helper provides ergonomics for configuring timeout via constructor args or setters.
+func (t *TradierAPI) WithTimeout(timeout time.Duration) *TradierAPI {
+	t.timeout = timeout
+	if t.client != nil {
+		t.client.Timeout = timeout
 	}
 	return t
 }
@@ -536,6 +565,18 @@ func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
 	return []PositionItem(response.Positions.Position), nil
 }
 
+// GetPositionsCtx retrieves current positions from the account with context support.
+func (t *TradierAPI) GetPositionsCtx(ctx context.Context) ([]PositionItem, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/positions", t.baseURL, t.accountID)
+
+	var response PositionsResponse
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+
+	return []PositionItem(response.Positions.Position), nil
+}
+
 // GetBalance retrieves account balance information.
 func (t *TradierAPI) GetBalance() (*BalanceResponse, error) {
 	endpoint := fmt.Sprintf("%s/accounts/%s/balances", t.baseURL, t.accountID)
@@ -592,6 +633,32 @@ func (t *TradierAPI) GetMarketCalendar(month, year int) (*MarketCalendarResponse
 
 	var response MarketCalendarResponse
 	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+
+	return &response, nil
+}
+
+// GetMarketCalendarCtx retrieves the market calendar for a specific month/year with context support.
+// If month/year are 0, uses current month/year.
+func (t *TradierAPI) GetMarketCalendarCtx(ctx context.Context, month, year int) (*MarketCalendarResponse, error) {
+	endpoint := fmt.Sprintf("%s/markets/calendar", t.baseURL)
+	
+	params := url.Values{}
+	if month > 0 {
+		params.Add("month", fmt.Sprintf("%02d", month))
+	}
+	if year > 0 {
+		params.Add("year", fmt.Sprintf("%04d", year))
+	}
+	
+	// Build URL with query parameters
+	if len(params) > 0 {
+		endpoint += "?" + params.Encode()
+	}
+
+	var response MarketCalendarResponse
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
 
@@ -756,14 +823,20 @@ func (t *TradierAPI) placeStrangleOrderInternalCtx(
 
 	// Validate price for credit/debit orders
 	if limitPrice <= 0 {
-		return nil, fmt.Errorf("invalid price for %s order: %.2f, price must be positive",
-			map[bool]string{true: "debit", false: "credit"}[buyToClose], limitPrice)
+		side := "credit"
+		if buyToClose {
+			side = "debit"
+		}
+		return nil, fmt.Errorf("invalid %s price: %.2f (must be > 0)", side, limitPrice)
 	}
 
 	// Validate quantity for orders
 	if quantity <= 0 {
-		return nil, fmt.Errorf("invalid quantity for %s order: %d, quantity must be greater than zero",
-			map[bool]string{true: "debit", false: "credit"}[buyToClose], quantity)
+		side := "credit"
+		if buyToClose {
+			side = "debit"
+		}
+		return nil, fmt.Errorf("invalid %s quantity: %d (must be > 0)", side, quantity)
 	}
 
 	// Validate strikes - put strike must be less than call strike
@@ -782,9 +855,15 @@ func (t *TradierAPI) placeStrangleOrderInternalCtx(
 	expFormatted := expDate.Format("060102")
 
 	// Build option symbols: SYMBOL + YYMMDD + P/C + 8-digit strike
-	// Use rounded 1/1000th dollars to build OCC strike field
-	// Note: Rounding to 1/1000 and %08d is standard OCC format, but edge cases like
-	// strikes ending in .995 (e.g., 394.995) may round to unexpected values.
+	// Round strikes to nearest 1/1000th dollar for OCC encoding (standard format)
+	// This ensures consistency across the codebase and tests
+	//
+	// Edge cases and precision notes:
+	// - Strikes ending in .995 may round unexpectedly (e.g., 394.995 → 395.000)
+	// - The eps constant (1e-9) handles floating point precision issues
+	// - Consider exposing a helper function formatStrikeForOCC() for consistency
+	//
+	// Example: $123.4567 → 123457 (rounded to nearest thousandth)
 	const eps = 1e-9
 	putStrikeInt := int(math.Round(putStrike*1000 + eps))
 	callStrikeInt := int(math.Round(callStrike*1000 + eps))
@@ -1127,14 +1206,15 @@ func (t *TradierAPI) makeRequestCtx(ctx context.Context, method, endpoint string
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted && resp.StatusCode != http.StatusNoContent {
-		body, err := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10)) // 64KB cap to avoid huge payloads
 		if err != nil {
 			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s -> failed to read error body", method, endpoint)}
 		}
+		ct := resp.Header.Get("Content-Type")
 		if ra := resp.Header.Get("Retry-After"); ra != "" {
-			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s -> %s (retry-after: %s)", method, endpoint, string(body), ra)}
+			return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s (%s) -> %s (retry-after: %s)", method, endpoint, ct, string(body), ra)}
 		}
-		return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s -> %s", method, endpoint, string(body))}
+		return &APIError{Status: resp.StatusCode, Body: fmt.Sprintf("%s %s (%s) -> %s", method, endpoint, ct, string(body))}
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
@@ -1241,7 +1321,9 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 		}
 
 		// Short positions have negative quantity
-		if pos.Quantity >= -QuantityEpsilon { // treat tiny negatives as zero
+		// Use tighter threshold since options are typically whole contracts
+		// QuantityEpsilon (1e-6) may miss tiny shorts; use <= -0.5 for whole contracts
+		if pos.Quantity > -0.5 { // only consider positions with at least 0.5 contracts short
 			continue
 		}
 
