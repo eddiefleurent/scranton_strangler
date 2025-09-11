@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"io/fs"
 	"math"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -103,51 +106,139 @@ func NewServer(cfg Config, storage storage.Interface, broker broker.Broker, logg
 }
 
 func (s *Server) setupRoutes() {
-	s.router.Use(middleware.Logger)
+	s.router.Use(s.requestLoggerMiddleware)
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(middleware.Timeout(60 * time.Second))
-
-	if s.authToken != "" {
-		s.router.Use(s.authMiddleware)
-	}
 
 	// Create a filesystem rooted at the "static" directory for proper embedded filesystem serving
 	sub, err := fs.Sub(staticFS, "web/static")
 	if err != nil {
 		s.logger.WithError(err).Fatal("Failed to create static filesystem")
 	}
+	// Static assets bypass authentication
 	s.router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 
-	s.router.Get("/", s.handleDashboard)
-	s.router.Get("/api/positions", s.handleGetPositions)
-	s.router.Get("/api/stats", s.handleGetStats)
-	s.router.Get("/api/position/{id}", s.handleGetPosition)
+	// Apply auth middleware to protected routes only
+	if s.authToken != "" {
+		s.router.Route("/", func(r chi.Router) {
+			r.Use(s.authMiddleware)
+			r.Get("/", s.handleDashboard)
+			r.Get("/api/positions", s.handleGetPositions)
+			r.Get("/api/stats", s.handleGetStats)
+			r.Get("/api/position/{id}", s.handleGetPosition)
+			r.Get("/partials/positions", s.handlePositionsPartial)
+			r.Get("/partials/stats", s.handleStatsPartial)
+			r.Get("/partials/position/{id}", s.handlePositionDetailPartial)
+		})
+	} else {
+		s.router.Get("/", s.handleDashboard)
+		s.router.Get("/api/positions", s.handleGetPositions)
+		s.router.Get("/api/stats", s.handleGetStats)
+		s.router.Get("/api/position/{id}", s.handleGetPosition)
+		s.router.Get("/partials/positions", s.handlePositionsPartial)
+		s.router.Get("/partials/stats", s.handleStatsPartial)
+		s.router.Get("/partials/position/{id}", s.handlePositionDetailPartial)
+	}
+
+	// Health endpoint is always public
 	s.router.Get("/health", s.handleHealth)
 
-	s.router.Get("/partials/positions", s.handlePositionsPartial)
-	s.router.Get("/partials/stats", s.handleStatsPartial)
-	s.router.Get("/partials/position/{id}", s.handlePositionDetailPartial)
+}
+
+func (s *Server) requestLoggerMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Clone the request for logging, redacting sensitive tokens
+		loggedURL := s.redactTokenFromURL(r.URL)
+		
+		// Create a custom logger entry with redacted URL
+		logEntry := s.logger.WithFields(logrus.Fields{
+			"method":     r.Method,
+			"url":        loggedURL.String(),
+			"user_agent": r.UserAgent(),
+			"remote_ip":  r.RemoteAddr,
+		})
+		
+		start := time.Now()
+		
+		// Wrap the response writer to capture status code
+		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		
+		next.ServeHTTP(wrapped, r)
+		
+		logEntry.WithFields(logrus.Fields{
+			"status":   wrapped.Status(),
+			"bytes":    wrapped.BytesWritten(),
+			"duration": time.Since(start),
+		}).Info("HTTP Request")
+	})
+}
+
+func (s *Server) redactTokenFromURL(originalURL *url.URL) *url.URL {
+	// Clone the URL to avoid modifying the original
+	loggedURL := &url.URL{
+		Scheme:   originalURL.Scheme,
+		Host:     originalURL.Host,
+		Path:     originalURL.Path,
+		RawQuery: originalURL.RawQuery,
+		Fragment: originalURL.Fragment,
+	}
+	
+	// Parse and redact query parameters
+	if originalURL.RawQuery != "" {
+		values := originalURL.Query()
+		if values.Has("token") {
+			values.Set("token", "[REDACTED]")
+			loggedURL.RawQuery = values.Encode()
+		}
+	}
+	
+	return loggedURL
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		// Skip authentication for health endpoint and static assets
+		if r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/static/") {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		token := r.Header.Get("X-Auth-Token")
+		// Extract token from multiple sources in priority order
+		var token string
+		
+		// 1. X-Auth-Token header (highest priority)
+		token = r.Header.Get("X-Auth-Token")
+		
+		// 2. URL query parameter
 		if token == "" {
 			token = r.URL.Query().Get("token")
 		}
+		
+		// 3. Cookie (lowest priority)
+		if token == "" {
+			if cookie, err := r.Cookie("auth_token"); err == nil {
+				token = cookie.Value
+			}
+		}
 
-		if token != s.authToken {
+		// Validate token using timing-safe comparison to prevent timing attacks
+		if !s.isValidToken(token) {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (s *Server) isValidToken(token string) bool {
+	// Check lengths first to prevent timing attacks on length comparison
+	if len(token) != len(s.authToken) {
+		return false
+	}
+	
+	// Use constant-time comparison to prevent timing attacks
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.authToken)) == 1
 }
 
 func (s *Server) Start() error {
