@@ -13,6 +13,10 @@ config.yaml
 scranton-strangler
 *.exe
 
+# Script binaries (generated from scripts/*.go) - only in root directory
+/liquidate_positions
+/test_otoco
+
 # Test files
 *.test
 *.out
