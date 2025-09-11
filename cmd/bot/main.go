@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -148,8 +150,11 @@ func main() {
 		bot.dashLogger = dashLogger
 
 		dashConfig := dashboard.Config{
-			Port:      cfg.Dashboard.Port,
-			AuthToken: cfg.Dashboard.AuthToken,
+			Port:                cfg.Dashboard.Port,
+			AuthToken:           cfg.Dashboard.AuthToken,
+			AllocationThreshold: cfg.Strategy.AllocationPct * 100, // Convert to percentage
+			ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
+			StopLossPct:         cfg.Strategy.Exit.StopLossPct,
 		}
 		bot.dashServer = dashboard.NewServer(dashConfig, bot.storage, bot.broker, bot.dashLogger)
 		logger.Printf("Dashboard enabled on port %d", cfg.Dashboard.Port)
@@ -174,12 +179,19 @@ func main() {
 		logger.Println("Shutdown signal received, stopping bot...")
 		close(bot.stop)
 		cancel()
+		if bot.dashServer != nil {
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			if err := bot.dashServer.Shutdown(shutdownCtx); err != nil {
+				logger.Printf("Error shutting down dashboard: %v", err)
+			}
+		}
 	}()
 
 	// Start dashboard server if enabled
 	if bot.dashServer != nil {
 		go func() {
-			if err := bot.dashServer.Start(); err != nil {
+			if err := bot.dashServer.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Printf("Dashboard server error: %v", err)
 			}
 		}()
@@ -198,7 +210,8 @@ func main() {
 
 	// Run the bot
 	if err := bot.Run(ctx); err != nil {
-		logger.Fatalf("Bot error: %v", err)
+		logger.Printf("Bot error: %v", err)
+		return
 	}
 
 	logger.Println("Bot stopped successfully")
