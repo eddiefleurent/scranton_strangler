@@ -24,6 +24,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
@@ -84,8 +85,9 @@ func main() {
 		cancelledCount := 0
 		
 		for _, order := range ordersResp.Orders.Order {
-			// Cancel orders that are still pending (not filled, cancelled, or expired)
-			if order.Status == "pending" || order.Status == "open" || order.Status == "submitted" {
+			// Cancel orders that are still active (not filled/canceled/expired/rejected)
+			status := strings.ToLower(order.Status)
+			if status == "pending" || status == "open" || status == "submitted" || status == "accepted" || status == "partially_filled" {
 				pendingCount++
 				fmt.Printf("📋 Cancelling pending order: %s %s %s (ID: %d)\n", 
 					order.Side, order.Symbol, order.Type, order.ID)
@@ -116,6 +118,10 @@ func main() {
 		log.Fatalf("Failed to get positions: %v", err)
 	}
 	
+	if len(positions) == 0 {
+		fmt.Println("✅ No positions to close.")
+		return
+	}
 	fmt.Printf("Found %d positions to close:\n", len(positions))
 	for i, pos := range positions {
 		fmt.Printf("  %d. %s: %.0f units @ $%.2f\n", i+1, pos.Symbol, math.Abs(pos.Quantity), pos.CostBasis)
@@ -129,6 +135,10 @@ func main() {
 		
 		// Determine position direction and appropriate close order type
 		quantity := int(math.Abs(math.Round(pos.Quantity)))
+		if quantity <= 0 {
+			fmt.Printf("⏭️  Skipping %s: computed quantity is 0\n", pos.Symbol)
+			continue
+		}
 		isShort := pos.Quantity < 0
 		
 		orderType := "buy-to-close MARKET"
