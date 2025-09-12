@@ -27,6 +27,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -95,7 +96,12 @@ func main() {
 	}
 
 	fmt.Println("💥 LIQUIDATE ALL POSITIONS - MARKET ORDERS 💥")
-	fmt.Printf("🏦 Account: %s\n", accountID)
+	// Mask account ID for security
+	if n := len(accountID); n > 4 {
+		fmt.Printf("🏦 Account: ****%s\n", accountID[n-4:])
+	} else {
+		fmt.Printf("🏦 Account: %s\n", accountID)
+	}
 	fmt.Println("⚠️  WARNING: This will close ALL positions using market orders")
 	
 	if !skipConfirm {
@@ -116,7 +122,9 @@ func main() {
 	
 	// Cancel ALL pending orders first
 	fmt.Println("🔍 Checking for pending orders to cancel...")
-	ordersResp, err := client.GetOrders()
+	ctxList, cancelList := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelList()
+	ordersResp, err := client.GetOrdersCtx(ctxList)
 	if err != nil {
 		log.Printf("⚠️  Warning: Could not retrieve orders: %v", err)
 	} else if ordersResp == nil || len(ordersResp.Orders.Order) == 0 {
@@ -147,7 +155,9 @@ func main() {
 				fmt.Printf("📋 Cancelling %s order: %s %s %s (ID: %v)\n",
 					status, order.Side, order.Symbol, order.Type, order.ID)
 				
-				_, cancelErr := client.CancelOrder(order.ID)
+				ctxCancel, cancelCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, cancelErr := client.CancelOrderCtx(ctxCancel, order.ID)
+				cancelCancel() // Clean up immediately after each order
 				if cancelErr != nil {
 					fmt.Printf("❌ Failed to cancel order %v: %v\n", order.ID, cancelErr)
 				} else {
@@ -168,7 +178,9 @@ func main() {
 	}
 	
 	// Get current positions first
-	positions, err := client.GetPositions()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	positions, err := client.GetPositionsCtx(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get positions: %v", err)
 	}
@@ -241,6 +253,8 @@ func main() {
 func checkMarketSession(client broker.Broker) bool {
 	fmt.Println("🕒 Checking market session...")
 	
+	// Note: GetMarketClock doesn't have a Ctx variant in the interface,
+	// but we can add a timeout wrapper if needed in the future
 	clock, err := client.GetMarketClock(false)
 	if err != nil {
 		fmt.Printf("⚠️  Could not get market status: %v\n", err)
