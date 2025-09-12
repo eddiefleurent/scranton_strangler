@@ -89,7 +89,7 @@ func (m *mockBrokerForOrders) CancelOrder(orderID int) (*broker.OrderResponse, e
 	m.callCount++
 	resp := &broker.OrderResponse{}
 	resp.Order.ID = orderID
-	resp.Order.Status = "cancelled"
+	resp.Order.Status = "canceled"
 	return resp, nil
 }
 
@@ -128,6 +128,14 @@ func (m *mockBrokerForOrders) PlaceBuyToCloseMarketOrder(optionSymbol string, qu
 
 func (m *mockBrokerForOrders) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForOrders) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return m.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
+func (m *mockBrokerForOrders) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return m.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 }
 
 func (m *mockBrokerForOrders) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
@@ -812,6 +820,16 @@ func TestManager_HandleOrderFill_CreditVsDebitFills(t *testing.T) {
 			expectedQuantity: 2, // Rounded from 2.3
 			expectCreditSet: false,
 			description:     "Market orders should not set CreditReceived",
+		},
+		{
+			name:             "zero_exec_quantity_no_effect",
+			orderType:        "credit",
+			avgFillPrice:     1.00,
+			execQuantity:     0.0,
+			expectedCredit:   0.0,
+			expectedQuantity: 0, // should remain 0 as StateSubmitted positions have quantity 0
+			expectCreditSet:  false,
+			description:      "0 exec quantity should not alter position or credit",
 		},
 	}
 

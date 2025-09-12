@@ -195,20 +195,25 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 				
 				orderStatus, err := m.broker.GetOrderStatusCtx(ctx, orderIDInt)
 				if err == nil && orderStatus != nil && orderStatus.Order.ID != 0 {
-					// Set the actual executed quantity using proper rounding
-					position.Quantity = int(math.Round(orderStatus.Order.ExecQuantity))
-					
-					// Handle credit received based on order type
-					if orderStatus.Order.Type == "credit" {
-						// For credit orders (sell-to-open), AvgFillPrice should be positive credit received
-						position.CreditReceived = math.Abs(orderStatus.Order.AvgFillPrice)
-						m.logger.Printf("Position %s filled: qty=%d, credit_received=%.4f (credit order)", 
-							positionID, position.Quantity, position.CreditReceived)
+					// Only update position details if order actually executed
+					if orderStatus.Order.ExecQuantity > 0 {
+						// Set the actual executed quantity using proper rounding
+						position.Quantity = int(math.Round(orderStatus.Order.ExecQuantity))
+						
+						// Handle credit received based on order type
+						if orderStatus.Order.Type == "credit" {
+							// For credit orders (sell-to-open), AvgFillPrice should be positive credit received
+							position.CreditReceived = math.Abs(orderStatus.Order.AvgFillPrice)
+							m.logger.Printf("Position %s filled: qty=%d, credit_received=%.4f (credit order)", 
+								positionID, position.Quantity, position.CreditReceived)
+						} else {
+							// For debit orders or other types, handle appropriately 
+							// Don't set CreditReceived as this wasn't a credit transaction
+							m.logger.Printf("Position %s filled: qty=%d, avg_fill_price=%.4f (non-credit order type: %s)", 
+								positionID, position.Quantity, orderStatus.Order.AvgFillPrice, orderStatus.Order.Type)
+						}
 					} else {
-						// For debit orders or other types, handle appropriately 
-						// Don't set CreditReceived as this wasn't a credit transaction
-						m.logger.Printf("Position %s filled: qty=%d, avg_fill_price=%.4f (non-credit order type: %s)", 
-							positionID, position.Quantity, orderStatus.Order.AvgFillPrice, orderStatus.Order.Type)
+						m.logger.Printf("Position %s order filled with zero execution quantity, keeping original values", positionID)
 					}
 				} else {
 					m.logger.Printf("Could not fetch order details for position %s, proceeding with transition", positionID)
