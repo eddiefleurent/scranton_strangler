@@ -177,6 +177,7 @@ func (s *Server) setupRoutes() {
 		s.router.Route("/", func(r chi.Router) {
 			r.Use(s.authMiddleware)
 			r.Get("/", s.handleDashboard)
+			r.Get("/history", s.handleFullHistory)
 			r.Get("/api/positions", s.handleGetPositions)
 			r.Get("/api/stats", s.handleGetStats)
 			r.Get("/api/position/{id}", s.handleGetPosition)
@@ -184,10 +185,12 @@ func (s *Server) setupRoutes() {
 			r.Get("/partials/positions", s.handlePositionsPartial)
 			r.Get("/partials/stats", s.handleStatsPartial)
 			r.Get("/partials/history", s.handleHistoryPartial)
+			r.Get("/partials/recent-history", s.handleRecentHistoryPartial)
 			r.Get("/partials/position/{id}", s.handlePositionDetailPartial)
 		})
 	} else {
 		s.router.Get("/", s.handleDashboard)
+		s.router.Get("/history", s.handleFullHistory)
 		s.router.Get("/api/positions", s.handleGetPositions)
 		s.router.Get("/api/stats", s.handleGetStats)
 		s.router.Get("/api/position/{id}", s.handleGetPosition)
@@ -195,6 +198,7 @@ func (s *Server) setupRoutes() {
 		s.router.Get("/partials/positions", s.handlePositionsPartial)
 		s.router.Get("/partials/stats", s.handleStatsPartial)
 		s.router.Get("/partials/history", s.handleHistoryPartial)
+		s.router.Get("/partials/recent-history", s.handleRecentHistoryPartial)
 		s.router.Get("/partials/position/{id}", s.handlePositionDetailPartial)
 	}
 
@@ -457,6 +461,41 @@ func (s *Server) handleHistoryPartial(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.historyTemplate.ExecuteTemplate(w, "history-content", views); err != nil {
 		s.logger.WithError(err).Error("Failed to execute history template")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleRecentHistoryPartial(w http.ResponseWriter, r *http.Request) {
+	history := s.storage.GetHistory()
+	views := s.convertPositionsToViewsWithClosed(history, true)
+	
+	// Limit to recent 3 completed trades
+	if len(views) > 3 {
+		views = views[:3]
+	}
+	
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.historyTemplate.ExecuteTemplate(w, "recent-history-content", views); err != nil {
+		s.logger.WithError(err).Error("Failed to execute recent history template")
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleFullHistory(w http.ResponseWriter, r *http.Request) {
+	history := s.storage.GetHistory()
+	views := s.convertPositionsToViewsWithClosed(history, true)
+	
+	data := struct {
+		History []PositionView
+		Stats   Statistics
+	}{
+		History: views,
+		Stats:   Statistics{}, // Empty stats for now
+	}
+	
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.historyTemplate.ExecuteTemplate(w, "full-history-page", data); err != nil {
+		s.logger.WithError(err).Error("Failed to execute full history page template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }

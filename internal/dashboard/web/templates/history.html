@@ -48,3 +48,101 @@
     </table>
 </div>
 {{end}}
+
+{{define "recent-history-content"}}
+<div class="history-table-wrapper recent">
+    {{if .}}
+    <table class="history-table">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Entry</th>
+                <th>Exit</th>
+                <th>Days</th>
+                <th>Strikes</th>
+                <th>Credit</th>
+                <th>Final P&L</th>
+                <th>P&L %</th>
+                <th>Result</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .}}
+            <tr class="history-row {{if .IsProfit}}profit{{else}}loss{{end}}" 
+                hx-get="/partials/position/{{.ID}}"
+                hx-target="#position-detail-container"
+                hx-swap="innerHTML"
+                hx-on:htmx:after-swap="showPositionDetail()">
+                <td>{{.Symbol}}</td>
+                <td>{{.EntryDate.Format "01/02"}}</td>
+                <td>{{.ExitDate.Format "01/02"}}</td>
+                <td>{{.HoldDays}}</td>
+                <td><span aria-label="Put strike: {{printf "%.0f" .PutStrike}}, Call strike: {{printf "%.0f" .CallStrike}}">{{printf "%.0f" .PutStrike}}/{{printf "%.0f" .CallStrike}}</span></td>
+                <td>${{printf "%.2f" .CreditReceived}}</td>
+                <td class="{{if .IsProfit}}positive{{else}}negative{{end}}">
+                    ${{printf "%.2f" .CurrentPnL}}
+                </td>
+                <td class="{{if .IsProfit}}positive{{else}}negative{{end}}">
+                    {{printf "%.1f" .PnLPercent}}%
+                </td>
+                <td>
+                    <span class="result-badge {{if .IsProfit}}win{{else}}loss{{end}}">
+                        {{if .IsProfit}}WIN{{else}}LOSS{{end}}
+                    </span>
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    {{else}}
+    <div class="no-data-message">
+        <p>No completed trades yet</p>
+    </div>
+    {{end}}
+</div>
+{{end}}
+
+{{define "full-history-page"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading History - Scranton Strangler</title>
+    <script src="/static/js/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Trading History</h1>
+            <div class="header-info">
+                <a href="/" class="back-link">← Back to Dashboard</a>
+            </div>
+        </header>
+
+        <main>
+            <section id="history-section" class="dashboard-section">
+                <div class="section-header">
+                    <h2>All Completed Trades ({{len .History}})</h2>
+                </div>
+                <div id="history-container">
+                    {{template "history-content" .History}}
+                </div>
+            </section>
+
+            <section id="position-detail-section" class="dashboard-section hidden">
+                <h2>Position Details</h2>
+                <div id="position-detail-container"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Scranton Strangler v1.0.0 | Trading History</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
+{{end}}

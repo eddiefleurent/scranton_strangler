@@ -337,6 +337,92 @@ footer {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Section Header with View All Link */
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.view-all-link {
+    color: var(--brand);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border: 1px solid var(--brand);
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.view-all-link:hover {
+    background: var(--brand);
+    color: white;
+}
+
+.back-link {
+    color: var(--brand);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border: 1px solid var(--brand);
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.back-link:hover {
+    background: var(--brand);
+    color: white;
+}
+
+/* Recent History Compact Styling */
+.history-table-wrapper.recent .history-table {
+    font-size: 14px;
+}
+
+.history-table-wrapper.recent .history-table th {
+    font-size: 12px;
+    padding: 8px 6px;
+}
+
+.history-table-wrapper.recent .history-table td {
+    padding: 10px 6px;
+}
+
+.no-data-message {
+    text-align: center;
+    padding: 30px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.no-data-message p {
+    font-size: 14px;
+}
+
+/* Result badges for history */
+.result-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-align: center;
+    min-width: 40px;
+    display: inline-block;
+}
+
+.result-badge.win {
+    background: var(--pos);
+    color: white;
+}
+
+.result-badge.loss {
+    background: var(--neg);
+    color: white;
+}
+
 @media (max-width: 768px) {
     .header-info {
         flex-direction: column;
@@ -359,5 +445,15 @@ footer {
     .positions-table th,
     .positions-table td {
         padding: 8px 4px;
+    }
+
+    .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .view-all-link, .back-link {
+        align-self: flex-end;
     }
 }
