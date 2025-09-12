@@ -47,8 +47,21 @@ func isOptionSymbol(symbol string) bool {
 			if i+6 < len(trimmedS) {
 				optionType := trimmedS[i+6]
 				if optionType == 'P' || optionType == 'C' {
-					// Verify we have at least 8 more characters for the strike price
-					return len(trimmedS) >= i+15
+					// Check there are at least (6 + 1 + 8) chars remaining at position i
+					if len(trimmedS) >= i+6+1+8 {
+						// Verify the next 8 chars after P/C are all digits
+						strikeValid := true
+						for j := i+7; j < i+15; j++ {
+							if trimmedS[j] < '0' || trimmedS[j] > '9' {
+								strikeValid = false
+								break
+							}
+						}
+						// Require that the character after those 8 digits is the string end
+						if strikeValid && i+6+1+8 == len(trimmedS) {
+							return true
+						}
+					}
 				}
 			}
 		}
