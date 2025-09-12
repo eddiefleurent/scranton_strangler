@@ -346,7 +346,9 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Br
 	
 	// In sandbox, buying power restrictions may not reflect live trading conditions
 	// Check if there are existing positions consuming buying power
-	positions, err := broker.GetPositionsCtx(ctx)
+	posCtx, posCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer posCancel()
+	positions, err := broker.GetPositionsCtx(posCtx)
 	if err != nil {
 		logger.Printf("Warning: Could not retrieve positions: %v", err)
 	} else if len(positions) > 0 {
@@ -354,9 +356,12 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Br
 		// Calculate approximate margin requirement for existing positions
 		totalContracts := 0
 		for _, pos := range positions {
-			if pos.Symbol != "SPY" { // Skip underlying positions
-				totalContracts += int(math.Abs(pos.Quantity))
+			// Count only option positions; skip underlying equities
+			// Option symbols typically have 15+ chars and end with 8 digits (OSI format)
+			if len(pos.Symbol) < 15 || pos.Symbol == "SPY" {
+				continue
 			}
+			totalContracts += int(math.Abs(pos.Quantity))
 		}
 		if totalContracts > 0 {
 			logger.Printf("Existing positions: %d option contracts", totalContracts)
@@ -385,6 +390,6 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Br
 	}
 	
 	// Test passes if we can retrieve valid values and calculate risk parameters
-	logger.Printf("Risk management validation successful")
+	logger.Printf("Risk management validation successful (balance=%.2f allocPct=%.3f maxAlloc=%.2f buyingPower=%.2f)", balance, allocationPct, maxAllocation, buyingPower)
 	return true
 }
