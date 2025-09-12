@@ -113,9 +113,10 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 
 #### 4. Order Executor
 - Translates signals to Tradier API calls
-- **OTOCO Orders**: Unsupported at runtime - planned feature for multi-leg orders (see `internal/broker/tradier.go`)
-- **OCO Orders**: Emergency exits and rolling scenarios
-- Handles multi-leg orders (strangles)
+- **OTOCO Orders**: Unsupported for multi-leg strangles (API limitation - different option_symbols)
+- **OCO Orders**: Per-leg profit targets and stop-losses using GTC limit orders
+- **Automated Risk Management**: Separate OCO orders per option leg for complete coverage
+- Handles multi-leg orders (strangles) with individual leg management
 - Manages partial fills and order status
 - Implements retry logic with exponential backoff
 
@@ -267,16 +268,30 @@ type RiskManager interface {
 
 ## Order Types & Automation Strategy
 
-### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Unsupported at Runtime**
-**Status**: Not supported for live trading - paper-only flags tolerated, live trading disallowed
-- **Limitation**: Tradier API does not support OTOCO for multi-leg orders
-- **Current Behavior**: `use_otoco: true` in config is tolerated but ignored at runtime
-- **Fallback**: System automatically uses regular multi-leg orders with monitoring
-- **Implementation**: See `internal/broker/tradier.go` - returns `ErrOTOCOUnsupported`
-- **Future**: Planned implementation may use separate entry + linked exit orders
+### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Unsupported for Multi-Leg**
+**Status**: Cannot be used for short strangles due to API limitations
+- **Root Cause**: Tradier OTOCO requires same `option_symbol` but strangles use different symbols per leg
+- **Current Behavior**: `PlaceStrangleOTOCO()` returns `ErrOTOCOUnsupported`
+- **Alternative**: Enhanced monitoring system with automated order management
+- **Implementation**: See `internal/broker/tradier.go:1191`
 
-### OCO Orders (One-Cancels-Other) 
-**Use Cases**:
+### Enhanced Monitoring System - **Recommended Solution**
+**Architecture**: Hybrid approach combining GTC orders with intelligent position monitoring
+- **Profit Target**: Single GTC limit order to close entire strangle at 50% of credit
+- **Stop-Loss Protection**: Real-time P&L monitoring with conditional market order execution
+- **Monitoring Frequency**: Every 1-minute during market hours, 5-minute during extended hours
+- **Trigger Logic**: When position P&L reaches -200% of credit, place immediate market order
+- **Order Management**: System automatically cancels profit target when stop-loss executes
+- **24/7 Protection**: Continuous monitoring provides protection when bot is active
+- **Fallback**: Manual monitoring alerts for system failures
+
+**Implementation Components**:
+1. **Enhanced Position Monitor**: High-frequency P&L calculation and threshold checking
+2. **Conditional Order Engine**: Trigger market orders based on position metrics
+3. **Order Lifecycle Manager**: Automatic cancellation of linked orders upon execution
+4. **Extended Hours Support**: Reduced frequency monitoring during pre/post market
+
+**Football System Use Cases**:
 1. **Second Down Rolling**: Close at 70% profit OR roll untested side
 2. **Third Down Management**: Take 25% profit OR continue to Fourth Down  
 3. **Fourth Down Stops**: Profit target OR 250% loss limit

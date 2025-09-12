@@ -105,10 +105,28 @@ If Experienced/Active Management:
 3. **Whichever comes first**
 
 ### Profit Taking Mechanics
-- **With OTOCO**: Automatically places GTC limit order at entry
-- **Without OTOCO**: Monitor daily for 50% profit opportunity
-- **Target**: Buy to close at 50% of credit received
-- **Example**: Collected $3.00 credit → Exit at $1.50 debit
+- **Target**: Buy to close entire strangle at 50% of original credit received
+- **Example**: $3.00 credit received → Close entire position when debit = $1.50
+- **Implementation**: Single GTC limit order placed immediately after position entry
+- **Order Type**: Multi-leg buy-to-close with GTC duration
+- **Execution**: Order stays active 24/7 until filled or manually canceled
+- **Management**: System automatically cancels order if stop-loss triggers
+
+### Stop-Loss Protection
+- **Trigger Threshold**: 200% loss of original credit (professional recommendation)
+- **Example**: $3.00 credit received → Trigger at -$6.00 P&L ($9.00 total cost)
+- **Implementation**: Real-time position monitoring with conditional market order execution
+- **Monitoring Frequency**: 
+  - **Market Hours**: Every 1 minute (9:30 AM - 4:00 PM ET)
+  - **Extended Hours**: Every 5 minutes (4:00 AM - 9:30 AM, 4:00 PM - 8:00 PM ET)
+- **Execution**: When threshold breached, place immediate market order to close position
+- **Order Management**: Automatically cancel profit target GTC order upon stop-loss execution
+
+### Why Enhanced Monitoring vs Traditional Stop-Loss Orders
+- **OTOCO Limitation**: Cannot be used for multi-leg strangles (different option_symbols required)
+- **Standing Order Risk**: GTC stop-loss orders at high debit prices would execute immediately
+- **Conditional Execution**: Stop-loss only triggers when position P&L reaches threshold
+- **Professional Practice**: Aligns with industry standard of P&L-based risk management
 
 ### Emergency Exits (Manual Intervention Only)
 - Loss exceeds EscalateLossPct (2.0 = 200%) of collected premium (escalate/prepare for action)
