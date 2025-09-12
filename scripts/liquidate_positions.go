@@ -144,6 +144,7 @@ func main() {
 			"queued":         {},
 			"working":        {},
 			"pending_cancel": {},
+			"pending_replace": {},
 			"replaced":       {},
 		}
 		
@@ -348,7 +349,7 @@ func isOSIOptionSymbol(symbol string) bool {
 		return false
 	}
 	optionType := trimmedSymbol[len(trimmedSymbol)-9]
-	if optionType != 'P' && optionType != 'C' {
+	if optionType != 'P' && optionType != 'C' && optionType != 'p' && optionType != 'c' {
 		return false
 	}
 	
