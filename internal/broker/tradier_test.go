@@ -318,7 +318,7 @@ func TestGetPositions(t *testing.T) {
 	})
 	defer srv.Close()
 
-	positions, err := api.GetPositions()
+	positions, err := api.GetPositionsCtx(context.Background())
 	if err != nil {
 		t.Fatalf("GetPositions error: %v", err)
 	}

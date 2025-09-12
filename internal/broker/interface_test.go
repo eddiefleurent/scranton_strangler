@@ -744,11 +744,7 @@ func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 }
 
 func (m *MockBroker) GetPositions() ([]PositionItem, error) {
-	m.callCount++
-	if m.shouldFail && m.callCount > m.failAfter {
-		return nil, errors.New("mock broker error")
-	}
-	return []PositionItem{}, nil
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]PositionItem, error) {
@@ -1209,7 +1205,7 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		fn   func() error
 	}{
 		{"GetAccountBalance", func() error { _, err := cb.GetAccountBalance(); return err }},
-		{"GetPositions", func() error { _, err := cb.GetPositions(); return err }},
+		{"GetPositions", func() error { _, err := cb.GetPositionsCtx(context.Background()); return err }},
 		{"GetQuote", func() error { _, err := cb.GetQuote("SPY"); return err }},
 		{"GetExpirations", func() error { _, err := cb.GetExpirations("SPY"); return err }},
 		{"GetExpirationsCtx", func() error { _, err := cb.GetExpirationsCtx(context.Background(), "SPY"); return err }},

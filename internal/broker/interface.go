@@ -188,7 +188,7 @@ func (t *TradierClient) GetOptionBuyingPowerCtx(ctx context.Context) (float64, e
 
 // GetPositions delegates to the embedded TradierAPI
 func (t *TradierClient) GetPositions() ([]PositionItem, error) {
-	return t.TradierAPI.GetPositions()
+	return t.TradierAPI.GetPositionsCtx(context.Background())
 }
 
 // GetPositionsCtx delegates to the embedded TradierAPI with context support
@@ -515,7 +515,7 @@ func (c *CircuitBreakerBroker) GetOptionBuyingPowerCtx(ctx context.Context) (flo
 
 // GetPositions wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) GetPositions() ([]PositionItem, error) {
-	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]PositionItem, error) { return b.GetPositions() })
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) ([]PositionItem, error) { return b.GetPositionsCtx(context.Background()) })
 }
 
 // GetPositionsCtx wraps the underlying broker call with circuit breaker and context support

@@ -584,14 +584,7 @@ func (t *TradierAPI) GetOptionChainCtx(ctx context.Context, symbol, expiration s
 
 // GetPositions retrieves current positions from the account.
 func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
-	endpoint := fmt.Sprintf("%s/accounts/%s/positions", t.baseURL, t.accountID)
-
-	var response PositionsResponse
-	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
-		return nil, err
-	}
-
-	return []PositionItem(response.Positions.Position), nil
+	return t.GetPositionsCtx(context.Background())
 }
 
 // GetPositionsCtx retrieves current positions from the account with context support.
