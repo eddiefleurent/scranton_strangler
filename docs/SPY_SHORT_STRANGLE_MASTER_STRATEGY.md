@@ -116,11 +116,15 @@ If Experienced/Active Management:
 - **Trigger Threshold**: 200% loss of original credit (professional recommendation)
 - **Example**: $3.00 credit received → Trigger at -$6.00 P&L ($9.00 total cost)
 - **Implementation**: Real-time position monitoring with conditional market order execution
-- **Monitoring Frequency**: 
-  - **Market Hours**: Every 1 minute (9:30 AM - 4:00 PM ET)
-  - **Extended Hours**: Every 5 minutes (4:00 AM - 9:30 AM, 4:00 PM - 8:00 PM ET)
+- **Monitoring Schedule** (Bot only runs when trading is possible):
+  - **9:30 AM - 4:00 PM ET**: Every 1 minute (regular hours)
+  - **4:00 PM - 4:15 PM ET**: Every 1 minute (SPY extended hours)
+  - **4:15 PM - 9:30 AM ET**: NO MONITORING (market closed, cannot trade)
+  - **Weekends/Holidays**: NO MONITORING (market closed)
+- **Overnight Gap Risk**: Cannot be mitigated until market reopens at 9:30 AM
 - **Execution**: When threshold breached, place immediate market order to close position
 - **Order Management**: Automatically cancel profit target GTC order upon stop-loss execution
+- **Extended Hours Risk**: Wider spreads may result in worse fills during 4:00-4:15 PM window
 
 ### Why Enhanced Monitoring vs Traditional Stop-Loss Orders
 - **OTOCO Limitation**: Cannot be used for multi-leg strangles (different option_symbols required)
@@ -308,10 +312,23 @@ $17,500 ÷ $15,000 BPR = 1 contract
 2. Look for 50% profit targets
 3. Check for 70% profit on untested sides
 
-### End of Day
-1. Final P&L calculation
+### End of Day (3:45 PM)
+1. Final P&L calculation during regular hours
 2. Plan next day's potential adjustments
 3. Set alerts at key levels
+
+### Extended Hours Monitoring (4:00-4:15 PM ONLY)
+1. **Automated**: Bot monitors for 15 minutes after close
+2. **Emergency Exits**: Market orders only for critical stop-loss breaches
+3. **No New Entries**: Entry logic disabled after 3:45 PM
+4. **Limited Protection**: Only during this 15-minute window
+5. **Liquidity Warning**: Expect wider spreads and potential execution delays
+
+### Overnight & Weekend (4:15 PM - 9:30 AM)
+1. **Bot STOPPED**: No monitoring (market closed, cannot trade)
+2. **Gap Risk**: Positions exposed to overnight/weekend moves
+3. **Next Check**: 9:30 AM next trading day
+4. **Opening Action**: Bot checks for gaps and adverse moves at market open
 
 ---
 

@@ -871,16 +871,50 @@ The bot supports optional after-hours position monitoring via the `after_hours_c
 
 - **Default Behavior**: When `false`, the bot runs during the configured trading window only
 - **After-Hours Mode**: When `true`, the bot continues monitoring existing positions even outside regular hours
+- **SPY Options Extended Hours**: Limited to 4:00-4:15 PM ET (15 minutes post-close only)
 - **Functionality During After-Hours**:
   - Monitors existing positions for exit conditions (stop losses, profit targets)
+  - Emergency market orders for critical stop-loss breaches
   - **Does NOT** attempt new position entries
   - **Does NOT** perform position adjustments (Phase 2 feature)
   - Logs after-hours activity for transparency
 
+##### Recommended Configuration
+```yaml
+schedule:
+  market_check_interval: "1m"     # 1-minute for stop-loss monitoring
+  trading_start: "09:45"          # Conservative entry window
+  trading_end: "15:45"            # Conservative exit window  
+  after_hours_check: true         # Monitor during 4:00-4:15 PM window ONLY
+```
+
+##### Monitoring Schedule Clarification
+**IMPORTANT**: The bot monitors positions only when markets are open and trading is possible:
+
+| Time Period | Monitoring Status | Reason |
+|------------|------------------|--------|
+| **9:30 AM - 4:00 PM ET** | ✅ Active (1-min intervals) | Regular trading hours |
+| **4:00 PM - 4:15 PM ET** | ✅ Active (1-min intervals) | SPY extended hours window |
+| **4:15 PM - 9:30 AM ET** | ❌ STOPPED | Market closed - no trading possible |
+| **Weekends** | ❌ STOPPED | Market closed |
+
+**Key Points**:
+- Bot **STOPS at 4:15 PM** - cannot exit positions when market is closed
+- Bot **RESUMES at 9:30 AM** next trading day
+- Overnight gap risk exists but cannot be mitigated until market opens
+- First cycle at 9:30 AM checks for adverse overnight moves
+
+##### SPY Options After-Hours Constraints
+- **Limited Window**: Only 4:00-4:15 PM ET (no pre-market)
+- **Reduced Liquidity**: Wider bid-ask spreads, potential for poor fills
+- **Order Types**: Market orders recommended for emergency exits only
+- **No 24/7 Monitoring**: Positions cannot be adjusted when markets are closed
+
 ##### Use Cases
 - Risk management for overnight positions
-- Monitoring positions during extended hours trading
-- Emergency exit capabilities outside normal hours
+- Emergency exits during 4:00-4:15 PM window
+- Stop-loss protection against after-hours news events
+- Profit target monitoring during extended session
 
 #### Rate Limiting Implementation
 ```go

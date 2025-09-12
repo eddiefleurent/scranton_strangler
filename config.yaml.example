@@ -37,15 +37,17 @@ strategy:
     
 risk:
   max_contracts: 1  # Start with 1 for safety
-  max_daily_loss: 500  # Stop trading if daily loss exceeds
+  max_daily_loss: 500  # TODO: Stop trading if daily loss exceeds (currently not implemented)
   max_position_loss: 2.0  # Exit if loss exceeds 200% of credit
   
 schedule:
-  market_check_interval: "15m"  # How often to check market
+  market_check_interval: "1m"  # 1-minute for stop-loss monitoring (was 15m)
   timezone: "America/New_York"  # Market timezone (handles DST)
-  trading_start: "09:45"  # Start 15 min after open
-  trading_end: "15:45"  # Stop 15 min before close
-  after_hours_check: false
+  trading_start: "09:45"  # Start 15 min after open (conservative entry window)
+  trading_end: "15:45"  # Stop 15 min before close (conservative exit window)
+  after_hours_check: true  # Monitor existing positions during 4:00-4:15 PM ET only
+  # NOTE: Bot stops at 4:15 PM and resumes at 9:30 AM next trading day
+  # SPY options do NOT trade pre-market or after 4:15 PM ET
 
 storage:
   path: "data/positions.json"  # Persistent path; mount as a volume in Docker
