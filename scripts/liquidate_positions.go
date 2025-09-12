@@ -200,6 +200,12 @@ func main() {
 			continue // Skip underlying
 		}
 		
+		// Filter to only include OSI format option symbols - skip equity positions
+		if !isOSIOptionSymbol(pos.Symbol) {
+			fmt.Printf("⏭️  Skipping %s: not an OSI option symbol (equity position)\n", pos.Symbol)
+			continue
+		}
+		
 		// Determine position direction and appropriate close order type
 		absQty := math.Abs(pos.Quantity)
 		rounded := int(math.Round(absQty))
@@ -313,4 +319,49 @@ func isWithinETHours() bool {
 	fmt.Printf("🔴 Outside trading hours (%02d:%02d ET)\n", hour, minute)
 	fmt.Println("📋 Regular hours: 9:30 AM - 4:00 PM ET, Monday-Friday")
 	return false
+}
+
+// isOSIOptionSymbol checks if a symbol follows OSI (Options Symbology Initiative) format
+// OSI format: TICKER + YYMMDD + P/C + 8-digit strike price (e.g., SPY241220P00450000)
+// Returns true for option symbols, false for equity symbols like "SPY", "AAPL"
+func isOSIOptionSymbol(symbol string) bool {
+	trimmedSymbol := strings.TrimSpace(symbol)
+	
+	// OSI symbols must be at least 15 characters (3-char ticker + 6-digit date + P/C + 8-digit strike)
+	if len(trimmedSymbol) < 15 {
+		return false
+	}
+	
+	// Check if it ends with exactly 8 digits (strike price)
+	if len(trimmedSymbol) < 8 {
+		return false
+	}
+	strikeStr := trimmedSymbol[len(trimmedSymbol)-8:]
+	for _, ch := range strikeStr {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	
+	// Check if there's a P or C before the strike (option type)
+	if len(trimmedSymbol) < 9 {
+		return false
+	}
+	optionType := trimmedSymbol[len(trimmedSymbol)-9]
+	if optionType != 'P' && optionType != 'C' {
+		return false
+	}
+	
+	// Check if there are at least 6 digits before the option type (date)
+	if len(trimmedSymbol) < 15 {
+		return false
+	}
+	dateStr := trimmedSymbol[len(trimmedSymbol)-15 : len(trimmedSymbol)-9]
+	for _, ch := range dateStr {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	
+	return true
 }
