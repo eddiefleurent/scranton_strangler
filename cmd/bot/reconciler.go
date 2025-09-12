@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -17,9 +18,10 @@ import (
 
 // Reconciler handles position synchronization between broker and storage
 type Reconciler struct {
-	broker  broker.Broker
-	storage storage.Interface
-	logger  *log.Logger
+	broker         broker.Broker
+	storage        storage.Interface
+	logger         *log.Logger
+	coldStartOnce  sync.Once
 }
 
 // NewReconciler creates a new position reconciler
@@ -31,6 +33,8 @@ func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.
 	}
 }
 
+const positionsFetchTimeout = 8 * time.Second
+
 // ReconcilePositions detects position mismatches between broker and storage
 // It handles three cases:
 // 1. Positions in storage but closed in broker (manual closes)
@@ -39,7 +43,7 @@ func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.
 //    We log this and rely on the orphan-detection pass below to create recovery positions.
 func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []models.Position {
 	// Get current broker positions with timeout to prevent stuck cycles
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), positionsFetchTimeout)
 	defer cancel()
 	brokerPositions, err := r.broker.GetPositionsCtx(ctx)
 	if err != nil {
@@ -53,8 +57,11 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 	// CRITICAL: Cold start scenario - if no stored positions but broker has positions,
 	// this is likely a production restart without positions.json file
 	if len(storedPositions) == 0 && len(brokerPositions) > 0 {
-		r.logger.Printf("COLD START DETECTED: No stored positions but %d broker positions exist", len(brokerPositions))
-		r.logger.Printf("Cold start: will attempt recovery via orphan-detection pass...")
+		// Use sync.Once to log cold start detection only once to avoid log spam
+		r.coldStartOnce.Do(func() {
+			r.logger.Printf("COLD START DETECTED: No stored positions but %d broker positions exist", len(brokerPositions))
+			r.logger.Printf("Cold start: will attempt recovery via orphan-detection pass...")
+		})
 	}
 
 	var activePositions []models.Position
@@ -214,11 +221,13 @@ func (r *Reconciler) createRecoveryPosition(orphan orphanedStrangle) *models.Pos
 
 // isPositionOpenInBroker checks if a stored position still exists in broker positions
 func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
-	// For options positions, check if we have both legs still open
-	hasCallLeg := false
-	hasCallStrike := false
-	hasPutLeg := false
-	hasPutStrike := false
+	// Require broker to have at least the stored quantity for both legs (by strike)
+	expectedQty := position.Quantity
+	if expectedQty < 0 {
+		expectedQty = -expectedQty
+	}
+	callQty := 0
+	putQty := 0
 
 	// Check if broker position matches our stored position strikes
 	for _, brokerPos := range brokerPositions {
@@ -242,22 +251,17 @@ func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPos
 			continue // Skip positions with different expirations
 		}
 
-		// Check if this matches one of our strangle legs
-		if optionType == "C" {
-			hasCallLeg = true
-			if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
-				hasCallStrike = true
-			}
-		} else if optionType == "P" {
-			hasPutLeg = true
-			if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
-				hasPutStrike = true
-			}
+		// Count contracts per matching strike/type
+		qty := int(math.Abs(brokerPos.Quantity))
+		if optionType == "C" && math.Abs(parsedStrike-position.CallStrike) < 0.01 {
+			callQty += qty
+		} else if optionType == "P" && math.Abs(parsedStrike-position.PutStrike) < 0.01 {
+			putQty += qty
 		}
 	}
 
-	// Position is open if we have both call and put legs with matching strikes
-	return hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike
+	// Open only if broker holds at least the stored quantity for both legs
+	return callQty >= expectedQty && putQty >= expectedQty
 }
 
 // Helper functions
@@ -273,13 +277,7 @@ func extractUnderlyingFromSymbol(symbol string) string {
 	// Only iterate while there are at least 6 characters remaining to check
 	for i := 0; i <= len(symbol)-6; i++ {
 		// Check if we have 6 consecutive digits starting at position i
-		allDigits := true
-		for j := i; j < i+6; j++ {
-			if symbol[j] < '0' || symbol[j] > '9' {
-				allDigits = false
-				break
-			}
-		}
+		allDigits := isAllDigits(symbol[i : i+6])
 		
 		// If we found 6 consecutive digits and they're not at the start (index > 0),
 		// return the substring before them as the underlying ticker
@@ -303,15 +301,14 @@ func extractExpirationFromSymbol(symbol string) string {
 	// Look for 6 consecutive digits
 	for i := 0; i <= len(symbol)-6; i++ {
 		// Check if we have 6 consecutive digits starting at position i
-		allDigits := true
-		for j := i; j < i+6; j++ {
-			if symbol[j] < '0' || symbol[j] > '9' {
-				allDigits = false
-				break
+		if isAllDigits(symbol[i : i+6]) {
+			// Validate C/P after the date for OPRA format confirmation
+			if i+6 < len(symbol) {
+				t := symbol[i+6]
+				if t != 'C' && t != 'P' {
+					continue
+				}
 			}
-		}
-		
-		if allDigits {
 			// Found 6-digit date, extract and format
 			dateStr := symbol[i : i+6]
 			year := "20" + dateStr[0:2]
