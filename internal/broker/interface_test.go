@@ -421,9 +421,9 @@ func TestExtractUnderlyingFromOSI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractUnderlyingFromOSI(tt.input)
+			result := ExtractUnderlyingFromOSI(tt.input)
 			if result != tt.expected {
-				t.Errorf("extractUnderlyingFromOSI(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("ExtractUnderlyingFromOSI(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}

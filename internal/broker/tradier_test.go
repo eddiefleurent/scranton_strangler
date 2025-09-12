@@ -821,8 +821,8 @@ func TestExtractUnderlyingFromOSI_BasicAndEdgeCases(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.in, func(t *testing.T) {
-			if got := extractUnderlyingFromOSI(tc.in); got != tc.want {
-				t.Fatalf("extractUnderlyingFromOSI(%q) = %q, want %q", tc.in, got, tc.want)
+			if got := ExtractUnderlyingFromOSI(tc.in); got != tc.want {
+				t.Fatalf("ExtractUnderlyingFromOSI(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

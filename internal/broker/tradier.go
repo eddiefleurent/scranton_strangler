@@ -1051,7 +1051,7 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	}
 
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1095,7 +1095,7 @@ func (t *TradierAPI) PlaceSellToCloseOrder(optionSymbol string, quantity int, ma
 		return nil, err
 	}
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1136,7 +1136,7 @@ func (t *TradierAPI) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSy
 		return nil, err
 	}
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1176,7 +1176,7 @@ func (t *TradierAPI) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionS
 		return nil, err
 	}
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1377,7 +1377,7 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 		pos := &positions[i]
 
 		// Ensure the OSI underlying matches exactly
-		if extractUnderlyingFromOSI(pos.Symbol) != symbol {
+		if ExtractUnderlyingFromOSI(pos.Symbol) != symbol {
 			continue
 		}
 
@@ -1400,9 +1400,9 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 	return
 }
 
-// extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
+// ExtractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"
-func extractUnderlyingFromOSI(s string) string {
+func ExtractUnderlyingFromOSI(s string) string {
 	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
 	// We need to find the start of the 6-digit expiration date
 	trimmedS := strings.TrimSpace(s)
