@@ -66,7 +66,11 @@ type Broker interface {
 		maxPrice float64, duration string, tag string) (*OrderResponse, error)
 	PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int,
 		duration string, tag string) (*OrderResponse, error)
+	PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int,
+		duration string, tag string) (*OrderResponse, error)
 	PlaceSellToCloseMarketOrder(optionSymbol string, quantity int,
+		duration string, tag string) (*OrderResponse, error)
+	PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int,
 		duration string, tag string) (*OrderResponse, error)
 }
 
@@ -306,10 +310,22 @@ func (t *TradierClient) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity
 	return t.TradierAPI.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 }
 
+// PlaceBuyToCloseMarketOrderCtx places a buy-to-close market order for a specific option with context support
+func (t *TradierClient) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int,
+	duration string, tag string) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceBuyToCloseMarketOrderCtx(ctx, optionSymbol, quantity, duration, tag)
+}
+
 // PlaceSellToCloseMarketOrder places a sell-to-close market order for a specific option
 func (t *TradierClient) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int,
 	duration string, tag string) (*OrderResponse, error) {
 	return t.TradierAPI.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
+// PlaceSellToCloseMarketOrderCtx places a sell-to-close market order for a specific option with context support
+func (t *TradierClient) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int,
+	duration string, tag string) (*OrderResponse, error) {
+	return t.TradierAPI.PlaceSellToCloseMarketOrderCtx(ctx, optionSymbol, quantity, duration, tag)
 }
 
 // GetMarketClock retrieves the current market clock status
@@ -654,11 +670,27 @@ func (c *CircuitBreakerBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, q
 	})
 }
 
+// PlaceBuyToCloseMarketOrderCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int,
+	duration string, tag string) (*OrderResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
+		return b.PlaceBuyToCloseMarketOrderCtx(ctx, optionSymbol, quantity, duration, tag)
+	})
+}
+
 // PlaceSellToCloseMarketOrder wraps the underlying broker call with circuit breaker
 func (c *CircuitBreakerBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int,
 	duration string, tag string) (*OrderResponse, error) {
 	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
 		return b.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+	})
+}
+
+// PlaceSellToCloseMarketOrderCtx wraps the underlying broker call with circuit breaker and context support
+func (c *CircuitBreakerBroker) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int,
+	duration string, tag string) (*OrderResponse, error) {
+	return execCircuitBreaker(c.breaker, c.broker, func(b Broker) (*OrderResponse, error) {
+		return b.PlaceSellToCloseMarketOrderCtx(ctx, optionSymbol, quantity, duration, tag)
 	})
 }
 

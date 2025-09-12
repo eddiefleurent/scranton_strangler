@@ -35,6 +35,9 @@ const QuantityEpsilon = 1e-6
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
 var ErrOTOCOUnsupported = errors.New("otoco unsupported for multi-leg strangle")
 
+// ErrOutsideTradingHours is returned when attempting to place orders outside valid trading hours
+var ErrOutsideTradingHours = errors.New("order cannot be placed outside trading hours")
+
 // APIError represents an API error with status code and response body
 type APIError struct {
 	Status int
@@ -474,7 +477,7 @@ type OrderResponse struct {
 // OrdersResponse represents the response when fetching multiple orders from the Tradier API.
 type OrdersResponse struct {
 	Orders struct {
-		Order []Order `json:"order"`
+		Order singleOrArray[Order] `json:"order"`
 	} `json:"orders"`
 }
 
@@ -1120,6 +1123,11 @@ func (t *TradierAPI) PlaceSellToCloseOrder(optionSymbol string, quantity int, ma
 
 // PlaceBuyToCloseMarketOrder places a buy-to-close market order for an option position.
 func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
+	return t.PlaceBuyToCloseMarketOrderCtx(context.Background(), optionSymbol, quantity, duration, tag...)
+}
+
+// PlaceBuyToCloseMarketOrderCtx places a buy-to-close market order for an option position with context support.
+func (t *TradierAPI) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate quantity for order
 	if quantity <= 0 {
 		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
@@ -1147,7 +1155,7 @@ func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 	}
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
 	var response OrderResponse
-	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+	if err := t.makeRequestCtx(ctx, "POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -1155,6 +1163,11 @@ func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 
 // PlaceSellToCloseMarketOrder places a sell-to-close market order for an option position.
 func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
+	return t.PlaceSellToCloseMarketOrderCtx(context.Background(), optionSymbol, quantity, duration, tag...)
+}
+
+// PlaceSellToCloseMarketOrderCtx places a sell-to-close market order for an option position with context support.
+func (t *TradierAPI) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate quantity for order
 	if quantity <= 0 {
 		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
@@ -1182,7 +1195,7 @@ func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity i
 	}
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
 	var response OrderResponse
-	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+	if err := t.makeRequestCtx(ctx, "POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil

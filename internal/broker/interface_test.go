@@ -919,7 +919,27 @@ func (m *MockBroker) PlaceBuyToCloseMarketOrder(_ string, _ int, _ string, _ str
 	return resp, nil
 }
 
+func (m *MockBroker) PlaceBuyToCloseMarketOrderCtx(_ context.Context, _ string, _ int, _ string, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 125
+	return resp, nil
+}
+
 func (m *MockBroker) PlaceSellToCloseMarketOrder(_ string, _ int, _ string, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 126
+	return resp, nil
+}
+
+func (m *MockBroker) PlaceSellToCloseMarketOrderCtx(_ context.Context, _ string, _ int, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
