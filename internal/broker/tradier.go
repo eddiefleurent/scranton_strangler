@@ -446,49 +446,35 @@ type MarketDay struct {
 	} `json:"postmarket,omitempty"`
 }
 
+// Order represents a single order from the Tradier API.
+type Order struct {
+	CreateDate        string  `json:"create_date"`
+	Type              string  `json:"type"`
+	Symbol            string  `json:"symbol"`
+	Side              string  `json:"side"`
+	Class             string  `json:"class"`
+	Status            string  `json:"status"`
+	Duration          string  `json:"duration"`
+	TransactionDate   string  `json:"transaction_date"`
+	AvgFillPrice      float64 `json:"avg_fill_price"`
+	ExecQuantity      float64 `json:"exec_quantity"`
+	LastFillPrice     float64 `json:"last_fill_price"`
+	LastFillQuantity  float64 `json:"last_fill_quantity"`
+	RemainingQuantity float64 `json:"remaining_quantity"`
+	ID                int     `json:"id"`
+	Price             float64 `json:"price"`
+	Quantity          float64 `json:"quantity"`
+}
+
 // OrderResponse represents the order response from the Tradier API.
 type OrderResponse struct {
-	Order struct {
-		CreateDate        string  `json:"create_date"`
-		Type              string  `json:"type"`
-		Symbol            string  `json:"symbol"`
-		Side              string  `json:"side"`
-		Class             string  `json:"class"`
-		Status            string  `json:"status"`
-		Duration          string  `json:"duration"`
-		TransactionDate   string  `json:"transaction_date"`
-		AvgFillPrice      float64 `json:"avg_fill_price"`
-		ExecQuantity      float64 `json:"exec_quantity"`
-		LastFillPrice     float64 `json:"last_fill_price"`
-		LastFillQuantity  float64 `json:"last_fill_quantity"`
-		RemainingQuantity float64 `json:"remaining_quantity"`
-		ID                int     `json:"id"`
-		Price             float64 `json:"price"`
-		Quantity          float64 `json:"quantity"`
-	} `json:"order"`
+	Order Order `json:"order"`
 }
 
 // OrdersResponse represents the response when fetching multiple orders from the Tradier API.
 type OrdersResponse struct {
 	Orders struct {
-		Order []struct {
-			CreateDate        string  `json:"create_date"`
-			Type              string  `json:"type"`
-			Symbol            string  `json:"symbol"`
-			Side              string  `json:"side"`
-			Class             string  `json:"class"`
-			Status            string  `json:"status"`
-			Duration          string  `json:"duration"`
-			TransactionDate   string  `json:"transaction_date"`
-			AvgFillPrice      float64 `json:"avg_fill_price"`
-			ExecQuantity      float64 `json:"exec_quantity"`
-			LastFillPrice     float64 `json:"last_fill_price"`
-			LastFillQuantity  float64 `json:"last_fill_quantity"`
-			RemainingQuantity float64 `json:"remaining_quantity"`
-			ID                int     `json:"id"`
-			Price             float64 `json:"price"`
-			Quantity          float64 `json:"quantity"`
-		} `json:"order"`
+		Order []Order `json:"order"`
 	} `json:"orders"`
 }
 
@@ -1002,6 +988,11 @@ func (t *TradierAPI) CancelOrder(orderID int) (*OrderResponse, error) {
 	if err := t.makeRequest("DELETE", endpoint, nil, &response); err != nil {
 		return nil, err
 	}
+	// Synthesize success response for 204 No Content responses
+	if response.Order.ID == 0 && response.Order.Status == "" {
+		response.Order.ID = orderID
+		response.Order.Status = "canceled"
+	}
 	return &response, nil
 }
 
@@ -1011,6 +1002,11 @@ func (t *TradierAPI) CancelOrderCtx(ctx context.Context, orderID int) (*OrderRes
 	var response OrderResponse
 	if err := t.makeRequestCtx(ctx, "DELETE", endpoint, nil, &response); err != nil {
 		return nil, err
+	}
+	// Synthesize success response for 204 No Content responses
+	if response.Order.ID == 0 && response.Order.Status == "" {
+		response.Order.ID = orderID
+		response.Order.Status = "canceled"
 	}
 	return &response, nil
 }
@@ -1193,8 +1189,6 @@ func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity i
 }
 
 // PlaceStrangleOTOCO places a strangle order with OTOCO (One Triggers Other Cancels) functionality
-// Since Tradier doesn't support OTOCO for multi-leg orders, we implement it by placing
-// a regular strangle order and including profitTarget as a custom parameter for testing
 func (t *TradierAPI) PlaceStrangleOTOCO(
 	symbol string,
 	putStrike, callStrike float64,
@@ -1205,24 +1199,9 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	duration string,
 	tag string,
 ) (*OrderResponse, error) {
-	// For testing purposes, we'll place a regular strangle order but include profitTarget
-	// in a way that can be verified by tests (e.g., in the tag or as a custom parameter)
-
-	// Use profitTarget to modify the tag or include it in the order somehow for verification
-	// Tradier API doesn't allow periods/decimals in tag, so convert to integer cents
-	profitCents := int(profitTarget * 1000) // Convert to thousandths to avoid decimals
-	
-	// Merge profit target info with the provided tag
-	var finalTag string
-	if tag != "" {
-		finalTag = fmt.Sprintf("%s-otoco-profit-%d", tag, profitCents)
-	} else {
-		finalTag = fmt.Sprintf("otoco-profit-%d", profitCents)
-	}
-
-	// Place the strangle order with the modified tag that includes profitTarget
-	return t.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration,
-		quantity, credit, preview, duration, finalTag)
+	// Tradier does not support OTOCO for multi-leg strangles.
+	// Signal explicit unsupported to allow caller-side fallback.
+	return nil, ErrOTOCOUnsupported
 }
 
 // Helper method for making HTTP requests
