@@ -118,7 +118,7 @@ liquidate:
 	@echo "This will close ALL open positions using market orders"
 	@echo "Uses credentials from environment variables or config.yaml"
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	cd scripts && go run liquidate_positions.go -config ../config.yaml
+	cd scripts && go run liquidate_positions.go -config ../config.yaml --yes
 
 # Build test helper
 build-test-helper:
@@ -132,9 +132,9 @@ security-scan: tools
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" gosec ./...
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" govulncheck ./...
 
-# Check: lint, test, integration test, security scan, and build
-check: lint test test-integration security-scan build
-	@echo "✅ All checks passed: lint, test, integration test, security scan, and build completed successfully"
+# Check: lint, test, integration test, security scan, and production build
+check: lint test test-integration security-scan build-prod
+	@echo "✅ All checks passed: lint, test, integration test, security scan, and production build completed successfully"
 
 # Install security tools
 tools:
