@@ -93,7 +93,7 @@ func (m *mockBrokerForStrategy) GetOrderStatusCtx(ctx context.Context, orderID i
 func (m *mockBrokerForStrategy) CancelOrder(orderID int) (*broker.OrderResponse, error) {
 	resp := &broker.OrderResponse{}
 	resp.Order.ID = orderID
-	resp.Order.Status = "cancelled"
+	resp.Order.Status = "canceled"
 	return resp, nil
 }
 
@@ -1133,7 +1133,7 @@ func (m *mockBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
 			Quantity          float64 `json:"quantity"`
 		}{
 			ID:     orderID,
-			Status: "cancelled",
+			Status: "canceled",
 		},
 	}, nil
 }
