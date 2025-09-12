@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"log"
 	"os"
 	"strings"
@@ -85,19 +86,24 @@ func (m *mockBrokerForOrders) GetOrderStatusCtx(ctx context.Context, orderID int
 }
 
 func (m *mockBrokerForOrders) CancelOrder(orderID int) (*broker.OrderResponse, error) {
-	return &broker.OrderResponse{}, nil
+	m.callCount++
+	resp := &broker.OrderResponse{}
+	resp.Order.ID = orderID
+	resp.Order.Status = "cancelled"
+	return resp, nil
 }
 
 func (m *mockBrokerForOrders) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
-	return &broker.OrderResponse{}, nil
+	return m.CancelOrder(orderID)
 }
 
 func (m *mockBrokerForOrders) GetOrders() (*broker.OrdersResponse, error) {
+	m.callCount++
 	return &broker.OrdersResponse{}, nil
 }
 
 func (m *mockBrokerForOrders) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
-	return &broker.OrdersResponse{}, nil
+	return m.GetOrders()
 }
 
 func (m *mockBrokerForOrders) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
@@ -897,11 +903,11 @@ func TestManager_HandleOrderFill_CreditVsDebitFills(t *testing.T) {
 
 			// Verify credit received handling based on order type
 			if tt.expectCreditSet {
-				if updatedPosition.CreditReceived != tt.expectedCredit {
+				if math.Abs(updatedPosition.CreditReceived-tt.expectedCredit) > 1e-6 {
 					t.Errorf("Expected CreditReceived %.4f, got %.4f", tt.expectedCredit, updatedPosition.CreditReceived)
 				}
 			} else {
-				if updatedPosition.CreditReceived != 0.0 {
+				if math.Abs(updatedPosition.CreditReceived-0.0) > 1e-6 {
 					t.Errorf("Expected CreditReceived to remain 0 for %s order, got %.4f", tt.orderType, updatedPosition.CreditReceived)
 				}
 			}

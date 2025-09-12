@@ -91,11 +91,14 @@ func (m *mockBrokerForStrategy) GetOrderStatusCtx(ctx context.Context, orderID i
 }
 
 func (m *mockBrokerForStrategy) CancelOrder(orderID int) (*broker.OrderResponse, error) {
-	return &broker.OrderResponse{}, nil
+	resp := &broker.OrderResponse{}
+	resp.Order.ID = orderID
+	resp.Order.Status = "cancelled"
+	return resp, nil
 }
 
 func (m *mockBrokerForStrategy) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
-	return &broker.OrderResponse{}, nil
+	return m.CancelOrder(orderID)
 }
 
 func (m *mockBrokerForStrategy) GetOrders() (*broker.OrdersResponse, error) {
@@ -103,7 +106,7 @@ func (m *mockBrokerForStrategy) GetOrders() (*broker.OrdersResponse, error) {
 }
 
 func (m *mockBrokerForStrategy) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
-	return &broker.OrdersResponse{}, nil
+	return m.GetOrders()
 }
 
 func (m *mockBrokerForStrategy) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
