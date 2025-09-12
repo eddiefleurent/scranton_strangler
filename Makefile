@@ -26,8 +26,9 @@ build:
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
 	@echo "⏱️  Starting build timer..."
+	@mkdir -p $(BIN_DIR)
 	@START_TIME=$$(date +%s); \
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) ./cmd/bot; \
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/bot; \
 	END_TIME=$$(date +%s); \
 	DURATION=$$((END_TIME - START_TIME)); \
 	echo "⏱️  Build completed in $${DURATION} seconds"
