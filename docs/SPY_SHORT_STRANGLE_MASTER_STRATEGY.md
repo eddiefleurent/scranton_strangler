@@ -100,7 +100,7 @@ If Experienced/Active Management:
 ## Exit Rules
 
 ### Standard Exits
-1. **Profit Target Hit**: 50% of initial credit (GTC limit order when using OTOCO)
+1. **Profit Target Hit**: 50% of initial credit (single multi-leg GTC buy-to-close)
 2. **Time Exit**: MaxDTE (21) remaining (avoid gamma risk)
 3. **Whichever comes first**
 
@@ -153,7 +153,7 @@ If Experienced/Active Management:
 ### Management Sequence (Football System - Automated)
 
 #### First Down (Initial Position)
-- **Goal**: 50% profit via OTOCO exit order
+- **Goal**: 50% profit via single multi-leg GTC buy-to-close order
 - **Monitor**: Position delta, time decay, price movement
 - **Action**: None - let theta work
 - **Trigger Next**: Stock within 5 points of either strike

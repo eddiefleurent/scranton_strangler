@@ -113,10 +113,10 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 
 #### 4. Order Executor
 - Translates signals to Tradier API calls
-- **OTOCO Orders**: Unsupported for multi-leg strangles (API limitation - different option_symbols)
-- **OCO Orders**: Per-leg profit targets and stop-losses using GTC limit orders
-- **Automated Risk Management**: Separate OCO orders per option leg for complete coverage
-- Handles multi-leg orders (strangles) with individual leg management
+- **OTOCO Orders**: Unsupported for multi-leg strangles (API limitation: different option_symbols)
+- **Profit Target (Preferred)**: Single multi-leg GTC buy-to-close at 50% of original credit
+- **Per-leg OCO (Adjustments)**: Use for leg-specific rolls/stop coverage when needed
+- Handles multi-leg orders with consolidated profit-target and leg-level adjustments
 - Manages partial fills and order status
 - Implements retry logic with exponential backoff
 
@@ -279,7 +279,7 @@ type RiskManager interface {
 **Architecture**: Hybrid approach combining GTC orders with intelligent position monitoring
 - **Profit Target**: Single GTC limit order to close entire strangle at 50% of credit
 - **Stop-Loss Protection**: Real-time P&L monitoring with conditional market order execution
-- **Monitoring Frequency**: Every 1-minute during market hours, 5-minute during extended hours
+- **Monitoring Frequency**: Every 1-minute during market hours and extended hours
 - **Trigger Logic**: When position P&L reaches -200% of credit, place immediate market order
 - **Order Management**: System automatically cancels profit target when stop-loss executes
 - **24/7 Protection**: Continuous monitoring provides protection when bot is active
