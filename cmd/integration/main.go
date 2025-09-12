@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	brokerPkg "github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -14,6 +15,47 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 )
+
+// isOptionSymbol determines if a symbol represents an option contract
+// by attempting to extract an underlying symbol using OSI format parsing
+func isOptionSymbol(symbol string) bool {
+	// Use length heuristic as fallback for basic filtering
+	if len(symbol) < 15 {
+		return false
+	}
+	
+	// Try to extract underlying using OSI format parsing
+	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
+	trimmedS := strings.TrimSpace(symbol)
+	if len(trimmedS) < 16 {
+		return false
+	}
+	
+	// Look for expiration date pattern (6 consecutive digits) followed by P/C
+	for i := 0; i <= len(trimmedS)-15; i++ {
+		// Check if we have 6 consecutive digits starting at position i
+		isDatePattern := true
+		for j := i; j < i+6; j++ {
+			if trimmedS[j] < '0' || trimmedS[j] > '9' {
+				isDatePattern = false
+				break
+			}
+		}
+		
+		if isDatePattern {
+			// Check if the character after the 6 digits is P or C
+			if i+6 < len(trimmedS) {
+				optionType := trimmedS[i+6]
+				if optionType == 'P' || optionType == 'C' {
+					// Verify we have at least 8 more characters for the strike price
+					return len(trimmedS) >= i+15
+				}
+			}
+		}
+	}
+	
+	return false
+}
 
 func main() {
 	fmt.Println("=== SPY Strangle Bot - End-to-End Integration Test ===")
@@ -157,7 +199,7 @@ func runIntegrationTests(broker brokerPkg.Broker, strategy *strategy.StrangleStr
 	// Test 6: Risk management
 	fmt.Println("Test 6: Risk Management")
 	fmt.Println("=======================")
-	if testRiskManagement(strategy, broker, logger, cfg) {
+	if testRiskManagement(broker, logger, cfg) {
 		testsPassed++
 		fmt.Println("✅ PASSED")
 	} else {
@@ -243,7 +285,29 @@ func testOrderPreview(broker brokerPkg.Broker, logger *log.Logger, cfg *config.C
 	putStrike := math.Floor((quote.Last*0.90)/5) * 5
 	callStrike := math.Ceil((quote.Last*1.10)/5) * 5
 
-	expiration := time.Now().Add(45 * 24 * time.Hour).Format("2006-01-02")
+	// Get real expirations and select closest to target DTE
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	exps, err := broker.GetExpirationsCtx(ctx, "SPY")
+	if err != nil || len(exps) == 0 {
+		logger.Printf("Failed to get expirations for preview: %v", err)
+		return false
+	}
+	// Pick expiration closest to configured target DTE
+	target := cfg.Strategy.Entry.TargetDTE
+	best := exps[0]
+	bestDiff := math.MaxFloat64
+	now := time.Now()
+	for _, e := range exps {
+		if t, parseErr := time.Parse("2006-01-02", e); parseErr == nil {
+			dte := t.Sub(now).Hours() / 24
+			diff := math.Abs(dte - float64(target))
+			if diff < bestDiff {
+				bestDiff, best = diff, e
+			}
+		}
+	}
+	expiration := best
 
 	order, err := broker.PlaceStrangleOrder(
 		"SPY",
@@ -297,7 +361,7 @@ func testPositionStorage(storage storage.Interface, logger *log.Logger) bool {
 	return true
 }
 
-func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Broker, logger *log.Logger, cfg *config.Config) bool {
+func testRiskManagement(broker brokerPkg.Broker, logger *log.Logger, cfg *config.Config) bool {
 	// Test account balance check
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -357,8 +421,8 @@ func testRiskManagement(strategy *strategy.StrangleStrategy, broker brokerPkg.Br
 		totalContracts := 0
 		for _, pos := range positions {
 			// Count only option positions; skip underlying equities
-			// Option symbols typically have 15+ chars and end with 8 digits (OSI format)
-			if len(pos.Symbol) < 15 || pos.Symbol == "SPY" {
+			// Use more reliable option detection: check for OSI format parsing
+			if !isOptionSymbol(pos.Symbol) || pos.Symbol == "SPY" {
 				continue
 			}
 			totalContracts += int(math.Abs(pos.Quantity))
