@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	brokerPkg "github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -17,57 +16,9 @@ import (
 )
 
 // isOptionSymbol determines if a symbol represents an option contract
-// by attempting to extract an underlying symbol using OSI format parsing
+// by leveraging the broker's OSI parsing logic to avoid duplication
 func isOptionSymbol(symbol string) bool {
-	// Use length heuristic as fallback for basic filtering
-	if len(symbol) < 15 {
-		return false
-	}
-	
-	// Try to extract underlying using OSI format parsing
-	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
-	trimmedS := strings.TrimSpace(symbol)
-	if len(trimmedS) < 16 {
-		return false
-	}
-	
-	// Look for expiration date pattern (6 consecutive digits) followed by P/C
-	for i := 0; i <= len(trimmedS)-15; i++ {
-		// Check if we have 6 consecutive digits starting at position i
-		isDatePattern := true
-		for j := i; j < i+6; j++ {
-			if trimmedS[j] < '0' || trimmedS[j] > '9' {
-				isDatePattern = false
-				break
-			}
-		}
-		
-		if isDatePattern {
-			// Check if the character after the 6 digits is P or C
-			if i+6 < len(trimmedS) {
-				optionType := trimmedS[i+6]
-				if optionType == 'P' || optionType == 'C' {
-					// Check there are at least (6 + 1 + 8) chars remaining at position i
-					if len(trimmedS) >= i+6+1+8 {
-						// Verify the next 8 chars after P/C are all digits
-						strikeValid := true
-						for j := i+7; j < i+15; j++ {
-							if trimmedS[j] < '0' || trimmedS[j] > '9' {
-								strikeValid = false
-								break
-							}
-						}
-						// Require that the character after those 8 digits is the string end
-						if strikeValid && i+6+1+8 == len(trimmedS) {
-							return true
-						}
-					}
-				}
-			}
-		}
-	}
-	
-	return false
+	return brokerPkg.ExtractUnderlyingFromOSI(symbol) != ""
 }
 
 func main() {
@@ -434,8 +385,8 @@ func testRiskManagement(broker brokerPkg.Broker, logger *log.Logger, cfg *config
 		totalContracts := 0
 		for _, pos := range positions {
 			// Count only option positions; skip underlying equities
-			// Use more reliable option detection: check for OSI format parsing
-			if !isOptionSymbol(pos.Symbol) || pos.Symbol == "SPY" {
+			// Use OSI format parsing to detect option symbols
+			if !isOptionSymbol(pos.Symbol) {
 				continue
 			}
 			totalContracts += int(math.Abs(pos.Quantity))
