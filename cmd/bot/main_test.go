@@ -50,11 +50,7 @@ func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 }
 
 func (m *MockBroker) GetPositions() ([]broker.PositionItem, error) {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]broker.PositionItem), args.Error(1)
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {

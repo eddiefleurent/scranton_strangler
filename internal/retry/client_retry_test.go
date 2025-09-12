@@ -50,7 +50,7 @@ func (f *fakeBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 }
 
 func (f *fakeBroker) GetPositions() ([]broker.PositionItem, error) {
-	return []broker.PositionItem{}, nil
+	return f.GetPositionsCtx(context.Background())
 }
 
 func (f *fakeBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {

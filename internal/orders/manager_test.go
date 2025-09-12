@@ -39,7 +39,7 @@ func (m *mockBrokerForOrders) GetOptionBuyingPowerCtx(ctx context.Context) (floa
 }
 
 func (m *mockBrokerForOrders) GetPositions() ([]broker.PositionItem, error) {
-	return []broker.PositionItem{}, nil
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *mockBrokerForOrders) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
