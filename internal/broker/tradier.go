@@ -35,8 +35,6 @@ const QuantityEpsilon = 1e-6
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
 var ErrOTOCOUnsupported = errors.New("otoco unsupported for multi-leg strangle")
 
-// ErrOutsideTradingHours is returned when attempting to place orders outside valid trading hours
-var ErrOutsideTradingHours = errors.New("order cannot be placed outside trading hours")
 
 // APIError represents an API error with status code and response body
 type APIError struct {
