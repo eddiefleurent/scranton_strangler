@@ -201,8 +201,24 @@ func (m *MockBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
+func (m *MockBroker) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(ctx, optionSymbol, quantity, duration, tag)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
 func (m *MockBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	args := m.Called(optionSymbol, quantity, duration, tag)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
+func (m *MockBroker) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(ctx, optionSymbol, quantity, duration, tag)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}

@@ -136,6 +136,14 @@ func (f *fakeBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity i
 	return &broker.OrderResponse{}, nil
 }
 
+func (f *fakeBroker) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return f.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
+func (f *fakeBroker) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return f.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
 func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, qty int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
 	callNum := atomic.AddInt32(&f.callCount, 1)
 
