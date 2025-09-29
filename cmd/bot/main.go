@@ -42,13 +42,13 @@ type reconciliationResult struct {
 }
 
 // generateCorrelationID creates a short correlation ID for request tracking
-func generateCorrelationID() string {
+func generateCorrelationID(logger *log.Logger) string {
 	bytes := make([]byte, 4)
 	_, err := rand.Read(bytes)
 	if err != nil {
 		// Fallback to deterministic-but-unique ID if crypto/rand fails
 		fallbackID := fmt.Sprintf("%x%x", time.Now().UnixNano(), os.Getpid())
-		log.Printf("Warning: crypto/rand.Read failed (%v), using fallback correlation ID", err)
+		logger.Printf("Warning: crypto/rand.Read failed (%v), using fallback correlation ID", err)
 		return fallbackID[:8] // Keep it short like the original
 	}
 	return hex.EncodeToString(bytes)
@@ -117,10 +117,10 @@ func run() int {
 		lastPnLUpdate: time.Now().Add(-time.Hour), // Initialize to past time to allow immediate first update
 	}
 
-	// Cache NY timezone location
+	// Cache NY timezone location with fallback
 	if loc, err := time.LoadLocation("America/New_York"); err != nil {
-		log.Printf("Failed to load NY timezone: %v", err)
-		return 1
+		log.Printf("WARNING: Failed to load America/New_York timezone (%v), using EST fallback", err)
+		bot.nyLocation = time.FixedZone("EST", -5*60*60) // EST: UTC-5
 	} else {
 		bot.nyLocation = loc
 	}
@@ -231,11 +231,14 @@ func run() int {
 		go func() {
 			if err := bot.dashServer.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				logger.Printf("Dashboard server error: %v", err)
+				// Emit metric for monitoring dashboard failures
+				logger.Printf("METRIC: dashboard_server_failures=1")
 			}
 		}()
 
 		// Ensure dashboard is shutdown gracefully
 		defer func() {
+			// Shutdown is nil-safe internally, so we can always call it
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer shutdownCancel()
 			if err := bot.dashServer.Shutdown(shutdownCtx); err != nil {
@@ -280,7 +283,7 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	// Broker-first initialization: sync local storage with broker reality
 	if err := b.performStartupReconciliation(ctx); err != nil {
-		correlationID := generateCorrelationID()
+		correlationID := generateCorrelationID(b.logger)
 		b.logger.Printf("Warning: Startup reconciliation failed: %v (correlation_id=%s)", err, correlationID)
 		b.logger.Printf("Continuing with existing local data...")
 
@@ -363,7 +366,7 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 	// Create sets for comparison by symbol (broker uses symbols, local uses position IDs)
 	brokerSymbols := make(map[string]bool)
 	localSymbols := make(map[string]bool)
-	localPositionsBySymbol := make(map[string]models.Position)
+	localPositionsBySymbol := make(map[string][]models.Position)
 
 	// Build broker symbol set
 	for _, pos := range brokerPositions {
@@ -373,7 +376,7 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 	// Build local symbol set and check for corruption
 	for _, pos := range localPositions {
 		localSymbols[pos.Symbol] = true
-		localPositionsBySymbol[pos.Symbol] = pos
+		localPositionsBySymbol[pos.Symbol] = append(localPositionsBySymbol[pos.Symbol], pos)
 
 		// Check for credit corruption using named constant
 		if pos.CreditReceived <= MinCreditThreshold {
@@ -391,8 +394,10 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 	// Find positions only in local (missing from broker)
 	for symbol := range localSymbols {
 		if !brokerSymbols[symbol] {
-			pos := localPositionsBySymbol[symbol]
-			result.localOnlyPositions = append(result.localOnlyPositions, pos.ID)
+			positions := localPositionsBySymbol[symbol]
+			for _, pos := range positions {
+				result.localOnlyPositions = append(result.localOnlyPositions, pos.ID)
+			}
 		}
 	}
 
