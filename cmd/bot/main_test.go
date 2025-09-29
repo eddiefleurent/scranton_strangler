@@ -446,7 +446,10 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	
 	// Setup broker connection check
 	tb.mockBroker.On("GetAccountBalanceCtx", mock.Anything).Return(10000.0, nil)
-	
+
+	// Setup positions reconciliation (called during startup)
+	tb.mockBroker.On("GetPositionsCtx", mock.Anything).Return([]broker.PositionItem{}, nil)
+
 	// Setup market calendar (will be called during trading cycle check)
 	tb.mockBroker.On("GetMarketCalendarCtx", mock.Anything, mock.Anything, mock.Anything).Return(&broker.MarketCalendarResponse{
 		Calendar: struct {
