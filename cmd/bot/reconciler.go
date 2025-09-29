@@ -188,7 +188,12 @@ func (r *Reconciler) findOrphanedStrangles(brokerPositions []broker.PositionItem
 					math.Abs(ap.CallStrike-strangle.callStrike) < 0.01 &&
 					ap.Expiration.Format("2006-01-02") == strangle.expiration &&
 					ap.Symbol == strangle.symbol {
-					trackedQty += ap.Quantity
+					// Use absolute value to correctly count inventory regardless of sign
+					if ap.Quantity < 0 {
+						trackedQty += -ap.Quantity
+					} else {
+						trackedQty += ap.Quantity
+					}
 				}
 			}
 			missing := strangle.quantity - trackedQty
@@ -250,8 +255,8 @@ func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPos
 	if expectedQty < 0 {
 		expectedQty = -expectedQty
 	}
-	callQty := 0
-	putQty := 0
+	callQtyNet := 0
+	putQtyNet := 0
 
 	// Check if broker position matches our stored position strikes
 	for _, brokerPos := range brokerPositions {
@@ -275,20 +280,28 @@ func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPos
 			continue // Skip positions with different expirations
 		}
 
-		// Count contracts per matching strike/type
-		qty := int(math.Abs(brokerPos.Quantity))
+		// Count contracts per matching strike/type (use signed quantities for net calculation)
+		q := int(math.Round(brokerPos.Quantity))
 		if optionType == "C" && math.Abs(parsedStrike-position.CallStrike) < 0.01 {
-			callQty += qty
+			callQtyNet += q
 		} else if optionType == "P" && math.Abs(parsedStrike-position.PutStrike) < 0.01 {
-			putQty += qty
+			putQtyNet += q
 		}
 	}
 
-	// Open only if broker holds at least the stored quantity for both legs
-	return callQty >= expectedQty && putQty >= expectedQty
+	// Open only if broker holds at least the stored quantity for both legs (use abs of net to handle signed quantities)
+	return absInt(callQtyNet) >= expectedQty && absInt(putQtyNet) >= expectedQty
 }
 
 // Helper functions
+
+// absInt returns the absolute value of an integer
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
 
 // extractUnderlyingFromSymbol extracts the underlying ticker from an option symbol
 // For OPRA format: SPY240315C00610000 -> "SPY"
@@ -406,14 +419,23 @@ func identifyStranglesFromPositions(positions []broker.PositionItem, expiration 
 			if pRem < n {
 				n = pRem
 			}
+			// Scale average per-contract basis by n
+			callAvg := 0.0
+			if callStrikes[ck] > 0 {
+				callAvg = callCostBasis[ck] / float64(callStrikes[ck])
+			}
+			putAvg := 0.0
+			if putStrikes[pk] > 0 {
+				putAvg = putCostBasis[pk] / float64(putStrikes[pk])
+			}
 			strangles = append(strangles, orphanedStrangle{
 				putStrike:     pk,
 				callStrike:    ck,
 				expiration:    expiration,
 				quantity:      n,
-				putCostBasis:  putCostBasis[pk],
-				callCostBasis: callCostBasis[ck],
-				symbol:     underlying,
+				putCostBasis:  putAvg * float64(n),
+				callCostBasis: callAvg * float64(n),
+				symbol:        underlying,
 			})
 			cRem -= n
 			pRem -= n

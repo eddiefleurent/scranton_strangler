@@ -334,15 +334,16 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 			// Transition to open state
 			if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
 				m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
-				// Continue with timeout closure as fallback
-			} else {
-				if err := m.storage.UpdatePosition(&position); err != nil {
-					m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
-				} else {
-					m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled with %d contracts", positionID, position.Quantity)
-					return // Exit early - position recovered
-				}
+				return // Exit early - recovery attempt failed, don't proceed to timeout closure
 			}
+
+			if err := m.storage.UpdatePosition(&position); err != nil {
+				m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
+				return // Exit early - recovery attempt failed, don't proceed to timeout closure
+			}
+
+			m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled with %d contracts", positionID, position.Quantity)
+			return // Exit early - position recovered
 		}
 	}
 
@@ -551,12 +552,16 @@ func (m *Manager) getActualQuantityFromBroker(position *models.Position, brokerP
 		if err != nil {
 			continue
 		}
-		qty := int(math.Abs(bp.Quantity))
-		if optType == "C" && math.Abs(strike-position.CallStrike) < 0.01 {
-			callQty += qty
-		}
-		if optType == "P" && math.Abs(strike-position.PutStrike) < 0.01 {
-			putQty += qty
+
+		// Only count short legs (negative quantities)
+		if bp.Quantity < 0 {
+			qty := int(math.Abs(bp.Quantity))
+			if optType == "C" && math.Abs(strike-position.CallStrike) < 0.01 {
+				callQty += qty
+			}
+			if optType == "P" && math.Abs(strike-position.PutStrike) < 0.01 {
+				putQty += qty
+			}
 		}
 	}
 
