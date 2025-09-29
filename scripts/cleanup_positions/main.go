@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -101,7 +102,9 @@ func main() {
 			cancelled := 0
 			for _, order := range audit.OpenOrders {
 				fmt.Printf("Cancelling order #%d...", order.ID)
-				_, err := tradierAPI.CancelOrder(order.ID)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				_, err := tradierAPI.CancelOrderCtx(ctx, order.ID)
+				cancel()
 				if err != nil {
 					fmt.Printf(" ❌ Failed: %v\n", err)
 				} else {

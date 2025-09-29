@@ -4,10 +4,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
@@ -28,9 +31,17 @@ func main() {
 	}
 
 	if *verbose {
+		// Mask account ID for security
+		var maskedAccountID string
+		if len(cfg.Broker.AccountID) <= 4 {
+			maskedAccountID = cfg.Broker.AccountID
+		} else {
+			maskedAccountID = strings.Repeat("*", len(cfg.Broker.AccountID)-4) + cfg.Broker.AccountID[len(cfg.Broker.AccountID)-4:]
+		}
+
 		fmt.Printf("Using config: %s\n", *configPath)
 		fmt.Printf("Broker: %s (sandbox: %t)\n", cfg.Broker.Provider, cfg.Environment.Mode == "paper")
-		fmt.Printf("Account ID: %s\n", cfg.Broker.AccountID)
+		fmt.Printf("Account ID: %s\n", maskedAccountID)
 		fmt.Printf("\n")
 	}
 
@@ -40,7 +51,9 @@ func main() {
 
 	// Perform audit
 	fmt.Printf("Auditing broker positions and orders...\n")
-	audit, err := tradierAPI.AuditBrokerPositions()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	audit, err := tradierAPI.AuditBrokerPositionsCtx(ctx)
 	if err != nil {
 		log.Fatalf("Failed to audit broker positions: %v", err)
 	}

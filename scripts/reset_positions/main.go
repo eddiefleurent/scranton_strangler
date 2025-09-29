@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"time"
 
@@ -84,7 +85,7 @@ func main() {
 			"current_pnl":      0,
 			"call_strike":      extractStrike(strangle.CallPosition),
 			"put_strike":       extractStrike(strangle.PutPosition),
-			"quantity":         int(strangle.TotalQuantity / 2), // Divide by 2 for pair
+			"quantity":         calculatePositionQuantity(strangle.CallPosition, strangle.PutPosition),
 		}
 		positions = append(positions, position)
 	}
@@ -127,6 +128,23 @@ func parseExpiration(brokerExp string) string {
 		return time.Now().AddDate(0, 1, 0).Format(time.RFC3339)
 	}
 	return exp.Format(time.RFC3339)
+}
+
+func calculatePositionQuantity(callPos, putPos *broker.PositionItem) int {
+	if callPos == nil || putPos == nil {
+		return 0
+	}
+
+	// Use the minimum of the absolute call and put quantities
+	// This handles cases where legs might have different quantities
+	callQty := int(math.Abs(callPos.Quantity))
+	putQty := int(math.Abs(putPos.Quantity))
+
+	// Return the minimum as that represents the paired contracts
+	if callQty < putQty {
+		return callQty
+	}
+	return putQty
 }
 
 func extractStrike(pos *broker.PositionItem) float64 {

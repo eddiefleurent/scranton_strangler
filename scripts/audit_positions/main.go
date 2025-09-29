@@ -22,7 +22,7 @@ func main() {
 	flag.Parse()
 
 	// Load configuration
-	cfg, err := config.LoadConfig(*configPath)
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -83,6 +83,11 @@ func main() {
 // analyzeAuditResults performs basic analysis to identify potential issues
 func analyzeAuditResults(audit *broker.AuditResult) []string {
 	var issues []string
+
+	// Nil-safety checks
+	if audit == nil {
+		return issues
+	}
 
 	// Check for incomplete strangles
 	incompleteStrangles := audit.Summary.TotalStrangles - audit.Summary.CompleteStrangles
