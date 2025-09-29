@@ -14,6 +14,7 @@ The project includes a comprehensive Makefile for common development tasks:
 # Build the bot
 make build              # Standard build
 make build-prod        # Production build (optimized)
+make build-utils        # Build all utility scripts to bin/
 
 # Run the bot
 make run               # Build and run with config.yaml

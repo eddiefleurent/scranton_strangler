@@ -3,13 +3,13 @@ SHELL := /bin/bash
 
 .PHONY: all help build build-prod test test-coverage test-integration lint run clean \
         deploy-unraid unraid-logs unraid-status unraid-restart \
-        dev-setup test-api test-paper security-scan build-test-helper tools check liquidate
+        dev-setup test-api test-paper security-scan build-test-helper build-utils tools check liquidate
 
 all: build
 
 # Default target
 help:
-	@printf "Targets:\n  build/test/test-integration/test-coverage/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
+	@printf "Targets:\n  build/build-utils/test/test-integration/test-coverage/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
 
 # Go binary name and paths
 BINARY_NAME=scranton-strangler
@@ -126,6 +126,16 @@ build-test-helper:
 	@echo "Building test helper..."
 	@mkdir -p $(BIN_DIR)
 	go build -tags test -o $(BIN_DIR)/test_helper scripts/test_helper/test_helper.go
+
+# Build all utility binaries to bin/ directory
+build-utils:
+	@echo "Building utility binaries..."
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/audit scripts/audit_positions/main.go
+	go build -o $(BIN_DIR)/liquidate_positions scripts/liquidate_positions_tool/main.go
+	go build -o $(BIN_DIR)/reset_positions scripts/reset_positions/main.go
+	go build -o $(BIN_DIR)/integration cmd/integration/main.go
+	@echo "All utilities built to $(BIN_DIR)/"
 
 # Security scan
 security-scan: tools
