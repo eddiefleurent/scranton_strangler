@@ -147,8 +147,12 @@ func (s *Server) setupRoutes() {
 	if err != nil {
 		s.logger.WithError(err).Fatal("Failed to create static filesystem")
 	}
-	// Static assets bypass authentication
-	s.router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
+	// Static assets bypass authentication and include cache headers for performance
+	staticHandler := http.StripPrefix("/static/", http.FileServer(http.FS(sub)))
+	s.router.Handle("/static/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		staticHandler.ServeHTTP(w, r)
+	}))
 
 	// Apply auth middleware to protected routes only
 	if s.authToken != "" {
@@ -294,7 +298,11 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// Persist as cookie for subsequent requests
 		if _, err := r.Cookie("auth_token"); err != nil {
 			// Determine if connection is secure (direct TLS or behind HTTPS proxy)
-			isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+			xfProto := r.Header.Get("X-Forwarded-Proto")
+			fwd := r.Header.Get("Forwarded") // RFC 7239 standard header
+			isSecure := r.TLS != nil ||
+				strings.EqualFold(xfProto, "https") ||
+				strings.Contains(strings.ToLower(fwd), "proto=https")
 
 			http.SetCookie(w, &http.Cookie{
 				Name:     "auth_token",
@@ -592,6 +600,9 @@ func (s *Server) convertPositionToView(pos *models.Position) PositionView {
 			endDate = time.Now()
 		}
 		holdDays = int(endDate.Sub(pos.EntryDate).Hours() / 24)
+		if holdDays < 0 {
+			holdDays = 0
+		}
 	}
 	
 	currentPnL := pos.CurrentPnL
@@ -668,16 +679,21 @@ func (s *Server) calculateStatisticsCtx(ctx context.Context) (*Statistics, error
 	balanceCtx, balanceCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer balanceCancel()
 
+	// Always assign TotalAllocated regardless of account balance call result
+	stats.TotalAllocated = totalAllocated
+
 	accountBalance, err := s.broker.GetAccountBalanceCtx(balanceCtx)
 	if err == nil && accountBalance > 0 {
-		stats.TotalAllocated = totalAllocated
 		stats.AllocationPct = (totalAllocated / accountBalance) * 100
-	} else if err != nil && balanceCtx.Err() != nil {
-		// Log if the error was due to context cancellation/timeout
-		s.logger.WithError(err).Warn("Account balance request timed out or was cancelled during statistics calculation")
+	} else {
+		stats.AllocationPct = 0
+		if err != nil && balanceCtx.Err() != nil {
+			// Log if the error was due to context cancellation/timeout
+			s.logger.WithError(err).Warn("Account balance request timed out or was cancelled during statistics calculation")
+		}
 	}
 
-	// Set allocation threshold and warning flag
+	// Set allocation threshold and warning flag based on computed AllocationPct
 	stats.AllocationThreshold = s.allocationThreshold
 	stats.IsAllocationHigh = stats.AllocationPct > s.allocationThreshold
 
