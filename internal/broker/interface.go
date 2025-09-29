@@ -192,7 +192,11 @@ func (t *TradierClient) GetOptionBuyingPowerCtx(ctx context.Context) (float64, e
 
 // GetPositions delegates to the embedded TradierAPI with timeout
 func (t *TradierClient) GetPositions() ([]PositionItem, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := 30 * time.Second
+	if t.TradierAPI != nil && t.TradierAPI.timeout > 0 {
+		timeout = t.TradierAPI.timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return t.TradierAPI.GetPositionsCtx(ctx)
 }

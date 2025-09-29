@@ -1560,7 +1560,8 @@ func (t *TradierAPI) AuditBrokerPositionsCtx(ctx context.Context) (*AuditResult,
 	var openOrders []Order
 	if ordersResp != nil {
 		for _, order := range ordersResp.Orders.Order {
-			if order.Status == "open" || order.Status == "pending" || order.Status == "submitted" {
+			switch strings.ToLower(order.Status) {
+			case "open", "pending", "submitted", "partially_filled":
 				openOrders = append(openOrders, order)
 			}
 		}
@@ -1602,7 +1603,8 @@ func (t *TradierAPI) groupPositionsIntoStrangles(positions []PositionItem) []Str
 	// Group by underlying + expiration
 	groups := make(map[string]*StrangleGroup)
 
-	for _, pos := range positions {
+	for i := range positions {
+		pos := positions[i]
 		// Only consider short positions (negative quantity)
 		if pos.Quantity >= -QuantityEpsilon {
 			continue
@@ -1619,7 +1621,7 @@ func (t *TradierAPI) groupPositionsIntoStrangles(positions []PositionItem) []Str
 		}
 
 		groupKey := underlying + "_" + expiration
-		
+
 		if groups[groupKey] == nil {
 			groups[groupKey] = &StrangleGroup{
 				Symbol:     underlying,
@@ -1629,12 +1631,12 @@ func (t *TradierAPI) groupPositionsIntoStrangles(positions []PositionItem) []Str
 
 		group := groups[groupKey]
 		optType := optionTypeFromSymbol(pos.Symbol)
-		
+
 		switch optType {
 		case "put":
-			group.PutPosition = &pos
+			group.PutPosition = &positions[i]
 		case "call":
-			group.CallPosition = &pos
+			group.CallPosition = &positions[i]
 		}
 
 		group.TotalCost += pos.CostBasis
