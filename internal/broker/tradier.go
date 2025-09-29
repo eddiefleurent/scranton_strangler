@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -1503,4 +1504,241 @@ func isEightDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// ============ Audit and Debugging Methods ============
+
+// AuditResult contains the results of auditing broker vs local positions
+type AuditResult struct {
+	BrokerPositions      []PositionItem    `json:"broker_positions"`
+	OpenOrders          []Order           `json:"open_orders"`
+	BrokerStrangles     []StrangleGroup   `json:"broker_strangles"`
+	Timestamp           time.Time         `json:"timestamp"`
+	Summary             AuditSummary      `json:"summary"`
+}
+
+// StrangleGroup represents a grouped put/call strangle position
+type StrangleGroup struct {
+	Symbol        string       `json:"symbol"`
+	Expiration    string       `json:"expiration"`
+	PutPosition   *PositionItem `json:"put_position,omitempty"`
+	CallPosition  *PositionItem `json:"call_position,omitempty"`
+	TotalCost     float64      `json:"total_cost"`
+	TotalQuantity float64      `json:"total_quantity"`
+	IsComplete    bool         `json:"is_complete"`
+}
+
+// AuditSummary provides high-level audit statistics
+type AuditSummary struct {
+	TotalPositions    int     `json:"total_positions"`
+	TotalStrangles    int     `json:"total_strangles"`
+	CompleteStrangles int     `json:"complete_strangles"`
+	OpenOrders        int     `json:"open_orders"`
+	TotalCostBasis    float64 `json:"total_cost_basis"`
+}
+
+// AuditBrokerPositions performs a comprehensive audit of broker positions and orders
+func (t *TradierAPI) AuditBrokerPositions() (*AuditResult, error) {
+	return t.AuditBrokerPositionsCtx(context.Background())
+}
+
+// AuditBrokerPositionsCtx performs a comprehensive audit of broker positions and orders with context
+func (t *TradierAPI) AuditBrokerPositionsCtx(ctx context.Context) (*AuditResult, error) {
+	// Get current positions from broker
+	positions, err := t.GetPositionsCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get broker positions: %w", err)
+	}
+
+	// Get current orders from broker
+	ordersResp, err := t.GetOrdersCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get broker orders: %w", err)
+	}
+
+	// Extract open orders only
+	var openOrders []Order
+	if ordersResp != nil {
+		for _, order := range ordersResp.Orders.Order {
+			if order.Status == "open" || order.Status == "pending" || order.Status == "submitted" {
+				openOrders = append(openOrders, order)
+			}
+		}
+	}
+
+	// Group positions into strangles
+	strangles := t.groupPositionsIntoStrangles(positions)
+
+	// Calculate summary statistics
+	summary := AuditSummary{
+		TotalPositions: len(positions),
+		TotalStrangles: len(strangles),
+		OpenOrders:     len(openOrders),
+	}
+
+	var totalCost float64
+	for _, pos := range positions {
+		totalCost += pos.CostBasis
+	}
+	summary.TotalCostBasis = totalCost
+
+	for _, strangle := range strangles {
+		if strangle.IsComplete {
+			summary.CompleteStrangles++
+		}
+	}
+
+	return &AuditResult{
+		BrokerPositions: positions,
+		OpenOrders:      openOrders,
+		BrokerStrangles: strangles,
+		Timestamp:       time.Now(),
+		Summary:         summary,
+	}, nil
+}
+
+// groupPositionsIntoStrangles groups individual option positions into strangle pairs
+func (t *TradierAPI) groupPositionsIntoStrangles(positions []PositionItem) []StrangleGroup {
+	// Group by underlying + expiration
+	groups := make(map[string]*StrangleGroup)
+
+	for _, pos := range positions {
+		// Only consider short positions (negative quantity)
+		if pos.Quantity >= -QuantityEpsilon {
+			continue
+		}
+
+		underlying := ExtractUnderlyingFromOSI(pos.Symbol)
+		if underlying == "" {
+			continue
+		}
+
+		expiration := extractExpirationFromOSI(pos.Symbol)
+		if expiration == "" {
+			continue
+		}
+
+		groupKey := underlying + "_" + expiration
+		
+		if groups[groupKey] == nil {
+			groups[groupKey] = &StrangleGroup{
+				Symbol:     underlying,
+				Expiration: expiration,
+			}
+		}
+
+		group := groups[groupKey]
+		optType := optionTypeFromSymbol(pos.Symbol)
+		
+		switch optType {
+		case "put":
+			group.PutPosition = &pos
+		case "call":
+			group.CallPosition = &pos
+		}
+
+		group.TotalCost += pos.CostBasis
+		group.TotalQuantity += math.Abs(pos.Quantity)
+	}
+
+	// Convert map to slice and mark complete strangles
+	var strangles []StrangleGroup
+	for _, group := range groups {
+		group.IsComplete = group.PutPosition != nil && group.CallPosition != nil
+		strangles = append(strangles, *group)
+	}
+
+	return strangles
+}
+
+// extractExpirationFromOSI extracts the expiration date from an OSI option symbol
+// e.g., "SPY241220P00450000" -> "241220"
+func extractExpirationFromOSI(s string) string {
+	underlying := ExtractUnderlyingFromOSI(s)
+	if underlying == "" {
+		return ""
+	}
+
+	// The expiration starts right after the underlying
+	startIdx := len(underlying)
+	if startIdx+6 > len(s) {
+		return ""
+	}
+
+	expiration := s[startIdx : startIdx+6]
+	if !isSixDigits(expiration) {
+		return ""
+	}
+
+	return expiration
+}
+
+// PrintAuditReport prints a formatted audit report to stdout
+func (a *AuditResult) PrintAuditReport() {
+	fmt.Printf("=== BROKER AUDIT REPORT ===\n")
+	fmt.Printf("Timestamp: %s\n", a.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Printf("\n")
+
+	fmt.Printf("SUMMARY:\n")
+	fmt.Printf("  Total Positions: %d\n", a.Summary.TotalPositions)
+	fmt.Printf("  Total Strangles: %d (%d complete)\n", a.Summary.TotalStrangles, a.Summary.CompleteStrangles)
+	fmt.Printf("  Open Orders: %d\n", a.Summary.OpenOrders)
+	fmt.Printf("  Total Cost Basis: $%.2f\n", a.Summary.TotalCostBasis)
+	fmt.Printf("\n")
+
+	if len(a.BrokerStrangles) > 0 {
+		fmt.Printf("STRANGLE POSITIONS:\n")
+		for i, strangle := range a.BrokerStrangles {
+			status := "INCOMPLETE"
+			if strangle.IsComplete {
+				status = "COMPLETE"
+			}
+			fmt.Printf("  %d. %s %s [%s]\n", i+1, strangle.Symbol, strangle.Expiration, status)
+			fmt.Printf("     Total Cost: $%.2f, Quantity: %.0f contracts\n", strangle.TotalCost, strangle.TotalQuantity)
+			
+			if strangle.PutPosition != nil {
+				putStrike := extractStrikeFromOSI(strangle.PutPosition.Symbol)
+				fmt.Printf("     Put: %s strike, %.0f contracts, $%.2f cost\n", 
+					putStrike, math.Abs(strangle.PutPosition.Quantity), strangle.PutPosition.CostBasis)
+			}
+			if strangle.CallPosition != nil {
+				callStrike := extractStrikeFromOSI(strangle.CallPosition.Symbol)
+				fmt.Printf("     Call: %s strike, %.0f contracts, $%.2f cost\n", 
+					callStrike, math.Abs(strangle.CallPosition.Quantity), strangle.CallPosition.CostBasis)
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	if len(a.OpenOrders) > 0 {
+		fmt.Printf("OPEN ORDERS:\n")
+		for i, order := range a.OpenOrders {
+			fmt.Printf("  %d. Order #%d - %s %s\n", i+1, order.ID, order.Symbol, order.Status)
+			fmt.Printf("     Type: %s, Side: %s, Quantity: %.0f\n", order.Type, order.Side, order.Quantity)
+			fmt.Printf("     Price: $%.2f, Created: %s\n", order.Price, order.CreateDate)
+			fmt.Printf("\n")
+		}
+	}
+}
+
+// extractStrikeFromOSI extracts the strike price from an OSI option symbol
+// e.g., "SPY241220P00450000" -> "450.00"
+func extractStrikeFromOSI(s string) string {
+	if len(s) < 8 {
+		return ""
+	}
+	
+	// Strike is the last 8 digits
+	strikeStr := s[len(s)-8:]
+	if !isEightDigits(strikeStr) {
+		return ""
+	}
+	
+	// Convert to float (divide by 1000 to get dollars.cents)
+	if strikeInt, err := strconv.Atoi(strikeStr); err == nil {
+		strikeFloat := float64(strikeInt) / 1000.0
+		return fmt.Sprintf("%.2f", strikeFloat)
+	}
+	
+	return strikeStr
 }

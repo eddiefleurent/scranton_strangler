@@ -422,6 +422,11 @@ type CircuitBreakerBroker struct {
 	breaker *gobreaker.CircuitBreaker
 }
 
+// Underlying returns the underlying broker (useful for accessing type-specific methods)
+func (c *CircuitBreakerBroker) Underlying() Broker {
+	return c.broker
+}
+
 // exec is a generic helper for circuit breaker wrapper methods
 func execCircuitBreaker[T any](
 	breaker *gobreaker.CircuitBreaker,

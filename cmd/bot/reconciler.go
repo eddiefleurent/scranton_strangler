@@ -125,11 +125,13 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 
 // orphanedStrangle represents a strangle position found in broker but not in storage
 type orphanedStrangle struct {
-	putStrike  float64
-	callStrike float64
-	expiration string
-	quantity   int
-	symbol     string
+	putStrike    float64
+	callStrike   float64
+	expiration   string
+	quantity     int
+	symbol       string
+	putCostBasis float64  // Cost basis for put leg from broker
+	callCostBasis float64 // Cost basis for call leg from broker
 }
 
 // findOrphanedStrangles identifies strangle positions in broker that aren't tracked in storage
@@ -327,6 +329,8 @@ func identifyStranglesFromPositions(positions []broker.PositionItem, expiration 
 
 	callStrikes := make(map[float64]int)
 	putStrikes := make(map[float64]int)
+	callCostBasis := make(map[float64]float64) // Track cost basis for each strike
+	putCostBasis := make(map[float64]float64)
 
 	underlying := ""
 
@@ -344,8 +348,11 @@ func identifyStranglesFromPositions(positions []broker.PositionItem, expiration 
 		}
 		if optionType == "C" {
 			callStrikes[strike] += qty
+			// Accumulate cost basis (negative values indicate credit received)
+			callCostBasis[strike] += pos.CostBasis
 		} else if optionType == "P" {
 			putStrikes[strike] += qty
+			putCostBasis[strike] += pos.CostBasis
 		}
 	}
 
@@ -378,10 +385,12 @@ func identifyStranglesFromPositions(positions []broker.PositionItem, expiration 
 				n = pRem
 			}
 			strangles = append(strangles, orphanedStrangle{
-				putStrike:  pk,
-				callStrike: ck,
-				expiration: expiration,
-				quantity:   n,
+				putStrike:     pk,
+				callStrike:    ck,
+				expiration:    expiration,
+				quantity:      n,
+				putCostBasis:  putCostBasis[pk],
+				callCostBasis: callCostBasis[ck],
 				symbol:     underlying,
 			})
 			cRem -= n

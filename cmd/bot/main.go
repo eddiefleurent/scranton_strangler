@@ -232,6 +232,12 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 	b.logger.Printf("Connected to broker. Account balance: $%.2f", bal)
 
+	// Broker-first initialization: sync local storage with broker reality
+	if err := b.performStartupReconciliation(ctx); err != nil {
+		b.logger.Printf("Warning: Startup reconciliation failed: %v", err)
+		b.logger.Printf("Continuing with existing local data...")
+	}
+
 	// Main trading loop
 	interval := b.config.GetCheckInterval()
 	if interval <= 0 {
@@ -269,6 +275,49 @@ func (b *Bot) runTradingCycle() {
 
 
 // Utility functions have been moved to utils.go
+
+// performStartupReconciliation syncs local storage with broker reality at startup
+func (b *Bot) performStartupReconciliation(ctx context.Context) error {
+	b.logger.Println("🔄 BROKER-FIRST RECONCILIATION: Syncing with broker reality...")
+	
+	// Get broker positions with timeout
+	auditCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	
+	brokerPositions, err := b.broker.GetPositionsCtx(auditCtx)
+	if err != nil {
+		return fmt.Errorf("failed to get broker positions: %w", err)
+	}
+	
+	// Get current local positions
+	localPositions := b.storage.GetCurrentPositions()
+	
+	b.logger.Printf("Broker positions: %d, Local positions: %d", len(brokerPositions), len(localPositions))
+	
+	// Simple check: if we have zero-credit positions, we have corruption
+	hasCorruption := false
+	for _, pos := range localPositions {
+		if pos.CreditReceived <= 0.01 {
+			hasCorruption = true
+			b.logger.Printf("Found corrupted position with zero credit: %s", pos.ID)
+			break
+		}
+	}
+	
+	// If we have broker positions but corruption or empty local storage, reset
+	if len(brokerPositions) > 0 && (len(localPositions) == 0 || hasCorruption) {
+		b.logger.Printf("🧹 Corruption detected - will use manual cleanup tools")
+		b.logger.Printf("Run './audit -v' and './reset_positions' to fix automatically")
+		
+		// Don't auto-fix for now - require manual intervention
+		// This is safer until we fully trust the auto-reconciliation
+	} else {
+		b.logger.Printf("✅ Local storage appears consistent with broker")
+	}
+	
+	return nil
+}
+
 
 // getMarketCalendar gets the market calendar for a given month/year, with caching
 func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
