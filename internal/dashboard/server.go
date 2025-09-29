@@ -11,6 +11,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,12 +40,8 @@ type Server struct {
 	allocationThreshold float64
 	profitTarget        float64
 	stopLossPct         float64
-	// Cached templates
-	dashboardTemplate       *template.Template
-	positionsTemplate       *template.Template
-	statsTemplate           *template.Template
-	positionDetailTemplate  *template.Template
-	historyTemplate         *template.Template
+	// Shared template set for all templates
+	templates *template.Template
 }
 
 type Config struct {
@@ -121,36 +118,17 @@ func NewServer(cfg Config, storage storage.Interface, broker broker.Broker, logg
 func (s *Server) parseTemplates() error {
 	funcMap := template.FuncMap{
 		"mul": func(a, b float64) float64 { return a * b },
-		"div": func(a, b float64) float64 { 
+		"div": func(a, b float64) float64 {
 			if b == 0 { return 0 } // Prevent division by zero
-			return a / b 
+			return a / b
 		},
 	}
 
+	// Parse all templates once into a shared template set
 	var err error
-	s.dashboardTemplate, err = template.New("dashboard.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/*.html")
+	s.templates, err = template.New("").Funcs(funcMap).ParseFS(templateFS, "web/templates/*.html")
 	if err != nil {
-		return fmt.Errorf("failed to parse dashboard template: %w", err)
-	}
-
-	s.positionsTemplate, err = template.New("positions.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/positions.html")
-	if err != nil {
-		return fmt.Errorf("failed to parse positions template: %w", err)
-	}
-
-	s.statsTemplate, err = template.New("stats.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/stats.html")
-	if err != nil {
-		return fmt.Errorf("failed to parse stats template: %w", err)
-	}
-
-	s.positionDetailTemplate, err = template.New("position-detail.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/position-detail.html")
-	if err != nil {
-		return fmt.Errorf("failed to parse position detail template: %w", err)
-	}
-
-	s.historyTemplate, err = template.New("history.html").Funcs(funcMap).ParseFS(templateFS, "web/templates/history.html")
-	if err != nil {
-		return fmt.Errorf("failed to parse history template: %w", err)
+		return fmt.Errorf("failed to parse templates: %w", err)
 	}
 
 	return nil
@@ -231,6 +209,7 @@ func (s *Server) requestLoggerMiddleware(next http.Handler) http.Handler {
 		if shouldLog {
 			// Log errors at error level
 			s.logger.WithFields(logrus.Fields{
+				"req_id":     middleware.GetReqID(r.Context()),
 				"method":     r.Method,
 				"url":        loggedURL.String(),
 				"user_agent": r.UserAgent(),
@@ -242,6 +221,7 @@ func (s *Server) requestLoggerMiddleware(next http.Handler) http.Handler {
 		} else if !isPollingEndpoint {
 			// Log non-polling endpoints at debug level
 			s.logger.WithFields(logrus.Fields{
+				"req_id":     middleware.GetReqID(r.Context()),
 				"method":     r.Method,
 				"url":        loggedURL.String(),
 				"user_agent": r.UserAgent(),
@@ -311,6 +291,22 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Persist as cookie for subsequent requests
+		if _, err := r.Cookie("auth_token"); err != nil {
+			// Determine if connection is secure (direct TLS or behind HTTPS proxy)
+			isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+
+			http.SetCookie(w, &http.Cookie{
+				Name:     "auth_token",
+				Value:    token, // Use the validated token, not the server secret
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   isSecure,
+				Expires:  time.Now().Add(24 * time.Hour),
+			})
+		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -350,7 +346,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 }
 
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	data, err := s.getDashboardData()
+	data, err := s.getDashboardData(r.Context())
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to get dashboard data")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -358,7 +354,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.dashboardTemplate.Execute(w, data); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "dashboard.html", data); err != nil {
 		s.logger.WithError(err).Error("Failed to execute dashboard template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -376,7 +372,7 @@ func (s *Server) handleGetPositions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.calculateStatistics()
+	stats, err := s.calculateStatisticsCtx(r.Context())
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to calculate statistics")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -424,14 +420,14 @@ func (s *Server) handlePositionsPartial(w http.ResponseWriter, r *http.Request) 
 	views := s.convertPositionsToViews(positions)
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.positionsTemplate.ExecuteTemplate(w, "positions-content", views); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "positions-content", views); err != nil {
 		s.logger.WithError(err).Error("Failed to execute positions template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
 
 func (s *Server) handleStatsPartial(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.calculateStatistics()
+	stats, err := s.calculateStatisticsCtx(r.Context())
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to calculate statistics")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -439,7 +435,7 @@ func (s *Server) handleStatsPartial(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.statsTemplate.ExecuteTemplate(w, "stats-content", stats); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "stats-content", stats); err != nil {
 		s.logger.WithError(err).Error("Failed to execute stats template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -457,7 +453,7 @@ func (s *Server) handlePositionDetailPartial(w http.ResponseWriter, r *http.Requ
 	view := s.convertPositionToView(&position)
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.positionDetailTemplate.Execute(w, view); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "position-detail.html", view); err != nil {
 		s.logger.WithError(err).Error("Failed to execute position detail template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -479,7 +475,7 @@ func (s *Server) handleHistoryPartial(w http.ResponseWriter, r *http.Request) {
 	views := s.convertPositionsToViewsWithClosed(history, true)
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.historyTemplate.ExecuteTemplate(w, "history-content", views); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "history-content", views); err != nil {
 		s.logger.WithError(err).Error("Failed to execute history template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -488,14 +484,17 @@ func (s *Server) handleHistoryPartial(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRecentHistoryPartial(w http.ResponseWriter, r *http.Request) {
 	history := s.storage.GetHistory()
 	views := s.convertPositionsToViewsWithClosed(history, true)
-	
+
+	// Sort by ExitDate desc to ensure "recent" means most recently exited
+	sort.Slice(views, func(i, j int) bool { return views[i].ExitDate.After(views[j].ExitDate) })
+
 	// Limit to recent 3 completed trades
 	if len(views) > 3 {
 		views = views[:3]
 	}
-	
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.historyTemplate.ExecuteTemplate(w, "recent-history-content", views); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "recent-history-content", views); err != nil {
 		s.logger.WithError(err).Error("Failed to execute recent history template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
@@ -514,23 +513,32 @@ func (s *Server) handleFullHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.historyTemplate.ExecuteTemplate(w, "full-history-page", data); err != nil {
+	if err := s.templates.ExecuteTemplate(w, "full-history-page", data); err != nil {
 		s.logger.WithError(err).Error("Failed to execute full history page template")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
 }
 
-func (s *Server) getDashboardData() (*DashboardData, error) {
+func (s *Server) getDashboardData(ctx context.Context) (*DashboardData, error) {
 	positions := s.storage.GetCurrentPositions()
 
-	stats, err := s.calculateStatistics()
+	stats, err := s.calculateStatisticsCtx(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	accountBalance, err := s.broker.GetAccountBalance()
+	// Create a timeout context for the account balance call to prevent hanging
+	balanceCtx, balanceCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer balanceCancel()
+
+	accountBalance, err := s.broker.GetAccountBalanceCtx(balanceCtx)
 	if err != nil {
-		s.logger.WithError(err).Warn("Failed to get account balance")
+		// Check if error is due to context cancellation/timeout
+		if balanceCtx.Err() != nil {
+			s.logger.WithError(err).Warn("Account balance request timed out or was cancelled")
+		} else {
+			s.logger.WithError(err).Warn("Failed to get account balance")
+		}
 		accountBalance = 0
 	}
 
@@ -624,13 +632,13 @@ func (s *Server) convertPositionToView(pos *models.Position) PositionView {
 	}
 }
 
-func (s *Server) calculateStatistics() (*Statistics, error) {
+func (s *Server) calculateStatisticsCtx(ctx context.Context) (*Statistics, error) {
 	positions := s.storage.GetCurrentPositions()
 	historicalPositions := s.storage.GetHistory()
 
 	stats := &Statistics{}
 	var totalAllocated float64
-	
+
 	// Count current open positions (skip closed positions)
 	for _, pos := range positions {
 		if pos.State == models.StateClosed {
@@ -639,7 +647,7 @@ func (s *Server) calculateStatistics() (*Statistics, error) {
 		stats.CurrentOpen++
 		totalAllocated += pos.CreditReceived * 100
 	}
-	
+
 	// Count closed positions from history
 	for _, pos := range historicalPositions {
 		stats.TotalTrades++
@@ -656,10 +664,17 @@ func (s *Server) calculateStatistics() (*Statistics, error) {
 		stats.AveragePnL = stats.TotalPnL / float64(stats.TotalTrades)
 	}
 
-	accountBalance, err := s.broker.GetAccountBalance()
+	// Create a timeout context for the account balance call to prevent hanging
+	balanceCtx, balanceCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer balanceCancel()
+
+	accountBalance, err := s.broker.GetAccountBalanceCtx(balanceCtx)
 	if err == nil && accountBalance > 0 {
 		stats.TotalAllocated = totalAllocated
 		stats.AllocationPct = (totalAllocated / accountBalance) * 100
+	} else if err != nil && balanceCtx.Err() != nil {
+		// Log if the error was due to context cancellation/timeout
+		s.logger.WithError(err).Warn("Account balance request timed out or was cancelled during statistics calculation")
 	}
 
 	// Set allocation threshold and warning flag
