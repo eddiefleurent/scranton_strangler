@@ -16,6 +16,7 @@ scranton-strangler
 # Script binaries (generated from scripts/*.go) - only in root directory
 /liquidate_positions
 /test_otoco
+/integration
 
 # Test files
 *.test
