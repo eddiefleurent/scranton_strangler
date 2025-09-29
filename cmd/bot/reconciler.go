@@ -73,6 +73,28 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 			continue
 		}
 
+		// PHANTOM POSITION DETECTION: Clean up positions with quantity=0 that never filled
+		// These are created when orders timeout during polling but never actually executed
+		if position.Quantity == 0 && position.CreditReceived == 0 {
+			// Additional check: make sure it's not just a newly submitted order
+			timeSinceEntry := time.Since(position.EntryDate)
+			const phantomThreshold = 10 * time.Minute // Give orders 10 minutes to fill
+
+			if timeSinceEntry > phantomThreshold {
+				r.logger.Printf("PHANTOM POSITION DETECTED: Position %s has quantity=0 and credit=0 after %.0f minutes - cleaning up",
+					shortID(position.ID), timeSinceEntry.Minutes())
+
+				// Close this phantom position with zero P&L
+				if err := r.storage.ClosePositionByID(position.ID, 0, "phantom_cleanup"); err != nil {
+					r.logger.Printf("Failed to clean up phantom position %s: %v", shortID(position.ID), err)
+					activePositions = append(activePositions, position) // Keep in list if can't close
+				} else {
+					r.logger.Printf("Successfully cleaned up phantom position %s", shortID(position.ID))
+				}
+				continue // Skip to next position
+			}
+		}
+
 		// Check if this position still exists in the broker
 		isOpenInBroker := r.isPositionOpenInBroker(&position, brokerPositions)
 
