@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,12 +20,39 @@ import (
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 	"github.com/eddiefleurent/scranton_strangler/internal/dashboard"
+	"github.com/eddiefleurent/scranton_strangler/internal/models"
 	"github.com/eddiefleurent/scranton_strangler/internal/orders"
 	"github.com/eddiefleurent/scranton_strangler/internal/retry"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
 	"github.com/sirupsen/logrus"
 )
+
+const (
+	// MinCreditThreshold is the minimum credit required for a valid position (in dollars)
+	MinCreditThreshold = 0.01
+)
+
+// reconciliationResult contains the analysis of broker vs local position differences
+type reconciliationResult struct {
+	brokerOnlyPositions []string // Position symbols only in broker
+	localOnlyPositions  []string // Position IDs only in local storage
+	corruptedPositions  []string // Local position IDs with invalid credit
+	hasInconsistencies  bool     // Whether any inconsistencies were found
+}
+
+// generateCorrelationID creates a short correlation ID for request tracking
+func generateCorrelationID() string {
+	bytes := make([]byte, 4)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		// Fallback to deterministic-but-unique ID if crypto/rand fails
+		fallbackID := fmt.Sprintf("%x%x", time.Now().UnixNano(), os.Getpid())
+		log.Printf("Warning: crypto/rand.Read failed (%v), using fallback correlation ID", err)
+		return fallbackID[:8] // Keep it short like the original
+	}
+	return hex.EncodeToString(bytes)
+}
 
 // Bot represents the main trading bot instance.
 type Bot struct {
@@ -50,6 +79,10 @@ type Bot struct {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	var configPath string
 	flag.StringVar(&configPath, "config", "config.yaml", "Path to configuration file")
 	flag.Parse()
@@ -57,7 +90,8 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Printf("Failed to load config: %v", err)
+		return 1
 	}
 
 	// Create logger
@@ -85,7 +119,8 @@ func main() {
 
 	// Cache NY timezone location
 	if loc, err := time.LoadLocation("America/New_York"); err != nil {
-		log.Fatalf("Failed to load NY timezone: %v", err)
+		log.Printf("Failed to load NY timezone: %v", err)
+		return 1
 	} else {
 		bot.nyLocation = loc
 	}
@@ -99,7 +134,8 @@ func main() {
 		cfg.Strategy.Exit.ProfitTarget,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create Tradier client: %v", err)
+		log.Printf("Failed to create Tradier client: %v", err)
+		return 1
 	}
 
 	// Wrap with circuit breaker for resilience
@@ -109,7 +145,8 @@ func main() {
 	storagePath := cfg.Storage.Path
 	store, err := storage.NewStorage(storagePath)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		log.Printf("Failed to initialize storage: %v", err)
+		return 1
 	}
 	bot.storage = store
 
@@ -151,6 +188,9 @@ func main() {
 		}
 		if lvl, err := logrus.ParseLevel(cfg.Environment.LogLevel); err == nil {
 			dashLogger.SetLevel(lvl)
+		} else {
+			dashLogger.SetLevel(logrus.InfoLevel)
+			dashLogger.WithError(err).Warn("invalid log level; defaulting to info")
 		}
 		bot.dashLogger = dashLogger
 
@@ -162,7 +202,7 @@ func main() {
 			StopLossPct:         cfg.Strategy.Exit.StopLossPct,
 		}
 		bot.dashServer = dashboard.NewServer(dashConfig, bot.storage, bot.broker, bot.dashLogger)
-		logger.Printf("Dashboard enabled at http://localhost:%d", cfg.Dashboard.Port)
+		logger.Printf("Dashboard enabled at http://0.0.0.0:%d (accessible via localhost:%d)", cfg.Dashboard.Port, cfg.Dashboard.Port)
 	}
 
 	// Pre-fetch this month's market calendar for caching
@@ -184,13 +224,6 @@ func main() {
 		logger.Println("Shutdown signal received, stopping bot...")
 		close(bot.stop)
 		cancel()
-		if bot.dashServer != nil {
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel2()
-			if err := bot.dashServer.Shutdown(ctx2); err != nil {
-				logger.Printf("Error shutting down dashboard: %v", err)
-			}
-		}
 	}()
 
 	// Start dashboard server if enabled
@@ -200,7 +233,7 @@ func main() {
 				logger.Printf("Dashboard server error: %v", err)
 			}
 		}()
-		
+
 		// Ensure dashboard is shutdown gracefully
 		defer func() {
 			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -216,10 +249,11 @@ func main() {
 	// Run the bot
 	if err := bot.Run(ctx); err != nil {
 		logger.Printf("Bot error: %v", err)
-		return
+		return 1
 	}
 
 	logger.Println("Bot stopped successfully")
+	return 0
 }
 
 // Run starts the bot's main execution loop.
@@ -246,8 +280,12 @@ func (b *Bot) Run(ctx context.Context) error {
 
 	// Broker-first initialization: sync local storage with broker reality
 	if err := b.performStartupReconciliation(ctx); err != nil {
-		b.logger.Printf("Warning: Startup reconciliation failed: %v", err)
+		correlationID := generateCorrelationID()
+		b.logger.Printf("Warning: Startup reconciliation failed: %v (correlation_id=%s)", err, correlationID)
 		b.logger.Printf("Continuing with existing local data...")
+
+		// Emit structured metric for monitoring
+		b.logger.Printf("METRIC: reconciliation_failures=1 correlation_id=%s", correlationID)
 	}
 
 	// Main trading loop
@@ -291,43 +329,108 @@ func (b *Bot) runTradingCycle() {
 // performStartupReconciliation syncs local storage with broker reality at startup
 func (b *Bot) performStartupReconciliation(ctx context.Context) error {
 	b.logger.Println("🔄 BROKER-FIRST RECONCILIATION: Syncing with broker reality...")
-	
+
 	// Get broker positions with timeout
 	auditCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	
+
 	brokerPositions, err := b.broker.GetPositionsCtx(auditCtx)
 	if err != nil {
 		return fmt.Errorf("failed to get broker positions: %w", err)
 	}
-	
+
 	// Get current local positions
 	localPositions := b.storage.GetCurrentPositions()
-	
+
 	b.logger.Printf("Broker positions: %d, Local positions: %d", len(brokerPositions), len(localPositions))
-	
-	// Simple check: if we have zero-credit positions, we have corruption
-	hasCorruption := false
+
+	// Perform detailed reconciliation analysis
+	result := b.analyzePositionDifferences(brokerPositions, localPositions)
+
+	if result.hasInconsistencies {
+		b.logReconciliationIssues(result)
+	} else {
+		b.logger.Printf("✅ Local storage is consistent with broker")
+	}
+
+	return nil
+}
+
+// analyzePositionDifferences computes set differences between broker and local positions
+func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, localPositions []models.Position) reconciliationResult {
+	result := reconciliationResult{}
+
+	// Create sets for comparison by symbol (broker uses symbols, local uses position IDs)
+	brokerSymbols := make(map[string]bool)
+	localSymbols := make(map[string]bool)
+	localPositionsBySymbol := make(map[string]models.Position)
+
+	// Build broker symbol set
+	for _, pos := range brokerPositions {
+		brokerSymbols[pos.Symbol] = true
+	}
+
+	// Build local symbol set and check for corruption
 	for _, pos := range localPositions {
-		if pos.CreditReceived <= 0.01 {
-			hasCorruption = true
-			b.logger.Printf("Found corrupted position with zero credit: %s", pos.ID)
-			break
+		localSymbols[pos.Symbol] = true
+		localPositionsBySymbol[pos.Symbol] = pos
+
+		// Check for credit corruption using named constant
+		if pos.CreditReceived <= MinCreditThreshold {
+			result.corruptedPositions = append(result.corruptedPositions, pos.ID)
 		}
 	}
-	
-	// If we have broker positions but corruption or empty local storage, reset
-	if len(brokerPositions) > 0 && (len(localPositions) == 0 || hasCorruption) {
-		b.logger.Printf("🧹 Corruption detected - will use manual cleanup tools")
-		b.logger.Printf("Run './audit -v' and './reset_positions' to fix automatically")
-		
-		// Don't auto-fix for now - require manual intervention
-		// This is safer until we fully trust the auto-reconciliation
-	} else {
-		b.logger.Printf("✅ Local storage appears consistent with broker")
+
+	// Find positions only in broker (missing from local)
+	for symbol := range brokerSymbols {
+		if !localSymbols[symbol] {
+			result.brokerOnlyPositions = append(result.brokerOnlyPositions, symbol)
+		}
 	}
-	
-	return nil
+
+	// Find positions only in local (missing from broker)
+	for symbol := range localSymbols {
+		if !brokerSymbols[symbol] {
+			pos := localPositionsBySymbol[symbol]
+			result.localOnlyPositions = append(result.localOnlyPositions, pos.ID)
+		}
+	}
+
+	// Determine if we have any inconsistencies
+	result.hasInconsistencies = len(result.brokerOnlyPositions) > 0 ||
+		len(result.localOnlyPositions) > 0 ||
+		len(result.corruptedPositions) > 0
+
+	return result
+}
+
+// logReconciliationIssues provides detailed, actionable guidance for position inconsistencies
+func (b *Bot) logReconciliationIssues(result reconciliationResult) {
+	b.logger.Printf("⚠️  POSITION INCONSISTENCIES DETECTED")
+
+	if len(result.brokerOnlyPositions) > 0 {
+		b.logger.Printf("📋 Positions in broker but missing locally (%d): %v",
+			len(result.brokerOnlyPositions), result.brokerOnlyPositions)
+	}
+
+	if len(result.localOnlyPositions) > 0 {
+		b.logger.Printf("💾 Positions in local storage but missing from broker (%d): %v",
+			len(result.localOnlyPositions), result.localOnlyPositions)
+	}
+
+	if len(result.corruptedPositions) > 0 {
+		b.logger.Printf("🔧 Corrupted positions with invalid credit <= $%.2f (%d): %v",
+			MinCreditThreshold, len(result.corruptedPositions), result.corruptedPositions)
+	}
+
+	// Provide actionable guidance without hardcoded commands
+	b.logger.Printf("🔍 To investigate: Use the audit utility for detailed analysis")
+	b.logger.Printf("🧹 To fix: Use the reset_positions utility to sync with broker reality")
+	b.logger.Printf("📚 Documentation: See CLAUDE.md for reconciliation troubleshooting")
+
+	// Add specific guidance based on the type of inconsistency
+	totalInconsistencies := len(result.brokerOnlyPositions) + len(result.localOnlyPositions) + len(result.corruptedPositions)
+	b.logger.Printf("📊 Summary: %d total inconsistencies require attention", totalInconsistencies)
 }
 
 
