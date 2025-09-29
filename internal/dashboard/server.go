@@ -211,27 +211,47 @@ func (s *Server) requestLoggerMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Clone the request for logging, redacting sensitive tokens
 		loggedURL := s.redactTokenFromURL(r.URL)
-		
-		// Create a custom logger entry with redacted URL
-		logEntry := s.logger.WithFields(logrus.Fields{
-			"method":     r.Method,
-			"url":        loggedURL.String(),
-			"user_agent": r.UserAgent(),
-			"remote_ip":  r.RemoteAddr,
-		})
-		
+
 		start := time.Now()
-		
+
 		// Wrap the response writer to capture status code
 		wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		
+
 		next.ServeHTTP(wrapped, r)
-		
-		logEntry.WithFields(logrus.Fields{
-			"status":   wrapped.Status(),
-			"bytes":    wrapped.BytesWritten(),
-			"duration": time.Since(start),
-		}).Info("HTTP Request")
+
+		// Only log errors (4xx/5xx) and exclude frequent polling endpoints to reduce spam
+		status := wrapped.Status()
+		shouldLog := status >= 400 // Log errors
+
+		// Also log non-polling endpoints at debug level
+		isPollingEndpoint := strings.HasPrefix(r.URL.Path, "/partials/") ||
+							 strings.HasPrefix(r.URL.Path, "/static/") ||
+							 r.URL.Path == "/favicon.ico"
+
+		if shouldLog {
+			// Log errors at error level
+			s.logger.WithFields(logrus.Fields{
+				"method":     r.Method,
+				"url":        loggedURL.String(),
+				"user_agent": r.UserAgent(),
+				"remote_ip":  r.RemoteAddr,
+				"status":     status,
+				"bytes":      wrapped.BytesWritten(),
+				"duration":   time.Since(start),
+			}).Error("HTTP Request Error")
+		} else if !isPollingEndpoint {
+			// Log non-polling endpoints at debug level
+			s.logger.WithFields(logrus.Fields{
+				"method":     r.Method,
+				"url":        loggedURL.String(),
+				"user_agent": r.UserAgent(),
+				"remote_ip":  r.RemoteAddr,
+				"status":     status,
+				"bytes":      wrapped.BytesWritten(),
+				"duration":   time.Since(start),
+			}).Debug("HTTP Request")
+		}
+		// Polling endpoints are not logged to reduce spam
 	})
 }
 
