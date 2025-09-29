@@ -8,10 +8,19 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
 )
+
+// maskAccountID masks all but the last 4 characters of an account ID to prevent PII exposure
+func maskAccountID(id string) string {
+	if len(id) > 4 {
+		return strings.Repeat("*", len(id)-4) + id[len(id)-4:]
+	}
+	return id
+}
 
 func main() {
 	var (
@@ -30,7 +39,7 @@ func main() {
 	if *verbose {
 		fmt.Printf("Using config: %s\n", *configPath)
 		fmt.Printf("Broker: %s (sandbox: %t)\n", cfg.Broker.Provider, cfg.Environment.Mode == "paper")
-		fmt.Printf("Account ID: %s\n", cfg.Broker.AccountID)
+		fmt.Printf("Account ID: %s\n", maskAccountID(cfg.Broker.AccountID))
 		fmt.Printf("\n")
 	}
 
