@@ -144,9 +144,14 @@ func main() {
 		// Create logrus logger for dashboard
 		dashLogger := logrus.New()
 		dashLogger.SetOutput(os.Stdout)
-		dashLogger.SetFormatter(&logrus.TextFormatter{
-			FullTimestamp: true,
-		})
+		if cfg.Environment.Mode == "live" {
+			dashLogger.SetFormatter(&logrus.JSONFormatter{})
+		} else {
+			dashLogger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+		}
+		if lvl, err := logrus.ParseLevel(cfg.Environment.LogLevel); err == nil {
+			dashLogger.SetLevel(lvl)
+		}
 		bot.dashLogger = dashLogger
 
 		dashConfig := dashboard.Config{
