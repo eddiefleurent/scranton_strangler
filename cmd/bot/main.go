@@ -184,6 +184,13 @@ func main() {
 		logger.Println("Shutdown signal received, stopping bot...")
 		close(bot.stop)
 		cancel()
+		if bot.dashServer != nil {
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel2()
+			if err := bot.dashServer.Shutdown(ctx2); err != nil {
+				logger.Printf("Error shutting down dashboard: %v", err)
+			}
+		}
 	}()
 
 	// Start dashboard server if enabled
