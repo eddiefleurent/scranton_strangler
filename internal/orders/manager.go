@@ -327,23 +327,28 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 			// The order actually filled! Update quantities from broker and transition to open
 			actualQty := m.getActualQuantityFromBroker(&position, brokerPositions)
 			if actualQty > 0 {
+				// Only transition to OPEN and persist if we have a valid quantity
 				position.Quantity = actualQty
 				m.logger.Printf("Updated position %s quantity to %d contracts from broker", positionID, actualQty)
-			}
 
-			// Transition to open state
-			if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
-				m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
-				return // Exit early - recovery attempt failed, don't proceed to timeout closure
-			}
+				// Transition to open state
+				if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
+					m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
+					return // Exit early - recovery attempt failed, don't proceed to timeout closure
+				}
 
-			if err := m.storage.UpdatePosition(&position); err != nil {
-				m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
-				return // Exit early - recovery attempt failed, don't proceed to timeout closure
-			}
+				if err := m.storage.UpdatePosition(&position); err != nil {
+					m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
+					return // Exit early - recovery attempt failed, don't proceed to timeout closure
+				}
 
-			m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled with %d contracts", positionID, position.Quantity)
-			return // Exit early - position recovered
+				m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled with %d contracts", positionID, actualQty)
+				return // Exit early - position recovered
+			} else {
+				// Position exists in broker but has 0 quantity - not recoverable
+				m.logger.Printf("Position %s found in broker but has 0 quantity - no recoverable quantity, proceeding with timeout closure", positionID)
+				// Do not transition or return - allow normal timeout-closure flow to continue
+			}
 		}
 	}
 
