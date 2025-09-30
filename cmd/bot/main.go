@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
@@ -400,28 +401,37 @@ func (b *Bot) performStartupReconciliation(ctx context.Context) error {
 func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, localPositions []models.Position) reconciliationResult {
 	result := reconciliationResult{}
 
-	// Create multiplicity maps to track position counts per symbol
+	// Create multiplicity maps to track position counts per option symbol
 	brokerCounts := make(map[string]int)
 	localCounts := make(map[string]int)
 	localPositionsBySymbol := make(map[string][]models.Position)
 
-	// Build broker position counts by symbol
+	// Build broker position counts by option symbol
 	for _, pos := range brokerPositions {
-		brokerCounts[pos.Symbol]++
+		// Use absolute value since short positions have negative quantities
+		qty := int(math.Abs(pos.Quantity))
+		brokerCounts[pos.Symbol] += qty
 	}
 
-	// Build local position counts by symbol and check for corruption
+	// Build local position counts by generating option symbols from strikes/expiration
 	for _, pos := range localPositions {
-		localCounts[pos.Symbol]++
-		localPositionsBySymbol[pos.Symbol] = append(localPositionsBySymbol[pos.Symbol], pos)
-
-		// Check for credit corruption using named constant
+		// Check for credit corruption first
 		if pos.CreditReceived <= MinCreditThreshold {
 			result.corruptedPositions = append(result.corruptedPositions, pos.ID)
 		}
+
+		// Generate option symbols for this position's call and put legs
+		callSymbol := b.generateOptionSymbol(pos.Symbol, pos.Expiration, pos.CallStrike, "C")
+		putSymbol := b.generateOptionSymbol(pos.Symbol, pos.Expiration, pos.PutStrike, "P")
+
+		// Track each leg separately with quantity
+		localCounts[callSymbol] += pos.Quantity
+		localCounts[putSymbol] += pos.Quantity
+		localPositionsBySymbol[callSymbol] = append(localPositionsBySymbol[callSymbol], pos)
+		localPositionsBySymbol[putSymbol] = append(localPositionsBySymbol[putSymbol], pos)
 	}
 
-	// Get all unique symbols from both broker and local
+	// Get all unique option symbols from both broker and local
 	allSymbols := make(map[string]bool)
 	for symbol := range brokerCounts {
 		allSymbols[symbol] = true
@@ -430,31 +440,48 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		allSymbols[symbol] = true
 	}
 
-	// Compare position counts for each symbol
+	// Compare position counts for each option symbol
 	for symbol := range allSymbols {
 		brokerCount := brokerCounts[symbol]
 		localCount := localCounts[symbol]
 
 		if localCount > brokerCount {
-			// More local positions than broker positions - select extra local positions
+			// More local positions than broker positions - mark positions as phantom
 			positions := localPositionsBySymbol[symbol]
 			// Sort deterministically by EntryDate to avoid non-deterministic selection
 			sort.SliceStable(positions, func(i, j int) bool {
 				return positions[i].EntryDate.Before(positions[j].EntryDate)
 			})
-			extraCount := localCount - brokerCount
-			// Take the last N positions (most recent) as the extras
-			for i := len(positions) - extraCount; i < len(positions); i++ {
-				result.localOnlyPositions = append(result.localOnlyPositions, positions[i].ID)
+			// Mark the excess positions for cleanup (avoid duplicates)
+			seen := make(map[string]bool)
+			count := 0
+			needed := localCount - brokerCount
+			for i := len(positions) - 1; i >= 0 && count < needed; i-- {
+				if !seen[positions[i].ID] {
+					result.localOnlyPositions = append(result.localOnlyPositions, positions[i].ID)
+					seen[positions[i].ID] = true
+					count++
+				}
 			}
 		} else if brokerCount > localCount {
-			// More broker positions than local positions - add symbol once per missing count
+			// More broker positions than local positions - mark for recovery
 			missingCount := brokerCount - localCount
 			for i := 0; i < missingCount; i++ {
 				result.brokerOnlyPositions = append(result.brokerOnlyPositions, symbol)
 			}
 		}
 	}
+
+	// Deduplicate local-only positions (since we track by leg, same position can appear multiple times)
+	seenLocalIDs := make(map[string]bool)
+	uniqueLocalOnly := []string{}
+	for _, id := range result.localOnlyPositions {
+		if !seenLocalIDs[id] {
+			uniqueLocalOnly = append(uniqueLocalOnly, id)
+			seenLocalIDs[id] = true
+		}
+	}
+	result.localOnlyPositions = uniqueLocalOnly
 
 	// Determine if we have any inconsistencies
 	result.hasInconsistencies = len(result.brokerOnlyPositions) > 0 ||
@@ -662,6 +689,19 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 	pos.Adjustments = make([]models.Adjustment, 0)
 
 	return *pos
+}
+
+// generateOptionSymbol creates an OCC option symbol from position data
+// Format: SPY251107C00690000 (Symbol + YYMMDD + C/P + Strike*1000)
+func (b *Bot) generateOptionSymbol(baseSymbol string, expiration time.Time, strike float64, optType string) string {
+	// Format expiration as YYMMDD
+	expirationStr := expiration.Format("060102")
+
+	// Format strike as 8-digit integer (strike * 1000)
+	strikeInt := int(strike * strikeScaleDivisor)
+	strikeStr := fmt.Sprintf("%08d", strikeInt)
+
+	return fmt.Sprintf("%s%s%s%s", baseSymbol, expirationStr, optType, strikeStr)
 }
 
 // extractOptionType extracts 'call' or 'put' from option symbol
