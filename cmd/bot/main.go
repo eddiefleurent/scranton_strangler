@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -31,6 +32,15 @@ import (
 const (
 	// MinCreditThreshold is the minimum credit required for a valid position (in dollars)
 	MinCreditThreshold = 0.01
+
+	// Option symbol parsing constants
+	symbolBaseLength    = 3  // Length of base symbol (e.g., "SPY")
+	symbolDateLength    = 6  // Length of YYMMDD date
+	symbolPrefixLength  = 9  // Base + Date (SPY + YYMMDD)
+	symbolMinLength     = 15 // Minimum valid option symbol length
+	symbolTypeOffset    = 9  // Position of option type (C/P)
+	symbolStrikeOffset  = 10 // Position where strike price begins
+	strikeScaleDivisor  = 1000.0 // Divisor to convert strike from integer to decimal
 )
 
 // reconciliationResult contains the analysis of broker vs local position differences
@@ -351,6 +361,19 @@ func (b *Bot) performStartupReconciliation(ctx context.Context) error {
 	result := b.analyzePositionDifferences(brokerPositions, localPositions)
 
 	if result.hasInconsistencies {
+		b.logger.Printf("⚠️  POSITION INCONSISTENCIES DETECTED - Initiating self-healing...")
+
+		// Auto-heal phantom positions (local-only positions)
+		if err := b.cleanupPhantomPositions(result.localOnlyPositions); err != nil {
+			b.logger.Printf("❌ Failed to cleanup phantom positions: %v", err)
+		}
+
+		// Auto-recover untracked positions (broker-only positions)
+		if err := b.recoverUntrackedPositions(ctx, brokerPositions, result.brokerOnlyPositions); err != nil {
+			b.logger.Printf("❌ Failed to recover untracked positions: %v", err)
+		}
+
+		// Log any remaining issues
 		b.logReconciliationIssues(result)
 	} else {
 		b.logger.Printf("✅ Local storage is consistent with broker")
@@ -438,6 +461,175 @@ func (b *Bot) logReconciliationIssues(result reconciliationResult) {
 	b.logger.Printf("📊 Summary: %d total inconsistencies require attention", totalInconsistencies)
 }
 
+// cleanupPhantomPositions removes local positions that don't exist in the broker
+func (b *Bot) cleanupPhantomPositions(phantomPositionIDs []string) error {
+	if len(phantomPositionIDs) == 0 {
+		return nil
+	}
+
+	b.logger.Printf("🧹 Cleaning up %d phantom position(s)...", len(phantomPositionIDs))
+
+	for _, posID := range phantomPositionIDs {
+		if err := b.storage.DeletePosition(posID); err != nil {
+			b.logger.Printf("⚠️  Failed to delete phantom position %s: %v", posID, err)
+			continue
+		}
+		b.logger.Printf("✅ Deleted phantom position: %s", posID)
+	}
+
+	return nil
+}
+
+// recoverUntrackedPositions adds broker positions that aren't being tracked locally
+func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []broker.PositionItem, untrackedSymbols []string) error {
+	if len(untrackedSymbols) == 0 {
+		return nil
+	}
+
+	b.logger.Printf("🔄 Recovering %d untracked position(s)...", len(untrackedSymbols))
+
+	// Create a map for quick lookup
+	untrackedMap := make(map[string]bool)
+	for _, symbol := range untrackedSymbols {
+		untrackedMap[symbol] = true
+	}
+
+	// Group broker positions by their strangle pairs
+	strangleGroups := make(map[string][]broker.PositionItem)
+
+	for _, brokerPos := range brokerPositions {
+		if !untrackedMap[brokerPos.Symbol] {
+			continue
+		}
+
+		// Extract base symbol and expiration to group strangles
+		// SPY251107C00690000 -> SPY251107
+		if len(brokerPos.Symbol) < symbolMinLength {
+			b.logger.Printf("⚠️  Skipping malformed symbol: %s (length %d, expected >= %d)",
+				brokerPos.Symbol, len(brokerPos.Symbol), symbolMinLength)
+			continue
+		}
+
+		key := brokerPos.Symbol[:symbolPrefixLength] // SPY + YYMMDD
+		strangleGroups[key] = append(strangleGroups[key], brokerPos)
+	}
+
+	// Create recovery positions for each strangle group
+	for groupKey, positions := range strangleGroups {
+		if len(positions) < 2 {
+			b.logger.Printf("⚠️  Incomplete strangle group %s (only %d legs), skipping recovery", groupKey, len(positions))
+			continue
+		}
+
+		// Create a recovered position
+		recoveredPos := b.createRecoveredPosition(positions)
+		if err := b.storage.AddPosition(&recoveredPos); err != nil {
+			b.logger.Printf("❌ Failed to save recovered position %s: %v", recoveredPos.ID, err)
+			continue
+		}
+
+		b.logger.Printf("✅ Recovered position: %s with %d legs", recoveredPos.ID, len(positions))
+	}
+
+	return nil
+}
+
+// createRecoveredPosition creates a Position from broker positions
+func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) models.Position {
+	// Use first position to extract common data
+	first := brokerPositions[0]
+
+	// Extract base symbol and expiration with validation
+	baseSymbol := first.Symbol[:symbolBaseLength] // SPY
+	expirationStr := first.Symbol[symbolBaseLength:symbolPrefixLength] // YYMMDD
+
+	// Parse expiration date with error handling
+	expiration, err := time.Parse("060102", expirationStr)
+	if err != nil {
+		b.logger.Printf("⚠️  Failed to parse expiration date %s: %v, using default", expirationStr, err)
+		expiration = time.Now().AddDate(0, 0, 45) // Default to 45 DTE
+	}
+
+	// Default values
+	var callStrike, putStrike float64
+	var totalCredit float64
+	quantity := int(first.Quantity)
+	if quantity < 0 {
+		quantity = -quantity // Ensure positive quantity
+	}
+
+	// Separate call and put strikes and calculate total credit
+	for _, brokerPos := range brokerPositions {
+		optType := extractOptionType(brokerPos.Symbol)
+		strike := extractStrike(brokerPos.Symbol)
+
+		if strike <= 0 {
+			b.logger.Printf("⚠️  Invalid strike price %.2f for symbol %s", strike, brokerPos.Symbol)
+			continue
+		}
+
+		if optType == "call" {
+			callStrike = strike
+		} else if optType == "put" {
+			putStrike = strike
+		}
+
+		// Estimate credit from cost basis (negative cost basis means we received credit)
+		totalCredit += -brokerPos.CostBasis
+	}
+
+	// Validate strikes were found
+	if callStrike <= 0 || putStrike <= 0 {
+		b.logger.Printf("⚠️  Invalid strikes recovered: call=%.2f, put=%.2f", callStrike, putStrike)
+	}
+
+	// Create position using NewPosition factory
+	pos := models.NewPosition(
+		fmt.Sprintf("recovered-%d", time.Now().UnixNano()),
+		baseSymbol,
+		putStrike,
+		callStrike,
+		expiration,
+		quantity,
+	)
+
+	// Set state to open and credit received
+	pos.State = models.StateOpen
+	pos.StateMachine = models.NewStateMachineFromState(models.StateOpen)
+	pos.EntryDate = time.Now() // We don't know the actual entry time
+	pos.CreditReceived = totalCredit
+	pos.Adjustments = make([]models.Adjustment, 0)
+
+	return *pos
+}
+
+// extractOptionType extracts 'call' or 'put' from option symbol
+func extractOptionType(symbol string) string {
+	if len(symbol) < symbolTypeOffset+1 {
+		return "unknown"
+	}
+	optType := symbol[symbolTypeOffset : symbolTypeOffset+1] // C or P
+	if optType == "C" {
+		return "call"
+	} else if optType == "P" {
+		return "put"
+	}
+	return "unknown"
+}
+
+// extractStrike extracts strike price from option symbol
+// Returns 0.0 if the symbol is invalid or parsing fails
+func extractStrike(symbol string) float64 {
+	if len(symbol) < symbolMinLength {
+		return 0.0
+	}
+	strikeStr := symbol[symbolStrikeOffset:] // 00690000
+	strike, err := strconv.ParseFloat(strikeStr, 64)
+	if err != nil {
+		return 0.0
+	}
+	return strike / strikeScaleDivisor // Convert to actual price
+}
 
 // getMarketCalendar gets the market calendar for a given month/year, with caching
 func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {
