@@ -47,7 +47,7 @@ func (m *mockBrokerForStrategy) GetOptionBuyingPowerCtx(ctx context.Context) (fl
 }
 
 func (m *mockBrokerForStrategy) GetPositions() ([]broker.PositionItem, error) {
-	return []broker.PositionItem{}, nil
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *mockBrokerForStrategy) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
@@ -90,6 +90,25 @@ func (m *mockBrokerForStrategy) GetOrderStatusCtx(ctx context.Context, orderID i
 	return &broker.OrderResponse{}, nil
 }
 
+func (m *mockBrokerForStrategy) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	resp := &broker.OrderResponse{}
+	resp.Order.ID = orderID
+	resp.Order.Status = "canceled"
+	return resp, nil
+}
+
+func (m *mockBrokerForStrategy) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return m.CancelOrder(orderID)
+}
+
+func (m *mockBrokerForStrategy) GetOrders() (*broker.OrdersResponse, error) {
+	return &broker.OrdersResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
+	return m.GetOrders()
+}
+
 func (m *mockBrokerForStrategy) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, quantity int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
 }
@@ -112,6 +131,14 @@ func (m *mockBrokerForStrategy) PlaceBuyToCloseMarketOrder(optionSymbol string, 
 
 func (m *mockBrokerForStrategy) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	return &broker.OrderResponse{}, nil
+}
+
+func (m *mockBrokerForStrategy) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return m.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
+func (m *mockBrokerForStrategy) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return m.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 }
 
 func (m *mockBrokerForStrategy) GetMarketClock(delayed bool) (*broker.MarketClockResponse, error) {
@@ -931,7 +958,7 @@ func (m *mockBroker) GetAccountBalanceCtx(ctx context.Context) (float64, error) 
 }
 
 func (m *mockBroker) GetPositions() ([]broker.PositionItem, error) {
-	return nil, nil
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *mockBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
@@ -1085,6 +1112,44 @@ func (m *mockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*broker.
 	return m.GetOrderStatus(orderID)
 }
 
+func (m *mockBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	return &broker.OrderResponse{
+		Order: struct {
+			CreateDate        string  `json:"create_date"`
+			Type              string  `json:"type"`
+			Symbol            string  `json:"symbol"`
+			Side              string  `json:"side"`
+			Class             string  `json:"class"`
+			Status            string  `json:"status"`
+			Duration          string  `json:"duration"`
+			TransactionDate   string  `json:"transaction_date"`
+			AvgFillPrice      float64 `json:"avg_fill_price"`
+			ExecQuantity      float64 `json:"exec_quantity"`
+			LastFillPrice     float64 `json:"last_fill_price"`
+			LastFillQuantity  float64 `json:"last_fill_quantity"`
+			RemainingQuantity float64 `json:"remaining_quantity"`
+			ID                int     `json:"id"`
+			Price             float64 `json:"price"`
+			Quantity          float64 `json:"quantity"`
+		}{
+			ID:     orderID,
+			Status: "canceled",
+		},
+	}, nil
+}
+
+func (m *mockBroker) CancelOrderCtx(_ context.Context, orderID int) (*broker.OrderResponse, error) {
+	return m.CancelOrder(orderID)
+}
+
+func (m *mockBroker) GetOrders() (*broker.OrdersResponse, error) {
+	return &broker.OrdersResponse{}, nil
+}
+
+func (m *mockBroker) GetOrdersCtx(_ context.Context) (*broker.OrdersResponse, error) {
+	return m.GetOrders()
+}
+
 func (m *mockBroker) PlaceBuyToCloseOrder(
 	_ string,
 	_ int,
@@ -1121,6 +1186,26 @@ func (m *mockBroker) PlaceSellToCloseMarketOrder(
 	_ string,
 ) (*broker.OrderResponse, error) {
 	return nil, nil
+}
+
+func (m *mockBroker) PlaceBuyToCloseMarketOrderCtx(
+	ctx context.Context,
+	optionSymbol string,
+	quantity int,
+	duration string,
+	tag string,
+) (*broker.OrderResponse, error) {
+	return m.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
+func (m *mockBroker) PlaceSellToCloseMarketOrderCtx(
+	ctx context.Context,
+	optionSymbol string,
+	quantity int,
+	duration string,
+	tag string,
+) (*broker.OrderResponse, error) {
+	return m.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
 }
 
 func (m *mockBroker) GetMarketClock(_ bool) (*broker.MarketClockResponse, error) {

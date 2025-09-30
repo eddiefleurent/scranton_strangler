@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scranton Strangler - Trading Dashboard</title>
+    <script src="/static/js/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Scranton Strangler Trading Bot</h1>
+            <div class="header-info">
+                <span class="market-status {{if eq .MarketStatus "Open"}}open{{else}}closed{{end}}">
+                    Market: {{.MarketStatus}}
+                </span>
+                <span class="account-balance">Balance: ${{printf "%.2f" .AccountBalance}}</span>
+                <span class="last-update">Updated: {{.LastUpdate.Format "15:04:05"}}</span>
+            </div>
+        </header>
+
+        <main>
+            <section id="positions-section" class="dashboard-section">
+                <h2>Active Positions ({{.Stats.CurrentOpen}})</h2>
+                <div id="positions-container"
+                     hx-get="/partials/positions"
+                     hx-trigger="load, every 15s"
+                     hx-swap="innerHTML">
+                    {{template "positions-content" .Positions}}
+                </div>
+            </section>
+
+            <section id="recent-history-section" class="dashboard-section">
+                <div class="section-header">
+                    <h2>Recent Completed Trades</h2>
+                    <a href="/history" class="view-all-link">View All History →</a>
+                </div>
+                <div id="recent-history-container"
+                     hx-get="/partials/recent-history"
+                     hx-trigger="load, every 30s"
+                     hx-swap="innerHTML">
+                    Loading recent trades...
+                </div>
+            </section>
+
+            <section id="stats-section" class="dashboard-section compact">
+                <h3>Performance Summary</h3>
+                <div id="stats-container" 
+                     hx-get="/partials/stats" 
+                     hx-trigger="load, every 30s"
+                     hx-swap="innerHTML">
+                    {{template "stats-content" .Stats}}
+                </div>
+            </section>
+
+            <section id="position-detail-section" class="dashboard-section hidden">
+                <h2>Position Details</h2>
+                <div id="position-detail-container"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Scranton Strangler v1.0.0 | Auto-refresh: 15s (positions) / 30s (stats)</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

@@ -113,9 +113,10 @@ Automated trading bot for SPY short strangles via Tradier API. Built in Go for p
 
 #### 4. Order Executor
 - Translates signals to Tradier API calls
-- **OTOCO Orders**: Unsupported at runtime - planned feature for multi-leg orders (see `internal/broker/tradier.go`)
-- **OCO Orders**: Emergency exits and rolling scenarios
-- Handles multi-leg orders (strangles)
+- **OTOCO Orders**: Unsupported for multi-leg strangles (API limitation: different option_symbols)
+- **Profit Target (Preferred)**: Single multi-leg GTC buy-to-close at 50% of original credit
+- **Per-leg OCO (Adjustments)**: Use for leg-specific rolls/stop coverage when needed
+- Handles multi-leg orders with consolidated profit-target and leg-level adjustments
 - Manages partial fills and order status
 - Implements retry logic with exponential backoff
 
@@ -267,16 +268,30 @@ type RiskManager interface {
 
 ## Order Types & Automation Strategy
 
-### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Unsupported at Runtime**
-**Status**: Not supported for live trading - paper-only flags tolerated, live trading disallowed
-- **Limitation**: Tradier API does not support OTOCO for multi-leg orders
-- **Current Behavior**: `use_otoco: true` in config is tolerated but ignored at runtime
-- **Fallback**: System automatically uses regular multi-leg orders with monitoring
-- **Implementation**: See `internal/broker/tradier.go` - returns `ErrOTOCOUnsupported`
-- **Future**: Planned implementation may use separate entry + linked exit orders
+### OTOCO Orders (One-Triggers-One-Cancels-Other) - **Unsupported for Multi-Leg**
+**Status**: Cannot be used for short strangles due to API limitations
+- **Root Cause**: Tradier OTOCO requires same `option_symbol` but strangles use different symbols per leg
+- **Current Behavior**: `PlaceStrangleOTOCO()` returns `ErrOTOCOUnsupported`
+- **Alternative**: Enhanced monitoring system with automated order management
+- **Implementation**: See `internal/broker/tradier.go:1191`
 
-### OCO Orders (One-Cancels-Other) 
-**Use Cases**:
+### Enhanced Monitoring System - **Recommended Solution**
+**Architecture**: Hybrid approach combining GTC orders with intelligent position monitoring
+- **Profit Target**: Single GTC limit order to close entire strangle at 50% of credit
+- **Stop-Loss Protection**: Real-time P&L monitoring with conditional market order execution
+- **Monitoring Frequency**: Every 1-minute during market hours and extended hours
+- **Trigger Logic**: When position P&L reaches -200% of credit, place immediate market order
+- **Order Management**: System automatically cancels profit target when stop-loss executes
+- **24/7 Protection**: Continuous monitoring provides protection when bot is active
+- **Fallback**: Manual monitoring alerts for system failures
+
+**Implementation Components**:
+1. **Enhanced Position Monitor**: High-frequency P&L calculation and threshold checking
+2. **Conditional Order Engine**: Trigger market orders based on position metrics
+3. **Order Lifecycle Manager**: Automatic cancellation of linked orders upon execution
+4. **Extended Hours Support**: Reduced frequency monitoring during pre/post market
+
+**Football System Use Cases**:
 1. **Second Down Rolling**: Close at 70% profit OR roll untested side
 2. **Third Down Management**: Take 25% profit OR continue to Fourth Down  
 3. **Fourth Down Stops**: Profit target OR 250% loss limit
@@ -759,8 +774,8 @@ go run scripts/liquidate_positions.go
 
 The liquidation tool:
 - Fetches current broker positions
-- Places aggressive buy-to-close orders at 200% above ask price
-- Provides market order equivalent behavior for emergency situations
+- Places market orders for immediate execution
+- Provides emergency position closure capability
 
 #### Common Sync Issues Fixed
 
@@ -856,16 +871,50 @@ The bot supports optional after-hours position monitoring via the `after_hours_c
 
 - **Default Behavior**: When `false`, the bot runs during the configured trading window only
 - **After-Hours Mode**: When `true`, the bot continues monitoring existing positions even outside regular hours
+- **SPY Options Extended Hours**: Limited to 4:00-4:15 PM ET (15 minutes post-close only)
 - **Functionality During After-Hours**:
   - Monitors existing positions for exit conditions (stop losses, profit targets)
+  - Emergency market orders for critical stop-loss breaches
   - **Does NOT** attempt new position entries
   - **Does NOT** perform position adjustments (Phase 2 feature)
   - Logs after-hours activity for transparency
 
+##### Recommended Configuration
+```yaml
+schedule:
+  market_check_interval: "1m"     # 1-minute for stop-loss monitoring
+  trading_start: "09:45"          # Conservative entry window
+  trading_end: "15:45"            # Conservative exit window  
+  after_hours_check: true         # Monitor during 4:00-4:15 PM window ONLY
+```
+
+##### Monitoring Schedule Clarification
+**IMPORTANT**: The bot monitors positions only when markets are open and trading is possible:
+
+| Time Period | Monitoring Status | Reason |
+|------------|------------------|--------|
+| **9:30 AM - 4:00 PM ET** | ✅ Active (1-min intervals) | Regular trading hours |
+| **4:00 PM - 4:15 PM ET** | ✅ Active (1-min intervals) | SPY extended hours window |
+| **4:15 PM - 9:30 AM ET** | ❌ STOPPED | Market closed - no trading possible |
+| **Weekends** | ❌ STOPPED | Market closed |
+
+**Key Points**:
+- Bot **STOPS at 4:15 PM** - cannot exit positions when market is closed
+- Bot **RESUMES at 9:30 AM** next trading day
+- Overnight gap risk exists but cannot be mitigated until market opens
+- First cycle at 9:30 AM checks for adverse overnight moves
+
+##### SPY Options After-Hours Constraints
+- **Limited Window**: Only 4:00-4:15 PM ET (no pre-market)
+- **Reduced Liquidity**: Wider bid-ask spreads, potential for poor fills
+- **Order Types**: Market orders recommended for emergency exits only
+- **No 24/7 Monitoring**: Positions cannot be adjusted when markets are closed
+
 ##### Use Cases
 - Risk management for overnight positions
-- Monitoring positions during extended hours trading
-- Emergency exit capabilities outside normal hours
+- Emergency exits during 4:00-4:15 PM window
+- Stop-loss protection against after-hours news events
+- Profit target monitoring during extended session
 
 #### Rate Limiting Implementation
 ```go

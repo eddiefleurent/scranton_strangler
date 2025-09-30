@@ -14,6 +14,7 @@ The project includes a comprehensive Makefile for common development tasks:
 # Build the bot
 make build              # Standard build
 make build-prod        # Production build (optimized)
+make build-utils        # Build all utility scripts to bin/
 
 # Run the bot
 make run               # Build and run with config.yaml
@@ -165,6 +166,12 @@ The bot includes robust position synchronization to prevent broker/storage misma
 - `make liquidate` - Force close all positions via market orders
 - `scripts/liquidate_positions.go` - Direct API liquidation utility
 - Automatic position limit enforcement prevents over-allocation
+
+**Audit and Debugging Tools:**
+- `./bin/audit -v` - Comprehensive broker vs local position audit
+- `./bin/audit -json` - JSON output for programmatic analysis
+- `./bin/reset_positions` - Reset positions.json to match broker reality
+- Built-in audit methods in TradierAPI class for debugging
 
 **Common Sync Issues Fixed:**
 - Order timeout during polling (bot thinks order failed, but it filled)

@@ -3,11 +3,17 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -15,11 +21,49 @@ import (
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
 	"github.com/eddiefleurent/scranton_strangler/internal/config"
+	"github.com/eddiefleurent/scranton_strangler/internal/dashboard"
+	"github.com/eddiefleurent/scranton_strangler/internal/models"
 	"github.com/eddiefleurent/scranton_strangler/internal/orders"
 	"github.com/eddiefleurent/scranton_strangler/internal/retry"
 	"github.com/eddiefleurent/scranton_strangler/internal/storage"
 	"github.com/eddiefleurent/scranton_strangler/internal/strategy"
+	"github.com/sirupsen/logrus"
 )
+
+const (
+	// MinCreditThreshold is the minimum credit required for a valid position (in dollars)
+	MinCreditThreshold = 0.01
+
+	// Option symbol parsing constants
+	symbolBaseLength    = 3  // Length of base symbol (e.g., "SPY")
+	symbolDateLength    = 6  // Length of YYMMDD date
+	symbolPrefixLength  = 9  // Base + Date (SPY + YYMMDD)
+	symbolMinLength     = 15 // Minimum valid option symbol length
+	symbolTypeOffset    = 9  // Position of option type (C/P)
+	symbolStrikeOffset  = 10 // Position where strike price begins
+	strikeScaleDivisor  = 1000.0 // Divisor to convert strike from integer to decimal
+)
+
+// reconciliationResult contains the analysis of broker vs local position differences
+type reconciliationResult struct {
+	brokerOnlyPositions []string // Position symbols only in broker
+	localOnlyPositions  []string // Position IDs only in local storage
+	corruptedPositions  []string // Local position IDs with invalid credit
+	hasInconsistencies  bool     // Whether any inconsistencies were found
+}
+
+// generateCorrelationID creates a short correlation ID for request tracking
+func generateCorrelationID(logger *log.Logger) string {
+	bytes := make([]byte, 4)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		// Fallback to deterministic-but-unique ID if crypto/rand fails
+		fallbackID := fmt.Sprintf("%x%x", time.Now().UnixNano(), os.Getpid())
+		logger.Printf("Warning: crypto/rand.Read failed (%v), using fallback correlation ID", err)
+		return fallbackID[:8] // Keep it short like the original
+	}
+	return hex.EncodeToString(bytes)
+}
 
 // Bot represents the main trading bot instance.
 type Bot struct {
@@ -28,6 +72,8 @@ type Bot struct {
 	strategy      *strategy.StrangleStrategy
 	storage       storage.Interface
 	logger        *log.Logger
+	dashLogger    *logrus.Logger
+	dashServer    *dashboard.Server
 	stop          chan struct{}
 	ctx           context.Context // Main bot context for operations
 	orderManager  *orders.Manager
@@ -44,6 +90,10 @@ type Bot struct {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	var configPath string
 	flag.StringVar(&configPath, "config", "config.yaml", "Path to configuration file")
 	flag.Parse()
@@ -51,7 +101,8 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		log.Printf("Failed to load config: %v", err)
+		return 1
 	}
 
 	// Create logger
@@ -77,9 +128,10 @@ func main() {
 		lastPnLUpdate: time.Now().Add(-time.Hour), // Initialize to past time to allow immediate first update
 	}
 
-	// Cache NY timezone location
+	// Cache NY timezone location with fallback
 	if loc, err := time.LoadLocation("America/New_York"); err != nil {
-		log.Fatalf("Failed to load NY timezone: %v", err)
+		log.Printf("WARNING: Failed to load America/New_York timezone (%v), using EST fallback", err)
+		bot.nyLocation = time.FixedZone("EST", -5*60*60) // EST: UTC-5
 	} else {
 		bot.nyLocation = loc
 	}
@@ -93,7 +145,8 @@ func main() {
 		cfg.Strategy.Exit.ProfitTarget,
 	)
 	if err != nil {
-		log.Fatalf("Failed to create Tradier client: %v", err)
+		log.Printf("Failed to create Tradier client: %v", err)
+		return 1
 	}
 
 	// Wrap with circuit breaker for resilience
@@ -103,7 +156,8 @@ func main() {
 	storagePath := cfg.Storage.Path
 	store, err := storage.NewStorage(storagePath)
 	if err != nil {
-		log.Fatalf("Failed to initialize storage: %v", err)
+		log.Printf("Failed to initialize storage: %v", err)
+		return 1
 	}
 	bot.storage = store
 
@@ -133,6 +187,35 @@ func main() {
 	// Initialize retry client
 	bot.retryClient = retry.NewClient(bot.broker, logger)
 
+	// Initialize dashboard if enabled
+	if cfg.Dashboard.Enabled {
+		// Create logrus logger for dashboard
+		dashLogger := logrus.New()
+		dashLogger.SetOutput(os.Stdout)
+		if cfg.Environment.Mode == "live" {
+			dashLogger.SetFormatter(&logrus.JSONFormatter{})
+		} else {
+			dashLogger.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
+		}
+		if lvl, err := logrus.ParseLevel(cfg.Environment.LogLevel); err == nil {
+			dashLogger.SetLevel(lvl)
+		} else {
+			dashLogger.SetLevel(logrus.InfoLevel)
+			dashLogger.WithError(err).Warn("invalid log level; defaulting to info")
+		}
+		bot.dashLogger = dashLogger
+
+		dashConfig := dashboard.Config{
+			Port:                cfg.Dashboard.Port,
+			AuthToken:           cfg.Dashboard.AuthToken,
+			AllocationThreshold: cfg.Strategy.AllocationPct * 100, // Convert to percentage
+			ProfitTarget:        cfg.Strategy.Exit.ProfitTarget,
+			StopLossPct:         cfg.Strategy.Exit.StopLossPct,
+		}
+		bot.dashServer = dashboard.NewServer(dashConfig, bot.storage, bot.broker, bot.dashLogger)
+		logger.Printf("Dashboard enabled at http://0.0.0.0:%d (accessible via localhost:%d)", cfg.Dashboard.Port, cfg.Dashboard.Port)
+	}
+
 	// Pre-fetch this month's market calendar for caching
 	logger.Println("Fetching market calendar for this month...")
 	_, calErr := bot.getMarketCalendar(0, 0) // Current month/year
@@ -154,12 +237,37 @@ func main() {
 		cancel()
 	}()
 
+	// Start dashboard server if enabled
+	if bot.dashServer != nil {
+		go func() {
+			if err := bot.dashServer.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Printf("Dashboard server error: %v", err)
+				// Emit metric for monitoring dashboard failures
+				logger.Printf("METRIC: dashboard_server_failures=1")
+			}
+		}()
+
+		// Ensure dashboard is shutdown gracefully
+		defer func() {
+			// Shutdown is nil-safe internally, so we can always call it
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			if err := bot.dashServer.Shutdown(shutdownCtx); err != nil {
+				logger.Printf("Error shutting down dashboard: %v", err)
+			} else {
+				logger.Println("Dashboard server stopped")
+			}
+		}()
+	}
+
 	// Run the bot
 	if err := bot.Run(ctx); err != nil {
-		logger.Fatalf("Bot error: %v", err)
+		logger.Printf("Bot error: %v", err)
+		return 1
 	}
 
 	logger.Println("Bot stopped successfully")
+	return 0
 }
 
 // Run starts the bot's main execution loop.
@@ -183,6 +291,16 @@ func (b *Bot) Run(ctx context.Context) error {
 		}
 	}
 	b.logger.Printf("Connected to broker. Account balance: $%.2f", bal)
+
+	// Broker-first initialization: sync local storage with broker reality
+	if err := b.performStartupReconciliation(ctx); err != nil {
+		correlationID := generateCorrelationID(b.logger)
+		b.logger.Printf("Warning: Startup reconciliation failed: %v (correlation_id=%s)", err, correlationID)
+		b.logger.Printf("Continuing with existing local data...")
+
+		// Emit structured metric for monitoring
+		b.logger.Printf("METRIC: reconciliation_failures=1 correlation_id=%s", correlationID)
+	}
 
 	// Main trading loop
 	interval := b.config.GetCheckInterval()
@@ -221,6 +339,328 @@ func (b *Bot) runTradingCycle() {
 
 
 // Utility functions have been moved to utils.go
+
+// performStartupReconciliation syncs local storage with broker reality at startup
+func (b *Bot) performStartupReconciliation(ctx context.Context) error {
+	b.logger.Println("🔄 BROKER-FIRST RECONCILIATION: Syncing with broker reality...")
+
+	// Get broker positions with timeout
+	auditCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	brokerPositions, err := b.broker.GetPositionsCtx(auditCtx)
+	if err != nil {
+		return fmt.Errorf("failed to get broker positions: %w", err)
+	}
+
+	// Get current local positions
+	localPositions := b.storage.GetCurrentPositions()
+
+	b.logger.Printf("Broker positions: %d, Local positions: %d", len(brokerPositions), len(localPositions))
+
+	// Perform detailed reconciliation analysis
+	result := b.analyzePositionDifferences(brokerPositions, localPositions)
+
+	if result.hasInconsistencies {
+		b.logger.Printf("⚠️  POSITION INCONSISTENCIES DETECTED - Initiating self-healing...")
+
+		// Auto-heal phantom positions (local-only positions)
+		if err := b.cleanupPhantomPositions(result.localOnlyPositions); err != nil {
+			b.logger.Printf("❌ Failed to cleanup phantom positions: %v", err)
+		}
+
+		// Auto-recover untracked positions (broker-only positions)
+		if err := b.recoverUntrackedPositions(ctx, brokerPositions, result.brokerOnlyPositions); err != nil {
+			b.logger.Printf("❌ Failed to recover untracked positions: %v", err)
+		}
+
+		// Log any remaining issues
+		b.logReconciliationIssues(result)
+	} else {
+		b.logger.Printf("✅ Local storage is consistent with broker")
+	}
+
+	return nil
+}
+
+// analyzePositionDifferences computes set differences between broker and local positions
+func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, localPositions []models.Position) reconciliationResult {
+	result := reconciliationResult{}
+
+	// Create multiplicity maps to track position counts per symbol
+	brokerCounts := make(map[string]int)
+	localCounts := make(map[string]int)
+	localPositionsBySymbol := make(map[string][]models.Position)
+
+	// Build broker position counts by symbol
+	for _, pos := range brokerPositions {
+		brokerCounts[pos.Symbol]++
+	}
+
+	// Build local position counts by symbol and check for corruption
+	for _, pos := range localPositions {
+		localCounts[pos.Symbol]++
+		localPositionsBySymbol[pos.Symbol] = append(localPositionsBySymbol[pos.Symbol], pos)
+
+		// Check for credit corruption using named constant
+		if pos.CreditReceived <= MinCreditThreshold {
+			result.corruptedPositions = append(result.corruptedPositions, pos.ID)
+		}
+	}
+
+	// Get all unique symbols from both broker and local
+	allSymbols := make(map[string]bool)
+	for symbol := range brokerCounts {
+		allSymbols[symbol] = true
+	}
+	for symbol := range localCounts {
+		allSymbols[symbol] = true
+	}
+
+	// Compare position counts for each symbol
+	for symbol := range allSymbols {
+		brokerCount := brokerCounts[symbol]
+		localCount := localCounts[symbol]
+
+		if localCount > brokerCount {
+			// More local positions than broker positions - select extra local positions
+			positions := localPositionsBySymbol[symbol]
+			extraCount := localCount - brokerCount
+			// Take the last N positions (most recent) as the extras
+			for i := len(positions) - extraCount; i < len(positions); i++ {
+				result.localOnlyPositions = append(result.localOnlyPositions, positions[i].ID)
+			}
+		} else if brokerCount > localCount {
+			// More broker positions than local positions - add symbol once per missing count
+			missingCount := brokerCount - localCount
+			for i := 0; i < missingCount; i++ {
+				result.brokerOnlyPositions = append(result.brokerOnlyPositions, symbol)
+			}
+		}
+	}
+
+	// Determine if we have any inconsistencies
+	result.hasInconsistencies = len(result.brokerOnlyPositions) > 0 ||
+		len(result.localOnlyPositions) > 0 ||
+		len(result.corruptedPositions) > 0
+
+	return result
+}
+
+// logReconciliationIssues provides detailed, actionable guidance for position inconsistencies
+func (b *Bot) logReconciliationIssues(result reconciliationResult) {
+	b.logger.Printf("⚠️  POSITION INCONSISTENCIES DETECTED")
+
+	if len(result.brokerOnlyPositions) > 0 {
+		b.logger.Printf("📋 Positions in broker but missing locally (%d): %v",
+			len(result.brokerOnlyPositions), result.brokerOnlyPositions)
+	}
+
+	if len(result.localOnlyPositions) > 0 {
+		b.logger.Printf("💾 Positions in local storage but missing from broker (%d): %v",
+			len(result.localOnlyPositions), result.localOnlyPositions)
+	}
+
+	if len(result.corruptedPositions) > 0 {
+		b.logger.Printf("🔧 Corrupted positions with invalid credit <= $%.2f (%d): %v",
+			MinCreditThreshold, len(result.corruptedPositions), result.corruptedPositions)
+	}
+
+	// Provide actionable guidance without hardcoded commands
+	b.logger.Printf("🔍 To investigate: Use the audit utility for detailed analysis")
+	b.logger.Printf("🧹 To fix: Use the reset_positions utility to sync with broker reality")
+	b.logger.Printf("📚 Documentation: See CLAUDE.md for reconciliation troubleshooting")
+
+	// Add specific guidance based on the type of inconsistency
+	totalInconsistencies := len(result.brokerOnlyPositions) + len(result.localOnlyPositions) + len(result.corruptedPositions)
+	b.logger.Printf("📊 Summary: %d total inconsistencies require attention", totalInconsistencies)
+}
+
+// cleanupPhantomPositions removes local positions that don't exist in the broker
+func (b *Bot) cleanupPhantomPositions(phantomPositionIDs []string) error {
+	if len(phantomPositionIDs) == 0 {
+		return nil
+	}
+
+	b.logger.Printf("🧹 Cleaning up %d phantom position(s)...", len(phantomPositionIDs))
+
+	for _, posID := range phantomPositionIDs {
+		if err := b.storage.DeletePosition(posID); err != nil {
+			b.logger.Printf("⚠️  Failed to delete phantom position %s: %v", posID, err)
+			continue
+		}
+		b.logger.Printf("✅ Deleted phantom position: %s", posID)
+	}
+
+	return nil
+}
+
+// recoverUntrackedPositions adds broker positions that aren't being tracked locally
+func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []broker.PositionItem, untrackedSymbols []string) error {
+	if len(untrackedSymbols) == 0 {
+		return nil
+	}
+
+	b.logger.Printf("🔄 Recovering %d untracked position(s)...", len(untrackedSymbols))
+
+	// Track multiplicities of untracked symbols
+	untrackedMap := make(map[string]int)
+	for _, symbol := range untrackedSymbols {
+		untrackedMap[symbol]++
+	}
+
+	// Group broker positions by their strangle pairs
+	strangleGroups := make(map[string][]broker.PositionItem)
+
+	for _, brokerPos := range brokerPositions {
+		if untrackedMap[brokerPos.Symbol] <= 0 {
+			continue
+		}
+		untrackedMap[brokerPos.Symbol]--
+
+		// Extract base symbol and expiration to group strangles
+		// SPY251107C00690000 -> SPY251107
+		if len(brokerPos.Symbol) < symbolMinLength {
+			b.logger.Printf("⚠️  Skipping malformed symbol: %s (length %d, expected >= %d)",
+				brokerPos.Symbol, len(brokerPos.Symbol), symbolMinLength)
+			continue
+		}
+
+		key := brokerPos.Symbol[:symbolPrefixLength] // SPY + YYMMDD
+		strangleGroups[key] = append(strangleGroups[key], brokerPos)
+	}
+
+	// For each expiration group, pair calls and puts by strike to produce multiple positions
+	for groupKey, positions := range strangleGroups {
+		var calls, puts []broker.PositionItem
+		for _, p := range positions {
+			switch extractOptionType(p.Symbol) {
+			case "call":
+				calls = append(calls, p)
+			case "put":
+				puts = append(puts, p)
+			}
+		}
+		if len(calls) == 0 || len(puts) == 0 {
+			b.logger.Printf("⚠️  Incomplete strangle group %s (calls=%d, puts=%d), skipping", groupKey, len(calls), len(puts))
+			continue
+		}
+		// Sort by strike to pair deterministically
+		sort.Slice(calls, func(i, j int) bool { return extractStrike(calls[i].Symbol) < extractStrike(calls[j].Symbol) })
+		sort.Slice(puts, func(i, j int) bool { return extractStrike(puts[i].Symbol) < extractStrike(puts[j].Symbol) })
+		n := len(calls)
+		if len(puts) < n {
+			n = len(puts)
+		}
+		for i := 0; i < n; i++ {
+			recoveredPos := b.createRecoveredPosition([]broker.PositionItem{calls[i], puts[i]})
+			if err := b.storage.AddPosition(&recoveredPos); err != nil {
+				b.logger.Printf("❌ Failed to save recovered position %s: %v", recoveredPos.ID, err)
+				continue
+			}
+			b.logger.Printf("✅ Recovered position: %s (pair %d/%d)", recoveredPos.ID, i+1, n)
+		}
+	}
+
+	return nil
+}
+
+// createRecoveredPosition creates a Position from broker positions
+func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) models.Position {
+	// Use first position to extract common data
+	first := brokerPositions[0]
+
+	// Extract base symbol and expiration with validation
+	baseSymbol := first.Symbol[:symbolBaseLength] // SPY
+	expirationStr := first.Symbol[symbolBaseLength:symbolPrefixLength] // YYMMDD
+
+	// Parse expiration date with error handling
+	expiration, err := time.Parse("060102", expirationStr)
+	if err != nil {
+		b.logger.Printf("⚠️  Failed to parse expiration date %s: %v, using default", expirationStr, err)
+		expiration = time.Now().AddDate(0, 0, 45) // Default to 45 DTE
+	}
+
+	// Default values
+	var callStrike, putStrike float64
+	var totalCredit float64
+	quantity := int(first.Quantity)
+	if quantity < 0 {
+		quantity = -quantity // Ensure positive quantity
+	}
+
+	// Separate call and put strikes and calculate total credit
+	for _, brokerPos := range brokerPositions {
+		optType := extractOptionType(brokerPos.Symbol)
+		strike := extractStrike(brokerPos.Symbol)
+
+		if strike <= 0 {
+			b.logger.Printf("⚠️  Invalid strike price %.2f for symbol %s", strike, brokerPos.Symbol)
+			continue
+		}
+
+		if optType == "call" {
+			callStrike = strike
+		} else if optType == "put" {
+			putStrike = strike
+		}
+
+		// Estimate credit from cost basis (negative cost basis means we received credit)
+		totalCredit += -brokerPos.CostBasis
+	}
+
+	// Validate strikes were found
+	if callStrike <= 0 || putStrike <= 0 {
+		b.logger.Printf("⚠️  Invalid strikes recovered: call=%.2f, put=%.2f", callStrike, putStrike)
+	}
+
+	// Create position using NewPosition factory
+	pos := models.NewPosition(
+		fmt.Sprintf("recovered-%d", time.Now().UnixNano()),
+		baseSymbol,
+		putStrike,
+		callStrike,
+		expiration,
+		quantity,
+	)
+
+	// Set state to open and credit received
+	pos.State = models.StateOpen
+	pos.StateMachine = models.NewStateMachineFromState(models.StateOpen)
+	pos.EntryDate = time.Now() // We don't know the actual entry time
+	pos.CreditReceived = totalCredit
+	pos.Adjustments = make([]models.Adjustment, 0)
+
+	return *pos
+}
+
+// extractOptionType extracts 'call' or 'put' from option symbol
+func extractOptionType(symbol string) string {
+	if len(symbol) < symbolTypeOffset+1 {
+		return "unknown"
+	}
+	optType := symbol[symbolTypeOffset : symbolTypeOffset+1] // C or P
+	if optType == "C" {
+		return "call"
+	} else if optType == "P" {
+		return "put"
+	}
+	return "unknown"
+}
+
+// extractStrike extracts strike price from option symbol
+// Returns 0.0 if the symbol is invalid or parsing fails
+func extractStrike(symbol string) float64 {
+	if len(symbol) < symbolMinLength {
+		return 0.0
+	}
+	strikeStr := symbol[symbolStrikeOffset:] // 00690000
+	strike, err := strconv.ParseFloat(strikeStr, 64)
+	if err != nil {
+		return 0.0
+	}
+	return strike / strikeScaleDivisor // Convert to actual price
+}
 
 // getMarketCalendar gets the market calendar for a given month/year, with caching
 func (b *Bot) getMarketCalendar(month, year int) (*broker.MarketCalendarResponse, error) {

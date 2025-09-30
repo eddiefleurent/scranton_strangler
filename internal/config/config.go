@@ -33,6 +33,7 @@ type Config struct {
 	Strategy    StrategyConfig    `yaml:"strategy"`
 	Risk        RiskConfig        `yaml:"risk"`
 	Storage     StorageConfig     `yaml:"storage"`
+	Dashboard   DashboardConfig   `yaml:"dashboard"`
 }
 
 // EnvironmentConfig defines the environment settings.
@@ -43,14 +44,16 @@ type EnvironmentConfig struct {
 
 // BrokerConfig defines broker API settings.
 type BrokerConfig struct {
-	Provider    string `yaml:"provider"`
-	APIKey      string `yaml:"api_key"`
-	AccountID   string `yaml:"account_id"`
-	UseOTOCO    bool   `yaml:"use_otoco"` // Use OTOCO orders for preset exits
+	Provider         string        `yaml:"provider"`
+	APIKey           string        `yaml:"api_key"`
+	AccountID        string        `yaml:"account_id"`
+	UseOTOCO         bool          `yaml:"use_otoco"` // Use OTOCO orders for preset exits
 	// OTOCOPreview enables preview validation for OTOCO orders before placement
-	OTOCOPreview bool `yaml:"otoco_preview"`
+	OTOCOPreview     bool          `yaml:"otoco_preview"`
 	// OTOCOFallback enables fallback to separate orders if OTOCO validation fails
-	OTOCOFallback bool `yaml:"otoco_fallback"`
+	OTOCOFallback    bool          `yaml:"otoco_fallback"`
+	// PhantomThreshold defines how long to wait before cleaning up phantom positions (quantity=0, credit=0)
+	PhantomThreshold time.Duration `yaml:"phantom_threshold"`
 }
 
 // StrategyConfig defines trading strategy parameters.
@@ -109,6 +112,13 @@ type ScheduleConfig struct {
 // StorageConfig defines storage settings for position data.
 type StorageConfig struct {
 	Path string `yaml:"path"`
+}
+
+// DashboardConfig defines web dashboard settings.
+type DashboardConfig struct {
+	Enabled   bool   `yaml:"enabled"`    // Enable web dashboard
+	Port      int    `yaml:"port"`       // HTTP server port
+	AuthToken string `yaml:"auth_token"` // Optional authentication token
 }
 
 // Load reads and parses the configuration file from the specified path.
@@ -192,6 +202,11 @@ func (c *Config) Validate() error {
 	case "tradier":
 	default:
 		return fmt.Errorf("broker.provider must be 'tradier'")
+	}
+
+	// Phantom threshold validation
+	if c.Broker.PhantomThreshold < 0 {
+		return fmt.Errorf("broker.phantom_threshold must be >= 0")
 	}
 
 	// Strategy validation
@@ -307,6 +322,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("storage.path is required")
 	}
 
+	// Dashboard validation
+	if c.Dashboard.Enabled {
+		if c.Dashboard.Port <= 0 || c.Dashboard.Port > 65535 {
+			return fmt.Errorf("dashboard.port must be between 1 and 65535")
+		}
+	}
+
 	return nil
 }
 
@@ -388,6 +410,12 @@ func (c *Config) Normalize() {
 	}
 	if c.Strategy.MaxNewPositionsPerCycle == 0 {
 		c.Strategy.MaxNewPositionsPerCycle = 1 // Default to 1 for safety
+	}
+	if c.Dashboard.Port == 0 {
+		c.Dashboard.Port = 9847 // Default port as specified in tasks
+	}
+	if c.Broker.PhantomThreshold == 0 {
+		c.Broker.PhantomThreshold = 10 * time.Minute // Default to 10 minutes
 	}
 }
 

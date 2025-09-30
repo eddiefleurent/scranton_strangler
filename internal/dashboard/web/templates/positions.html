@@ -1,0 +1,49 @@
+{{define "positions-content"}}
+<div class="positions-table-wrapper">
+    <table class="positions-table">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>State</th>
+                <th>Entry Date</th>
+                <th>DTE</th>
+                <th>Strikes</th>
+                <th>Credit</th>
+                <th>Current P&L</th>
+                <th>P&L %</th>
+                <th>Target/Stop</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .}}
+            <tr class="position-row {{if .IsProfit}}profit{{else}}loss{{end}}" 
+                hx-get="/partials/position/{{.ID}}"
+                hx-target="#position-detail-container"
+                hx-swap="innerHTML"
+                hx-on:htmx:after-swap="showPositionDetail()">
+                <td>{{.Symbol}}</td>
+                <td><span class="state-badge state-{{.State}}">{{.State}}</span></td>
+                <td>{{.EntryDate.Format "01/02"}}</td>
+                <td class="{{if lt .DTE 21}}warning{{end}}">{{.DTE}}</td>
+                <td><span aria-label="Put strike: {{printf "%.0f" .PutStrike}}, Call strike: {{printf "%.0f" .CallStrike}}">{{printf "%.0f" .PutStrike}}/{{printf "%.0f" .CallStrike}}</span></td>
+                <td>${{printf "%.2f" .CreditReceived}}</td>
+                <td class="{{if .IsProfit}}positive{{else}}negative{{end}}">
+                    ${{printf "%.2f" .CurrentPnL}}
+                </td>
+                <td class="{{if .IsProfit}}positive{{else}}negative{{end}}">
+                    {{printf "%.1f" .PnLPercent}}%
+                </td>
+                <td>
+                    <span class="target">${{printf "%.2f" .ProfitTarget}}</span> / 
+                    <span class="stop">${{printf "%.2f" .StopLoss}}</span>
+                </td>
+            </tr>
+            {{else}}
+            <tr>
+                <td colspan="9" class="no-data">No active positions</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{end}}

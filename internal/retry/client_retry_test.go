@@ -50,7 +50,7 @@ func (f *fakeBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 }
 
 func (f *fakeBroker) GetPositions() ([]broker.PositionItem, error) {
-	return []broker.PositionItem{}, nil
+	return f.GetPositionsCtx(context.Background())
 }
 
 func (f *fakeBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
@@ -136,6 +136,14 @@ func (f *fakeBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity i
 	return &broker.OrderResponse{}, nil
 }
 
+func (f *fakeBroker) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return f.PlaceBuyToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
+func (f *fakeBroker) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	return f.PlaceSellToCloseMarketOrder(optionSymbol, quantity, duration, tag)
+}
+
 func (f *fakeBroker) CloseStranglePosition(symbol string, putStrike, callStrike float64, expiration string, qty int, maxDebit float64, tag string) (*broker.OrderResponse, error) {
 	callNum := atomic.AddInt32(&f.callCount, 1)
 
@@ -190,6 +198,23 @@ func (f *fakeBroker) CloseStranglePositionCtx(ctx context.Context, symbol string
 
 	// Otherwise return success
 	return f.successResponse(), nil
+}
+
+// Add missing CancelOrder methods only
+func (f *fakeBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	return f.successResponse(), nil
+}
+
+func (f *fakeBroker) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	return f.successResponse(), nil
+}
+
+func (f *fakeBroker) GetOrders() (*broker.OrdersResponse, error) {
+	return &broker.OrdersResponse{}, nil
+}
+
+func (f *fakeBroker) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
+	return f.GetOrders()
 }
 
 func (f *fakeBroker) successResponse() *broker.OrderResponse {

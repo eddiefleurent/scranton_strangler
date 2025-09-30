@@ -27,7 +27,7 @@ type TradingCycle struct {
 func NewTradingCycle(bot *Bot) *TradingCycle {
 	return &TradingCycle{
 		bot:        bot,
-		reconciler: NewReconciler(bot.broker, bot.storage, bot.logger),
+		reconciler: NewReconciler(bot.broker, bot.storage, bot.logger, bot.config.Broker.PhantomThreshold),
 	}
 }
 
@@ -169,22 +169,15 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 		maxPositions = 1
 	}
 
-	if len(positions) >= maxPositions {
+	// Count active positions (already reconciled in Run())
+	activeCount := len(positions)
+
+	if activeCount >= maxPositions {
 		tc.bot.logger.Printf("Maximum positions (%d) reached, not checking for new entries", maxPositions)
 		return
 	}
 
-	tc.bot.logger.Printf("Have %d/%d positions, checking entry conditions...", len(positions), maxPositions)
-
-	// Additional reconcile before opening new trades
-	tc.bot.logger.Printf("Running additional reconcile check before opening new trades...")
-	positions = tc.reconciler.ReconcilePositions(positions)
-
-	if len(positions) >= maxPositions {
-		tc.bot.logger.Printf("Position limit reached after reconcile (%d/%d), skipping new entries", 
-			len(positions), maxPositions)
-		return
-	}
+	tc.bot.logger.Printf("Have %d/%d active positions; checking entry conditions...", activeCount, maxPositions)
 
 	// Check buying power
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -212,7 +205,10 @@ func (tc *TradingCycle) checkEntryConditions(positions []models.Position) {
 	tc.bot.logger.Printf("Entry signal: %s", reason)
 
 	// Open new positions
-	remainingSlots := maxPositions - len(positions)
+	remainingSlots := maxPositions - activeCount
+	if remainingSlots < 0 {
+		remainingSlots = 0
+	}
 	maxNewPositions := tc.bot.config.Strategy.MaxNewPositionsPerCycle
 	if maxNewPositions <= 0 {
 		maxNewPositions = 1
@@ -322,7 +318,7 @@ func (tc *TradingCycle) placeStrangleOrder(order *strategy.StrangleOrder) (*brok
 		order.Quantity,
 		px,
 		false,
-		string(broker.DurationGTC),
+		string(broker.DurationDay), // Day orders auto-cancel at market close
 		clientOrderID,
 	)
 }

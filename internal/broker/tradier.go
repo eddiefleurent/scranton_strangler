@@ -13,6 +13,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +35,7 @@ const QuantityEpsilon = 1e-6
 
 // ErrOTOCOUnsupported is returned when OTOCO orders are not supported for multi-leg strangle orders
 var ErrOTOCOUnsupported = errors.New("otoco unsupported for multi-leg strangle")
+
 
 // APIError represents an API error with status code and response body
 type APIError struct {
@@ -446,26 +448,36 @@ type MarketDay struct {
 	} `json:"postmarket,omitempty"`
 }
 
+// Order represents a single order from the Tradier API.
+type Order struct {
+	CreateDate        string  `json:"create_date"`
+	Type              string  `json:"type"`
+	Symbol            string  `json:"symbol"`
+	Side              string  `json:"side"`
+	Class             string  `json:"class"`
+	Status            string  `json:"status"`
+	Duration          string  `json:"duration"`
+	TransactionDate   string  `json:"transaction_date"`
+	AvgFillPrice      float64 `json:"avg_fill_price"`
+	ExecQuantity      float64 `json:"exec_quantity"`
+	LastFillPrice     float64 `json:"last_fill_price"`
+	LastFillQuantity  float64 `json:"last_fill_quantity"`
+	RemainingQuantity float64 `json:"remaining_quantity"`
+	ID                int     `json:"id"`
+	Price             float64 `json:"price"`
+	Quantity          float64 `json:"quantity"`
+}
+
 // OrderResponse represents the order response from the Tradier API.
 type OrderResponse struct {
-	Order struct {
-		CreateDate        string  `json:"create_date"`
-		Type              string  `json:"type"`
-		Symbol            string  `json:"symbol"`
-		Side              string  `json:"side"`
-		Class             string  `json:"class"`
-		Status            string  `json:"status"`
-		Duration          string  `json:"duration"`
-		TransactionDate   string  `json:"transaction_date"`
-		AvgFillPrice      float64 `json:"avg_fill_price"`
-		ExecQuantity      float64 `json:"exec_quantity"`
-		LastFillPrice     float64 `json:"last_fill_price"`
-		LastFillQuantity  float64 `json:"last_fill_quantity"`
-		RemainingQuantity float64 `json:"remaining_quantity"`
-		ID                int     `json:"id"`
-		Price             float64 `json:"price"`
-		Quantity          float64 `json:"quantity"`
-	} `json:"order"`
+	Order Order `json:"order"`
+}
+
+// OrdersResponse represents the response when fetching multiple orders from the Tradier API.
+type OrdersResponse struct {
+	Orders struct {
+		Order singleOrArray[Order] `json:"order"`
+	} `json:"orders"`
 }
 
 // HistoricalDataPoint represents a single historical data point
@@ -560,14 +572,7 @@ func (t *TradierAPI) GetOptionChainCtx(ctx context.Context, symbol, expiration s
 
 // GetPositions retrieves current positions from the account.
 func (t *TradierAPI) GetPositions() ([]PositionItem, error) {
-	endpoint := fmt.Sprintf("%s/accounts/%s/positions", t.baseURL, t.accountID)
-
-	var response PositionsResponse
-	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
-		return nil, err
-	}
-
-	return []PositionItem(response.Positions.Position), nil
+	return t.GetPositionsCtx(context.Background())
 }
 
 // GetPositionsCtx retrieves current positions from the account with context support.
@@ -978,6 +983,56 @@ func (t *TradierAPI) GetOrderStatusCtx(ctx context.Context, orderID int) (*Order
 	return &response, nil
 }
 
+// CancelOrder cancels an existing order by ID
+func (t *TradierAPI) CancelOrder(orderID int) (*OrderResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
+	var response OrderResponse
+	if err := t.makeRequest("DELETE", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	// Synthesize success response for 204 No Content responses
+	if response.Order.ID == 0 && response.Order.Status == "" {
+		response.Order.ID = orderID
+		response.Order.Status = "canceled"
+	}
+	return &response, nil
+}
+
+// CancelOrderCtx cancels an existing order by ID with context
+func (t *TradierAPI) CancelOrderCtx(ctx context.Context, orderID int) (*OrderResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders/%d", t.baseURL, t.accountID, orderID)
+	var response OrderResponse
+	if err := t.makeRequestCtx(ctx, "DELETE", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	// Synthesize success response for 204 No Content responses
+	if response.Order.ID == 0 && response.Order.Status == "" {
+		response.Order.ID = orderID
+		response.Order.Status = "canceled"
+	}
+	return &response, nil
+}
+
+// GetOrders retrieves all orders for the account from the current trading day
+func (t *TradierAPI) GetOrders() (*OrdersResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrdersResponse
+	if err := t.makeRequest("GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+// GetOrdersCtx retrieves all orders for the account from the current trading day with context
+func (t *TradierAPI) GetOrdersCtx(ctx context.Context) (*OrdersResponse, error) {
+	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
+	var response OrdersResponse
+	if err := t.makeRequestCtx(ctx, "GET", endpoint, nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 // PlaceBuyToCloseOrder places a buy-to-close order for an option position.
 func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate price for limit orders
@@ -997,7 +1052,7 @@ func (t *TradierAPI) PlaceBuyToCloseOrder(optionSymbol string, quantity int, max
 	}
 
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1041,7 +1096,7 @@ func (t *TradierAPI) PlaceSellToCloseOrder(optionSymbol string, quantity int, ma
 		return nil, err
 	}
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1067,6 +1122,11 @@ func (t *TradierAPI) PlaceSellToCloseOrder(optionSymbol string, quantity int, ma
 
 // PlaceBuyToCloseMarketOrder places a buy-to-close market order for an option position.
 func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
+	return t.PlaceBuyToCloseMarketOrderCtx(context.Background(), optionSymbol, quantity, duration, tag...)
+}
+
+// PlaceBuyToCloseMarketOrderCtx places a buy-to-close market order for an option position with context support.
+func (t *TradierAPI) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate quantity for order
 	if quantity <= 0 {
 		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
@@ -1077,7 +1137,7 @@ func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 		return nil, err
 	}
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1094,7 +1154,7 @@ func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 	}
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
 	var response OrderResponse
-	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+	if err := t.makeRequestCtx(ctx, "POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -1102,6 +1162,11 @@ func (t *TradierAPI) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 
 // PlaceSellToCloseMarketOrder places a sell-to-close market order for an option position.
 func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
+	return t.PlaceSellToCloseMarketOrderCtx(context.Background(), optionSymbol, quantity, duration, tag...)
+}
+
+// PlaceSellToCloseMarketOrderCtx places a sell-to-close market order for an option position with context support.
+func (t *TradierAPI) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag ...string) (*OrderResponse, error) {
 	// Validate quantity for order
 	if quantity <= 0 {
 		return nil, fmt.Errorf("invalid quantity for order: %d, quantity must be greater than zero", quantity)
@@ -1112,7 +1177,7 @@ func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity i
 		return nil, err
 	}
 	// Extract underlying symbol from option OCC/OSI code
-	symbol := extractUnderlyingFromOSI(optionSymbol)
+	symbol := ExtractUnderlyingFromOSI(optionSymbol)
 	if symbol == "" {
 		return nil, fmt.Errorf("failed to extract underlying symbol from option symbol: %s", optionSymbol)
 	}
@@ -1129,15 +1194,13 @@ func (t *TradierAPI) PlaceSellToCloseMarketOrder(optionSymbol string, quantity i
 	}
 	endpoint := fmt.Sprintf("%s/accounts/%s/orders", t.baseURL, t.accountID)
 	var response OrderResponse
-	if err := t.makeRequest("POST", endpoint, params, &response); err != nil {
+	if err := t.makeRequestCtx(ctx, "POST", endpoint, params, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
 }
 
 // PlaceStrangleOTOCO places a strangle order with OTOCO (One Triggers Other Cancels) functionality
-// Since Tradier doesn't support OTOCO for multi-leg orders, we implement it by placing
-// a regular strangle order and including profitTarget as a custom parameter for testing
 func (t *TradierAPI) PlaceStrangleOTOCO(
 	symbol string,
 	putStrike, callStrike float64,
@@ -1148,24 +1211,9 @@ func (t *TradierAPI) PlaceStrangleOTOCO(
 	duration string,
 	tag string,
 ) (*OrderResponse, error) {
-	// For testing purposes, we'll place a regular strangle order but include profitTarget
-	// in a way that can be verified by tests (e.g., in the tag or as a custom parameter)
-
-	// Use profitTarget to modify the tag or include it in the order somehow for verification
-	// Tradier API doesn't allow periods/decimals in tag, so convert to integer cents
-	profitCents := int(profitTarget * 1000) // Convert to thousandths to avoid decimals
-	
-	// Merge profit target info with the provided tag
-	var finalTag string
-	if tag != "" {
-		finalTag = fmt.Sprintf("%s-otoco-profit-%d", tag, profitCents)
-	} else {
-		finalTag = fmt.Sprintf("otoco-profit-%d", profitCents)
-	}
-
-	// Place the strangle order with the modified tag that includes profitTarget
-	return t.PlaceStrangleOrder(symbol, putStrike, callStrike, expiration,
-		quantity, credit, preview, duration, finalTag)
+	// Tradier does not support OTOCO for multi-leg strangles.
+	// Signal explicit unsupported to allow caller-side fallback.
+	return nil, ErrOTOCOUnsupported
 }
 
 // Helper method for making HTTP requests
@@ -1330,7 +1378,7 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 		pos := &positions[i]
 
 		// Ensure the OSI underlying matches exactly
-		if extractUnderlyingFromOSI(pos.Symbol) != symbol {
+		if ExtractUnderlyingFromOSI(pos.Symbol) != symbol {
 			continue
 		}
 
@@ -1353,9 +1401,9 @@ func CheckStranglePosition(positions []PositionItem, symbol string) (hasStrangle
 	return
 }
 
-// extractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
+// ExtractUnderlyingFromOSI extracts the underlying symbol from an OSI-formatted option symbol
 // e.g., "SPY241220P00450000" -> "SPY"
-func extractUnderlyingFromOSI(s string) string {
+func ExtractUnderlyingFromOSI(s string) string {
 	// OSI format: UNDERLYING + YYMMDD + P/C + 8-digit strike
 	// We need to find the start of the 6-digit expiration date
 	trimmedS := strings.TrimSpace(s)
@@ -1456,4 +1504,243 @@ func isEightDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// ============ Audit and Debugging Methods ============
+
+// AuditResult contains the results of auditing broker vs local positions
+type AuditResult struct {
+	BrokerPositions      []PositionItem    `json:"broker_positions"`
+	OpenOrders          []Order           `json:"open_orders"`
+	BrokerStrangles     []StrangleGroup   `json:"broker_strangles"`
+	Timestamp           time.Time         `json:"timestamp"`
+	Summary             AuditSummary      `json:"summary"`
+}
+
+// StrangleGroup represents a grouped put/call strangle position
+type StrangleGroup struct {
+	Symbol        string       `json:"symbol"`
+	Expiration    string       `json:"expiration"`
+	PutPosition   *PositionItem `json:"put_position,omitempty"`
+	CallPosition  *PositionItem `json:"call_position,omitempty"`
+	TotalCost     float64      `json:"total_cost"`
+	TotalQuantity float64      `json:"total_quantity"`
+	IsComplete    bool         `json:"is_complete"`
+}
+
+// AuditSummary provides high-level audit statistics
+type AuditSummary struct {
+	TotalPositions    int     `json:"total_positions"`
+	TotalStrangles    int     `json:"total_strangles"`
+	CompleteStrangles int     `json:"complete_strangles"`
+	OpenOrders        int     `json:"open_orders"`
+	TotalCostBasis    float64 `json:"total_cost_basis"`
+}
+
+// AuditBrokerPositions performs a comprehensive audit of broker positions and orders
+func (t *TradierAPI) AuditBrokerPositions() (*AuditResult, error) {
+	return t.AuditBrokerPositionsCtx(context.Background())
+}
+
+// AuditBrokerPositionsCtx performs a comprehensive audit of broker positions and orders with context
+func (t *TradierAPI) AuditBrokerPositionsCtx(ctx context.Context) (*AuditResult, error) {
+	// Get current positions from broker
+	positions, err := t.GetPositionsCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get broker positions: %w", err)
+	}
+
+	// Get current orders from broker
+	ordersResp, err := t.GetOrdersCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get broker orders: %w", err)
+	}
+
+	// Extract open orders only
+	var openOrders []Order
+	if ordersResp != nil {
+		for _, order := range ordersResp.Orders.Order {
+			switch strings.ToLower(order.Status) {
+			case "open", "pending", "submitted", "partially_filled":
+				openOrders = append(openOrders, order)
+			}
+		}
+	}
+
+	// Group positions into strangles
+	strangles := t.groupPositionsIntoStrangles(positions)
+
+	// Calculate summary statistics
+	summary := AuditSummary{
+		TotalPositions: len(positions),
+		TotalStrangles: len(strangles),
+		OpenOrders:     len(openOrders),
+	}
+
+	var totalCost float64
+	for _, pos := range positions {
+		totalCost += pos.CostBasis
+	}
+	summary.TotalCostBasis = totalCost
+
+	for _, strangle := range strangles {
+		if strangle.IsComplete {
+			summary.CompleteStrangles++
+		}
+	}
+
+	return &AuditResult{
+		BrokerPositions: positions,
+		OpenOrders:      openOrders,
+		BrokerStrangles: strangles,
+		Timestamp:       time.Now(),
+		Summary:         summary,
+	}, nil
+}
+
+// groupPositionsIntoStrangles groups individual option positions into strangle pairs
+func (t *TradierAPI) groupPositionsIntoStrangles(positions []PositionItem) []StrangleGroup {
+	// Group by underlying + expiration
+	groups := make(map[string]*StrangleGroup)
+
+	for i := range positions {
+		pos := positions[i]
+		// Only consider short positions (negative quantity)
+		if pos.Quantity >= -QuantityEpsilon {
+			continue
+		}
+
+		underlying := ExtractUnderlyingFromOSI(pos.Symbol)
+		if underlying == "" {
+			continue
+		}
+
+		expiration := extractExpirationFromOSI(pos.Symbol)
+		if expiration == "" {
+			continue
+		}
+
+		groupKey := underlying + "_" + expiration
+
+		if groups[groupKey] == nil {
+			groups[groupKey] = &StrangleGroup{
+				Symbol:     underlying,
+				Expiration: expiration,
+			}
+		}
+
+		group := groups[groupKey]
+		optType := optionTypeFromSymbol(pos.Symbol)
+
+		switch optType {
+		case "put":
+			group.PutPosition = &positions[i]
+		case "call":
+			group.CallPosition = &positions[i]
+		}
+
+		group.TotalCost += pos.CostBasis
+		group.TotalQuantity += math.Abs(pos.Quantity)
+	}
+
+	// Convert map to slice and mark complete strangles
+	var strangles []StrangleGroup
+	for _, group := range groups {
+		group.IsComplete = group.PutPosition != nil && group.CallPosition != nil
+		strangles = append(strangles, *group)
+	}
+
+	return strangles
+}
+
+// extractExpirationFromOSI extracts the expiration date from an OSI option symbol
+// e.g., "SPY241220P00450000" -> "241220"
+func extractExpirationFromOSI(s string) string {
+	underlying := ExtractUnderlyingFromOSI(s)
+	if underlying == "" {
+		return ""
+	}
+
+	// The expiration starts right after the underlying
+	startIdx := len(underlying)
+	if startIdx+6 > len(s) {
+		return ""
+	}
+
+	expiration := s[startIdx : startIdx+6]
+	if !isSixDigits(expiration) {
+		return ""
+	}
+
+	return expiration
+}
+
+// PrintAuditReport prints a formatted audit report to stdout
+func (a *AuditResult) PrintAuditReport() {
+	fmt.Printf("=== BROKER AUDIT REPORT ===\n")
+	fmt.Printf("Timestamp: %s\n", a.Timestamp.Format("2006-01-02 15:04:05"))
+	fmt.Printf("\n")
+
+	fmt.Printf("SUMMARY:\n")
+	fmt.Printf("  Total Positions: %d\n", a.Summary.TotalPositions)
+	fmt.Printf("  Total Strangles: %d (%d complete)\n", a.Summary.TotalStrangles, a.Summary.CompleteStrangles)
+	fmt.Printf("  Open Orders: %d\n", a.Summary.OpenOrders)
+	fmt.Printf("  Total Cost Basis: $%.2f\n", a.Summary.TotalCostBasis)
+	fmt.Printf("\n")
+
+	if len(a.BrokerStrangles) > 0 {
+		fmt.Printf("STRANGLE POSITIONS:\n")
+		for i, strangle := range a.BrokerStrangles {
+			status := "INCOMPLETE"
+			if strangle.IsComplete {
+				status = "COMPLETE"
+			}
+			fmt.Printf("  %d. %s %s [%s]\n", i+1, strangle.Symbol, strangle.Expiration, status)
+			fmt.Printf("     Total Cost: $%.2f, Quantity: %.0f contracts\n", strangle.TotalCost, strangle.TotalQuantity)
+			
+			if strangle.PutPosition != nil {
+				putStrike := extractStrikeFromOSI(strangle.PutPosition.Symbol)
+				fmt.Printf("     Put: %s strike, %.0f contracts, $%.2f cost\n", 
+					putStrike, math.Abs(strangle.PutPosition.Quantity), strangle.PutPosition.CostBasis)
+			}
+			if strangle.CallPosition != nil {
+				callStrike := extractStrikeFromOSI(strangle.CallPosition.Symbol)
+				fmt.Printf("     Call: %s strike, %.0f contracts, $%.2f cost\n", 
+					callStrike, math.Abs(strangle.CallPosition.Quantity), strangle.CallPosition.CostBasis)
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	if len(a.OpenOrders) > 0 {
+		fmt.Printf("OPEN ORDERS:\n")
+		for i, order := range a.OpenOrders {
+			fmt.Printf("  %d. Order #%d - %s %s\n", i+1, order.ID, order.Symbol, order.Status)
+			fmt.Printf("     Type: %s, Side: %s, Quantity: %.0f\n", order.Type, order.Side, order.Quantity)
+			fmt.Printf("     Price: $%.2f, Created: %s\n", order.Price, order.CreateDate)
+			fmt.Printf("\n")
+		}
+	}
+}
+
+// extractStrikeFromOSI extracts the strike price from an OSI option symbol
+// e.g., "SPY241220P00450000" -> "450.00"
+func extractStrikeFromOSI(s string) string {
+	if len(s) < 8 {
+		return ""
+	}
+	
+	// Strike is the last 8 digits
+	strikeStr := s[len(s)-8:]
+	if !isEightDigits(strikeStr) {
+		return ""
+	}
+	
+	// Convert to float (divide by 1000 to get dollars.cents)
+	if strikeInt, err := strconv.Atoi(strikeStr); err == nil {
+		strikeFloat := float64(strikeInt) / 1000.0
+		return fmt.Sprintf("%.2f", strikeFloat)
+	}
+	
+	return strikeStr
 }

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/eddiefleurent/scranton_strangler/internal/broker"
@@ -15,27 +18,36 @@ import (
 
 // Reconciler handles position synchronization between broker and storage
 type Reconciler struct {
-	broker  broker.Broker
-	storage storage.Interface
-	logger  *log.Logger
+	broker         broker.Broker
+	storage        storage.Interface
+	logger         *log.Logger
+	coldStartOnce  sync.Once
+	phantomThreshold time.Duration
 }
 
 // NewReconciler creates a new position reconciler
-func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.Logger) *Reconciler {
+func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.Logger, phantomThreshold time.Duration) *Reconciler {
 	return &Reconciler{
 		broker:  broker,
 		storage: storage,
 		logger:  logger,
+		phantomThreshold: phantomThreshold,
 	}
 }
 
+const positionsFetchTimeout = 8 * time.Second
+
 // ReconcilePositions detects position mismatches between broker and storage
-// It handles two cases:
+// It handles three cases:
 // 1. Positions in storage but closed in broker (manual closes)
 // 2. Positions in broker but missing from storage (timeout-related sync issues)
+// 3. Cold start: stored positions are empty while broker has positions.
+//    We log this and rely on the orphan-detection pass below to create recovery positions.
 func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []models.Position {
-	// Get current broker positions
-	brokerPositions, err := r.broker.GetPositions()
+	// Get current broker positions with timeout to prevent stuck cycles
+	ctx, cancel := context.WithTimeout(context.Background(), positionsFetchTimeout)
+	defer cancel()
+	brokerPositions, err := r.broker.GetPositionsCtx(ctx)
 	if err != nil {
 		r.logger.Printf("Failed to get broker positions for reconciliation: %v", err)
 		return storedPositions // Return unchanged on error
@@ -43,6 +55,16 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 
 	r.logger.Printf("Reconciling %d stored positions with %d broker positions",
 		len(storedPositions), len(brokerPositions))
+
+	// CRITICAL: Cold start scenario - if no stored positions but broker has positions,
+	// this is likely a production restart without positions.json file
+	if len(storedPositions) == 0 && len(brokerPositions) > 0 {
+		// Use sync.Once to log cold start detection only once to avoid log spam
+		r.coldStartOnce.Do(func() {
+			r.logger.Printf("COLD START DETECTED: No stored positions but %d broker positions exist", len(brokerPositions))
+			r.logger.Printf("Cold start: will attempt recovery via orphan-detection pass...")
+		})
+	}
 
 	var activePositions []models.Position
 
@@ -52,6 +74,65 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 		if position.GetCurrentState() == models.StateClosed {
 			continue
 		}
+
+		// PHANTOM POSITION DETECTION: Clean up positions with quantity=0 that never filled
+		// These are created when orders timeout during polling but never actually executed
+		// Check BEFORE updating LastChecked so we can use the old value for age calculation
+		if position.Quantity == 0 && position.CreditReceived == 0 {
+			// Determine age of position using LastChecked from previous reconciliation or EntryDate
+			var timeSinceCreation time.Duration
+			const stalePhantomThreshold = 24 * time.Hour // 24 hours for stale phantoms
+
+			if !position.EntryDate.IsZero() {
+				// If EntryDate is set, use it
+				timeSinceCreation = time.Since(position.EntryDate)
+			} else if !position.LastChecked.IsZero() {
+				// Use LastChecked from previous reconciliation pass
+				timeSinceCreation = time.Since(position.LastChecked)
+			} else {
+				// Never checked before, check if it has adjustment history indicating age
+				if len(position.Adjustments) > 0 {
+					// Has adjustment history, likely been around a while
+					// Treat as stale (2x the normal threshold)
+					timeSinceCreation = r.phantomThreshold * 2
+				} else {
+					// Brand new position with no history - wait for phantom threshold
+					timeSinceCreation = 0
+				}
+			}
+
+			// Use shorter threshold for recent phantoms, longer for stale ones
+			threshold := r.phantomThreshold
+			if timeSinceCreation > stalePhantomThreshold {
+				// After 24 hours, definitely clean it up
+				r.logger.Printf("STALE PHANTOM POSITION DETECTED: Position %s has quantity=0 and credit=0 after %.1f hours - cleaning up",
+					shortID(position.ID), timeSinceCreation.Hours())
+
+				if err := r.storage.DeletePosition(position.ID); err != nil {
+					r.logger.Printf("Failed to clean up stale phantom position %s: %v", shortID(position.ID), err)
+					activePositions = append(activePositions, position)
+				} else {
+					r.logger.Printf("Successfully cleaned up stale phantom position %s", shortID(position.ID))
+				}
+				continue
+			} else if timeSinceCreation > threshold {
+				r.logger.Printf("PHANTOM POSITION DETECTED: Position %s has quantity=0 and credit=0 after %.0f minutes - cleaning up",
+					shortID(position.ID), timeSinceCreation.Minutes())
+
+				// Delete this phantom position directly without state machine transitions
+				// Phantoms never properly entered the system, so we just remove them
+				if err := r.storage.DeletePosition(position.ID); err != nil {
+					r.logger.Printf("Failed to clean up phantom position %s: %v", shortID(position.ID), err)
+					activePositions = append(activePositions, position) // Keep in list if can't delete
+				} else {
+					r.logger.Printf("Successfully cleaned up phantom position %s", shortID(position.ID))
+				}
+				continue // Skip to next position
+			}
+		}
+
+		// Update LastChecked timestamp after phantom detection
+		position.LastChecked = time.Now().UTC()
 
 		// Check if this position still exists in the broker
 		isOpenInBroker := r.isPositionOpenInBroker(&position, brokerPositions)
@@ -77,6 +158,10 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 				shortID(position.ID), finalPnL)
 		} else {
 			// Position is still active in broker
+			// Update LastChecked in storage
+			if err := r.storage.UpdatePosition(&position); err != nil {
+				r.logger.Printf("Warning: Failed to update LastChecked for position %s: %v", shortID(position.ID), err)
+			}
 			activePositions = append(activePositions, position)
 		}
 	}
@@ -85,17 +170,40 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 	// This handles the case where orders timed out locally but actually filled
 	orphanedStrangles := r.findOrphanedStrangles(brokerPositions, activePositions)
 	for _, orphanStrangle := range orphanedStrangles {
-		r.logger.Printf("Detected orphaned strangle in broker: Put %.0f / Call %.0f, creating recovery position",
+		r.logger.Printf("Detected orphaned strangle in broker: Put %.0f / Call %.0f",
 			orphanStrangle.putStrike, orphanStrangle.callStrike)
 
-		// Create a recovery position for this orphaned strangle
-		recoveryPos := r.createRecoveryPosition(orphanStrangle)
-		if recoveryPos != nil {
-			if err := r.storage.AddPosition(recoveryPos); err != nil {
-				r.logger.Printf("Failed to add recovery position: %v", err)
+		// First, check if we have a phantom position that matches this strangle
+		// Phantoms are positions with quantity=0 that never filled, but now we see them in broker
+		phantomToUpdate := r.findMatchingPhantom(activePositions, orphanStrangle)
+
+		if phantomToUpdate != nil {
+			// Update the existing phantom with broker data
+			r.logger.Printf("Found matching phantom position %s, updating with broker data", shortID(phantomToUpdate.ID))
+			phantomToUpdate.Quantity = orphanStrangle.quantity
+			phantomToUpdate.CreditReceived = float64(-orphanStrangle.putCostBasis - orphanStrangle.callCostBasis)
+
+			// Transition from submitted/idle to open state
+			if err := phantomToUpdate.TransitionState(models.StateOpen, models.ConditionOrderFilled); err != nil {
+				r.logger.Printf("Failed to transition phantom to open: %v", err)
+			}
+
+			if err := r.storage.UpdatePosition(phantomToUpdate); err != nil {
+				r.logger.Printf("Failed to update phantom position: %v", err)
 			} else {
-				activePositions = append(activePositions, *recoveryPos)
-				r.logger.Printf("Added recovery position %s for orphaned strangle", shortID(recoveryPos.ID))
+				r.logger.Printf("Successfully updated phantom position %s with broker data", shortID(phantomToUpdate.ID))
+			}
+		} else {
+			// No phantom found, create a recovery position
+			r.logger.Printf("No matching phantom found, creating recovery position")
+			recoveryPos := r.createRecoveryPosition(orphanStrangle)
+			if recoveryPos != nil {
+				if err := r.storage.AddPosition(recoveryPos); err != nil {
+					r.logger.Printf("Failed to add recovery position: %v", err)
+				} else {
+					activePositions = append(activePositions, *recoveryPos)
+					r.logger.Printf("Added recovery position %s for orphaned strangle", shortID(recoveryPos.ID))
+				}
 			}
 		}
 	}
@@ -105,11 +213,13 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 
 // orphanedStrangle represents a strangle position found in broker but not in storage
 type orphanedStrangle struct {
-	putStrike  float64
-	callStrike float64
-	expiration string
-	quantity   int
-	symbol     string
+	putStrike    float64
+	callStrike   float64
+	expiration   string
+	quantity     int
+	symbol       string
+	putCostBasis float64  // Cost basis for put leg from broker
+	callCostBasis float64 // Cost basis for call leg from broker
 }
 
 // findOrphanedStrangles identifies strangle positions in broker that aren't tracked in storage
@@ -138,16 +248,25 @@ func (r *Reconciler) findOrphanedStrangles(brokerPositions []broker.PositionItem
 
 		// Check if each strangle is already tracked in our active positions
 		for _, strangle := range strangles {
-			isTracked := false
-			for _, activePos := range activePositions {
-				if strangleMatches(activePos, strangle) {
-					isTracked = true
-					break
+			trackedQty := 0
+			for _, ap := range activePositions {
+				if math.Abs(ap.PutStrike-strangle.putStrike) < 0.01 &&
+					math.Abs(ap.CallStrike-strangle.callStrike) < 0.01 &&
+					ap.Expiration.Format("2006-01-02") == strangle.expiration &&
+					ap.Symbol == strangle.symbol {
+					// Use absolute value to correctly count inventory regardless of sign
+					if ap.Quantity < 0 {
+						trackedQty += -ap.Quantity
+					} else {
+						trackedQty += ap.Quantity
+					}
 				}
 			}
-
-			if !isTracked {
-				orphaned = append(orphaned, strangle)
+			missing := strangle.quantity - trackedQty
+			if missing > 0 {
+				s := strangle
+				s.quantity = missing
+				orphaned = append(orphaned, s)
 			}
 		}
 	}
@@ -197,11 +316,13 @@ func (r *Reconciler) createRecoveryPosition(orphan orphanedStrangle) *models.Pos
 
 // isPositionOpenInBroker checks if a stored position still exists in broker positions
 func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPositions []broker.PositionItem) bool {
-	// For options positions, check if we have both legs still open
-	hasCallLeg := false
-	hasCallStrike := false
-	hasPutLeg := false
-	hasPutStrike := false
+	// Require broker to have at least the stored quantity for both legs (by strike)
+	expectedQty := position.Quantity
+	if expectedQty < 0 {
+		expectedQty = -expectedQty
+	}
+	callQtyNet := 0
+	putQtyNet := 0
 
 	// Check if broker position matches our stored position strikes
 	for _, brokerPos := range brokerPositions {
@@ -225,25 +346,28 @@ func (r *Reconciler) isPositionOpenInBroker(position *models.Position, brokerPos
 			continue // Skip positions with different expirations
 		}
 
-		// Check if this matches one of our strangle legs
-		if optionType == "C" {
-			hasCallLeg = true
-			if math.Abs(parsedStrike-position.CallStrike) < 0.01 {
-				hasCallStrike = true
-			}
-		} else if optionType == "P" {
-			hasPutLeg = true
-			if math.Abs(parsedStrike-position.PutStrike) < 0.01 {
-				hasPutStrike = true
-			}
+		// Count contracts per matching strike/type (use signed quantities for net calculation)
+		q := int(math.Round(brokerPos.Quantity))
+		if optionType == "C" && math.Abs(parsedStrike-position.CallStrike) < 0.01 {
+			callQtyNet += q
+		} else if optionType == "P" && math.Abs(parsedStrike-position.PutStrike) < 0.01 {
+			putQtyNet += q
 		}
 	}
 
-	// Position is open if we have both call and put legs with matching strikes
-	return hasCallLeg && hasPutLeg && hasCallStrike && hasPutStrike
+	// Open only if broker holds at least the stored quantity for both legs (use abs of net to handle signed quantities)
+	return absInt(callQtyNet) >= expectedQty && absInt(putQtyNet) >= expectedQty
 }
 
 // Helper functions
+
+// absInt returns the absolute value of an integer
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
 
 // extractUnderlyingFromSymbol extracts the underlying ticker from an option symbol
 // For OPRA format: SPY240315C00610000 -> "SPY"
@@ -256,13 +380,7 @@ func extractUnderlyingFromSymbol(symbol string) string {
 	// Only iterate while there are at least 6 characters remaining to check
 	for i := 0; i <= len(symbol)-6; i++ {
 		// Check if we have 6 consecutive digits starting at position i
-		allDigits := true
-		for j := i; j < i+6; j++ {
-			if symbol[j] < '0' || symbol[j] > '9' {
-				allDigits = false
-				break
-			}
-		}
+		allDigits := isAllDigits(symbol[i : i+6])
 		
 		// If we found 6 consecutive digits and they're not at the start (index > 0),
 		// return the substring before them as the underlying ticker
@@ -286,15 +404,14 @@ func extractExpirationFromSymbol(symbol string) string {
 	// Look for 6 consecutive digits
 	for i := 0; i <= len(symbol)-6; i++ {
 		// Check if we have 6 consecutive digits starting at position i
-		allDigits := true
-		for j := i; j < i+6; j++ {
-			if symbol[j] < '0' || symbol[j] > '9' {
-				allDigits = false
-				break
+		if isAllDigits(symbol[i : i+6]) {
+			// Validate C/P after the date for OPRA format confirmation
+			if i+6 < len(symbol) {
+				t := symbol[i+6]
+				if t != 'C' && t != 'P' {
+					continue
+				}
 			}
-		}
-		
-		if allDigits {
 			// Found 6-digit date, extract and format
 			dateStr := symbol[i : i+6]
 			year := "20" + dateStr[0:2]
@@ -311,49 +428,90 @@ func extractExpirationFromSymbol(symbol string) string {
 func identifyStranglesFromPositions(positions []broker.PositionItem, expiration string) []orphanedStrangle {
 	var strangles []orphanedStrangle
 
-	// Group positions by strike for this expiration
-	callStrikes := make(map[float64]int) // strike -> quantity
+	callStrikes := make(map[float64]int)
 	putStrikes := make(map[float64]int)
+	callCostBasis := make(map[float64]float64) // Track cost basis for each strike
+	putCostBasis := make(map[float64]float64)
+
+	underlying := ""
 
 	for _, pos := range positions {
 		strike, optionType, err := parseOptionSymbol(pos.Symbol)
 		if err != nil {
 			continue
 		}
-
-		quantity := int(math.Abs(pos.Quantity)) // Use absolute value
-
+		if underlying == "" {
+			underlying = extractUnderlyingFromSymbol(pos.Symbol)
+		}
+		qty := int(math.Abs(pos.Quantity))
+		if qty <= 0 {
+			continue
+		}
 		if optionType == "C" {
-			callStrikes[strike] += quantity
+			callStrikes[strike] += qty
+			// Accumulate cost basis (negative values indicate credit received)
+			callCostBasis[strike] += pos.CostBasis
 		} else if optionType == "P" {
-			putStrikes[strike] += quantity
+			putStrikes[strike] += qty
+			putCostBasis[strike] += pos.CostBasis
 		}
 	}
 
-	// Find matching call/put pairs (simple approach - assumes same quantity)
-	for callStrike, callQty := range callStrikes {
-		for putStrike, putQty := range putStrikes {
-			if callQty == putQty && callQty > 0 {
-				strangles = append(strangles, orphanedStrangle{
-					putStrike:  putStrike,
-					callStrike: callStrike,
-					expiration: expiration,
-					quantity:   callQty,
-					symbol:     "SPY",
-				})
+	// deterministic ordering
+	callKeys := make([]float64, 0, len(callStrikes))
+	for k := range callStrikes {
+		callKeys = append(callKeys, k)
+	}
+	putKeys := make([]float64, 0, len(putStrikes))
+	for k := range putStrikes {
+		putKeys = append(putKeys, k)
+	}
+	sort.Float64s(callKeys)
+	sort.Float64s(putKeys)
+
+	// greedy 1:1 pairing without reuse
+	for _, ck := range callKeys {
+		cRem := callStrikes[ck]
+		if cRem == 0 {
+			continue
+		}
+		for pi := 0; pi < len(putKeys) && cRem > 0; pi++ {
+			pk := putKeys[pi]
+			pRem := putStrikes[pk]
+			if pRem == 0 {
+				continue
 			}
+			n := cRem
+			if pRem < n {
+				n = pRem
+			}
+			// Scale average per-contract basis by n
+			callAvg := 0.0
+			if callStrikes[ck] > 0 {
+				callAvg = callCostBasis[ck] / float64(callStrikes[ck])
+			}
+			putAvg := 0.0
+			if putStrikes[pk] > 0 {
+				putAvg = putCostBasis[pk] / float64(putStrikes[pk])
+			}
+			strangles = append(strangles, orphanedStrangle{
+				putStrike:     pk,
+				callStrike:    ck,
+				expiration:    expiration,
+				quantity:      n,
+				putCostBasis:  putAvg * float64(n),
+				callCostBasis: callAvg * float64(n),
+				symbol:        underlying,
+			})
+			cRem -= n
+			pRem -= n
+			putStrikes[pk] = pRem
 		}
 	}
 
 	return strangles
 }
 
-func strangleMatches(position models.Position, strangle orphanedStrangle) bool {
-	return math.Abs(position.PutStrike-strangle.putStrike) < 0.01 &&
-		math.Abs(position.CallStrike-strangle.callStrike) < 0.01 &&
-		position.Expiration.Format("2006-01-02") == strangle.expiration &&
-		position.Quantity == strangle.quantity
-}
 
 // parseOptionSymbol parses an OPRA format option symbol to extract strike and type
 // Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
@@ -417,4 +575,27 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
+}
+// findMatchingPhantom looks for a phantom position (quantity=0) that matches the orphaned strangle
+func (r *Reconciler) findMatchingPhantom(positions []models.Position, orphan orphanedStrangle) *models.Position {
+	for i := range positions {
+		pos := &positions[i]
+
+		// Check if this is a phantom (quantity = 0, credit = 0)
+		if pos.Quantity != 0 || pos.CreditReceived != 0 {
+			continue
+		}
+
+		// Check if strikes and expiration match
+		expMatch := pos.Expiration.Format("2006-01-02") == orphan.expiration
+		strikeMatch := math.Abs(pos.PutStrike-orphan.putStrike) < 0.01 &&
+			math.Abs(pos.CallStrike-orphan.callStrike) < 0.01
+		symbolMatch := pos.Symbol == orphan.symbol
+
+		if expMatch && strikeMatch && symbolMatch {
+			return pos
+		}
+	}
+
+	return nil
 }

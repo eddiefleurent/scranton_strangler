@@ -23,6 +23,10 @@ type Interface interface {
 	// Returns (position, true) if found, or (zero-value, false) if not found.
 	// The returned position is a deep copy - callers can safely modify it without affecting storage.
 	GetPositionByID(id string) (models.Position, bool)
+	// DeletePosition removes a position from storage without state machine transitions.
+	// Used for cleaning up phantom/invalid positions that never properly entered the system.
+	// Does not move position to history - it's simply removed.
+	DeletePosition(id string) error
 
 	// Data persistence
 	Save() error

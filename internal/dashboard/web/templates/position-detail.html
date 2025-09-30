@@ -1,0 +1,75 @@
+<div class="position-detail">
+    <button type="button" class="close-detail" data-action="close-detail" aria-label="Close details">×</button>
+    
+    <h3>Position: {{.Symbol}}</h3>
+    
+    <div class="detail-grid">
+        <div class="detail-item">
+            <label>Position ID:</label>
+            <span>{{.ID}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>State:</label>
+            <span class="state-badge state-{{if eq .State "idle"}}idle{{else if eq .State "submitted"}}submitted{{else if eq .State "open"}}open{{else if eq .State "closed"}}closed{{else if eq .State "error"}}error{{else if eq .State "first_down"}}first-down{{else if eq .State "second_down"}}second-down{{else if eq .State "third_down"}}third-down{{else if eq .State "fourth_down"}}fourth-down{{else if eq .State "adjusting"}}adjusting{{else if eq .State "rolling"}}rolling{{else}}unknown{{end}}">{{.State}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Entry Date:</label>
+            <span>{{.EntryDate.Format "2006-01-02 15:04"}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Days to Expiration:</label>
+            <span class="{{if lt .DTE 21}}warning{{end}}">{{.DTE}} days</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Call Strike:</label>
+            <span>${{printf "%.2f" .CallStrike}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Put Strike:</label>
+            <span>${{printf "%.2f" .PutStrike}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Credit Received:</label>
+            <span>${{printf "%.2f" .CreditReceived}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Current P&L:</label>
+            <span class="{{if .IsProfit}}positive{{else}}negative{{end}}">
+                ${{printf "%.2f" .CurrentPnL}} ({{printf "%.1f" .PnLPercent}}%)
+            </span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Profit Target (50%):</label>
+            <span class="target">${{printf "%.2f" .ProfitTarget}}</span>
+        </div>
+        
+        <div class="detail-item">
+            <label>Stop Loss (250%):</label>
+            <span class="stop">${{printf "%.2f" .StopLoss}}</span>
+        </div>
+    </div>
+    
+    <div class="progress-bars">
+        <div class="progress-bar-container">
+            <label>Progress to Target:</label>
+            <div class="progress-bar">
+                <div class="progress-fill profit" style="width: {{if and (gt .CurrentPnL 0.0) (gt .ProfitTarget 0.0)}}{{$pct := mul (div .CurrentPnL .ProfitTarget) 100}}{{if gt $pct 100}}100{{else}}{{printf "%.0f" $pct}}{{end}}{{else}}0{{end}}%"></div>
+            </div>
+        </div>
+        
+        <div class="progress-bar-container">
+            <label>Risk Level:</label>
+            <div class="progress-bar">
+                <div class="progress-fill loss" style="width: {{if lt .RiskLevelPercent 0.0}}0{{else if gt .RiskLevelPercent 100.0}}100{{else}}{{printf "%.0f" .RiskLevelPercent}}{{end}}%"></div>
+            </div>
+        </div>
+    </div>
+</div>

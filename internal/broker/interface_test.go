@@ -190,10 +190,15 @@ func TestTradierClient_PlaceStrangleOrder_ProfitTarget(t *testing.T) {
 		t.Errorf("Expected POST request, got %s", capturedRequestMethod)
 	}
 
-	// Verify the tag contains the profit target for OTOCO orders (converted to cents)
-	// 0.5 profit target becomes otoco-profit-500 (500 thousandths)
-	if !strings.Contains(capturedRequestBody, "otoco-profit-500") {
-		t.Errorf("Expected request body to contain OTOCO tag with profit target, got: %s", capturedRequestBody)
+	// Verify that the fallback order does NOT contain the profit target encoding
+	// since OTOCO is unsupported and we fall back to regular strangle order
+	if strings.Contains(capturedRequestBody, "otoco-profit-500") {
+		t.Errorf("Expected fallback order to NOT contain OTOCO profit target encoding, got: %s", capturedRequestBody)
+	}
+	
+	// Verify the fallback order contains the original tag
+	if !strings.Contains(capturedRequestBody, "tag=test-order") {
+		t.Errorf("Expected fallback order to contain original tag, got: %s", capturedRequestBody)
 	}
 }
 
@@ -416,9 +421,9 @@ func TestExtractUnderlyingFromOSI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractUnderlyingFromOSI(tt.input)
+			result := ExtractUnderlyingFromOSI(tt.input)
 			if result != tt.expected {
-				t.Errorf("extractUnderlyingFromOSI(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("ExtractUnderlyingFromOSI(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -744,11 +749,7 @@ func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 }
 
 func (m *MockBroker) GetPositions() ([]PositionItem, error) {
-	m.callCount++
-	if m.shouldFail && m.callCount > m.failAfter {
-		return nil, errors.New("mock broker error")
-	}
-	return []PositionItem{}, nil
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]PositionItem, error) {
@@ -837,6 +838,33 @@ func (m *MockBroker) GetOrderStatusCtx(_ context.Context, orderID int) (*OrderRe
 	return resp, nil
 }
 
+func (m *MockBroker) CancelOrder(orderID int) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = orderID
+	resp.Order.Status = "canceled"
+	return resp, nil
+}
+
+func (m *MockBroker) CancelOrderCtx(_ context.Context, orderID int) (*OrderResponse, error) {
+	return m.CancelOrder(orderID)
+}
+
+func (m *MockBroker) GetOrders() (*OrdersResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	return &OrdersResponse{}, nil
+}
+
+func (m *MockBroker) GetOrdersCtx(_ context.Context) (*OrdersResponse, error) {
+	return m.GetOrders()
+}
+
 func (m *MockBroker) CloseStranglePosition(_ string, _, _ float64, _ string,
 	_ int, _ float64, _ string) (*OrderResponse, error) {
 	m.callCount++
@@ -891,7 +919,27 @@ func (m *MockBroker) PlaceBuyToCloseMarketOrder(_ string, _ int, _ string, _ str
 	return resp, nil
 }
 
+func (m *MockBroker) PlaceBuyToCloseMarketOrderCtx(_ context.Context, _ string, _ int, _ string, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 125
+	return resp, nil
+}
+
 func (m *MockBroker) PlaceSellToCloseMarketOrder(_ string, _ int, _ string, _ string) (*OrderResponse, error) {
+	m.callCount++
+	if m.shouldFail && m.callCount > m.failAfter {
+		return nil, errors.New("mock broker error")
+	}
+	resp := &OrderResponse{}
+	resp.Order.ID = 126
+	return resp, nil
+}
+
+func (m *MockBroker) PlaceSellToCloseMarketOrderCtx(_ context.Context, _ string, _ int, _ string, _ string) (*OrderResponse, error) {
 	m.callCount++
 	if m.shouldFail && m.callCount > m.failAfter {
 		return nil, errors.New("mock broker error")
@@ -1131,8 +1179,12 @@ func TestCircuitBreakerBroker_AllMethods(t *testing.T) {
 		fn   func() error
 	}{
 		{"GetAccountBalance", func() error { _, err := cb.GetAccountBalance(); return err }},
-		{"GetPositions", func() error { _, err := cb.GetPositions(); return err }},
+		{"GetPositions", func() error { _, err := cb.GetPositionsCtx(context.Background()); return err }},
 		{"GetQuote", func() error { _, err := cb.GetQuote("SPY"); return err }},
+		{"CancelOrder", func() error { _, err := cb.CancelOrder(123); return err }},
+		{"CancelOrderCtx", func() error { _, err := cb.CancelOrderCtx(context.Background(), 123); return err }},
+		{"GetOrders", func() error { _, err := cb.GetOrders(); return err }},
+		{"GetOrdersCtx", func() error { _, err := cb.GetOrdersCtx(context.Background()); return err }},
 		{"GetExpirations", func() error { _, err := cb.GetExpirations("SPY"); return err }},
 		{"GetExpirationsCtx", func() error { _, err := cb.GetExpirationsCtx(context.Background(), "SPY"); return err }},
 		{"GetOptionChain", func() error { _, err := cb.GetOptionChain("SPY", "2024-12-20", false); return err }},

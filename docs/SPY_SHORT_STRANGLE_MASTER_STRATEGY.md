@@ -100,15 +100,37 @@ If Experienced/Active Management:
 ## Exit Rules
 
 ### Standard Exits
-1. **Profit Target Hit**: 50% of initial credit (GTC limit order when using OTOCO)
+1. **Profit Target Hit**: 50% of initial credit (single multi-leg GTC buy-to-close)
 2. **Time Exit**: MaxDTE (21) remaining (avoid gamma risk)
 3. **Whichever comes first**
 
 ### Profit Taking Mechanics
-- **With OTOCO**: Automatically places GTC limit order at entry
-- **Without OTOCO**: Monitor daily for 50% profit opportunity
-- **Target**: Buy to close at 50% of credit received
-- **Example**: Collected $3.00 credit → Exit at $1.50 debit
+- **Target**: Buy to close entire strangle at 50% of original credit received
+- **Example**: $3.00 credit received → Close entire position when debit = $1.50
+- **Implementation**: Single GTC limit order placed immediately after position entry
+- **Order Type**: Multi-leg buy-to-close with GTC duration
+- **Execution**: Order stays active 24/7 until filled or manually canceled
+- **Management**: System automatically cancels order if stop-loss triggers
+
+### Stop-Loss Protection
+- **Trigger Threshold**: 200% loss of original credit (professional recommendation)
+- **Example**: $3.00 credit received → Trigger at -$6.00 P&L ($9.00 total cost)
+- **Implementation**: Real-time position monitoring with conditional market order execution
+- **Monitoring Schedule** (Bot only runs when trading is possible):
+  - **9:30 AM - 4:00 PM ET**: Every 1 minute (regular hours)
+  - **4:00 PM - 4:15 PM ET**: Every 1 minute (SPY extended hours)
+  - **4:15 PM - 9:30 AM ET**: NO MONITORING (market closed, cannot trade)
+  - **Weekends/Holidays**: NO MONITORING (market closed)
+- **Overnight Gap Risk**: Cannot be mitigated until market reopens at 9:30 AM
+- **Execution**: When threshold breached, place immediate market order to close position
+- **Order Management**: Automatically cancel profit target GTC order upon stop-loss execution
+- **Extended Hours Risk**: Wider spreads may result in worse fills during 4:00-4:15 PM window
+
+### Why Enhanced Monitoring vs Traditional Stop-Loss Orders
+- **OTOCO Limitation**: Cannot be used for multi-leg strangles (different option_symbols required)
+- **Standing Order Risk**: GTC stop-loss orders at high debit prices would execute immediately
+- **Conditional Execution**: Stop-loss only triggers when position P&L reaches threshold
+- **Professional Practice**: Aligns with industry standard of P&L-based risk management
 
 ### Emergency Exits (Manual Intervention Only)
 - Loss exceeds EscalateLossPct (2.0 = 200%) of collected premium (escalate/prepare for action)
@@ -131,7 +153,7 @@ If Experienced/Active Management:
 ### Management Sequence (Football System - Automated)
 
 #### First Down (Initial Position)
-- **Goal**: 50% profit via OTOCO exit order
+- **Goal**: 50% profit via single multi-leg GTC buy-to-close order
 - **Monitor**: Position delta, time decay, price movement
 - **Action**: None - let theta work
 - **Trigger Next**: Stock within 5 points of either strike
@@ -290,10 +312,23 @@ $17,500 ÷ $15,000 BPR = 1 contract
 2. Look for 50% profit targets
 3. Check for 70% profit on untested sides
 
-### End of Day
-1. Final P&L calculation
+### End of Day (3:45 PM)
+1. Final P&L calculation during regular hours
 2. Plan next day's potential adjustments
 3. Set alerts at key levels
+
+### Extended Hours Monitoring (4:00-4:15 PM ONLY)
+1. **Automated**: Bot monitors for 15 minutes after close
+2. **Emergency Exits**: Market orders only for critical stop-loss breaches
+3. **No New Entries**: Entry logic disabled after 3:45 PM
+4. **Limited Protection**: Only during this 15-minute window
+5. **Liquidity Warning**: Expect wider spreads and potential execution delays
+
+### Overnight & Weekend (4:15 PM - 9:30 AM)
+1. **Bot STOPPED**: No monitoring (market closed, cannot trade)
+2. **Gap Risk**: Positions exposed to overnight/weekend moves
+3. **Next Check**: 9:30 AM next trading day
+4. **Opening Action**: Bot checks for gaps and adverse moves at market open
 
 ---
 

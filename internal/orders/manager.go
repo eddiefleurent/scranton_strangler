@@ -184,6 +184,45 @@ func (m *Manager) handleOrderFilled(positionID string, isEntryOrder bool) {
 	var transitionReason string
 
 	if isEntryOrder {
+		// For entry orders, try to populate credit received and quantity from the order execution
+		// This is optional - if we can't get order details, we'll proceed with the transition anyway
+		if position.EntryOrderID != "" {
+			orderIDInt, err := parseOrderID(position.EntryOrderID)
+			if err == nil {
+				// Create context with timeout for API call
+				ctx, cancel := context.WithTimeout(context.Background(), m.config.CallTimeout)
+				defer cancel()
+				
+				orderStatus, err := m.broker.GetOrderStatusCtx(ctx, orderIDInt)
+				if err == nil && orderStatus != nil && orderStatus.Order.ID != 0 {
+					// Only update position details if order actually executed
+					if orderStatus.Order.ExecQuantity > 0 {
+						// Set the actual executed quantity using proper rounding
+						position.Quantity = int(math.Round(orderStatus.Order.ExecQuantity))
+						
+						// Handle credit received based on order type
+						if orderStatus.Order.Type == "credit" {
+							// For credit orders (sell-to-open), AvgFillPrice should be positive credit received
+							position.CreditReceived = math.Abs(orderStatus.Order.AvgFillPrice)
+							m.logger.Printf("Position %s filled: qty=%d, credit_received=%.4f (credit order)", 
+								positionID, position.Quantity, position.CreditReceived)
+						} else {
+							// For debit orders or other types, handle appropriately 
+							// Don't set CreditReceived as this wasn't a credit transaction
+							m.logger.Printf("Position %s filled: qty=%d, avg_fill_price=%.4f (non-credit order type: %s)", 
+								positionID, position.Quantity, orderStatus.Order.AvgFillPrice, orderStatus.Order.Type)
+						}
+					} else {
+						m.logger.Printf("Position %s order filled with zero execution quantity, keeping original values", positionID)
+					}
+				} else {
+					m.logger.Printf("Could not fetch order details for position %s, proceeding with transition", positionID)
+				}
+			} else {
+				m.logger.Printf("Failed to parse entry order ID %s: %v", position.EntryOrderID, err)
+			}
+		}
+
 		targetState = models.StateOpen
 		transitionReason = "order_filled"
 
@@ -271,7 +310,7 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 	// Before closing position, check if broker actually has open positions matching this trade
 	// This prevents closing positions that actually filled but we lost track due to polling timeout
 	m.logger.Printf("Order timeout for position %s - verifying broker state before closing", positionID)
-	
+
 	// Bound the broker probe by CallTimeout to avoid indefinite hangs
 	posCtx, cancel := context.WithTimeout(context.Background(), m.config.CallTimeout)
 	defer cancel()
@@ -283,19 +322,32 @@ func (m *Manager) handleOrderTimeout(positionID string) {
 		// Check if this position actually exists in the broker
 		isOpenInBroker := m.isPositionOpenInBroker(&position, brokerPositions)
 		if isOpenInBroker {
-			m.logger.Printf("Position %s order timed out but position exists in broker - transitioning to open state", positionID)
-			
-			// The order actually filled! Transition to open state instead of closing
-			if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
-				m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
-				// Continue with timeout closure as fallback
-			} else {
+			m.logger.Printf("Position %s order timed out but position exists in broker - recovering actual quantities", positionID)
+
+			// The order actually filled! Update quantities from broker and transition to open
+			actualQty := m.getActualQuantityFromBroker(&position, brokerPositions)
+			if actualQty > 0 {
+				// Only transition to OPEN and persist if we have a valid quantity
+				position.Quantity = actualQty
+				m.logger.Printf("Updated position %s quantity to %d contracts from broker", positionID, actualQty)
+
+				// Transition to open state
+				if err := position.TransitionState(models.StateOpen, "order_filled"); err != nil {
+					m.logger.Printf("Failed to transition timed-out position %s to open: %v", positionID, err)
+					return // Exit early - recovery attempt failed, don't proceed to timeout closure
+				}
+
 				if err := m.storage.UpdatePosition(&position); err != nil {
 					m.logger.Printf("Failed to save recovered position %s: %v", positionID, err)
-				} else {
-					m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled", positionID)
-					return // Exit early - position recovered
+					return // Exit early - recovery attempt failed, don't proceed to timeout closure
 				}
+
+				m.logger.Printf("Successfully recovered position %s from timeout - position was actually filled with %d contracts", positionID, actualQty)
+				return // Exit early - position recovered
+			} else {
+				// Position exists in broker but has 0 quantity - not recoverable
+				m.logger.Printf("Position %s found in broker but has 0 quantity - no recoverable quantity, proceeding with timeout closure", positionID)
+				// Do not transition or return - allow normal timeout-closure flow to continue
 			}
 		}
 	}
@@ -485,6 +537,49 @@ func (m *Manager) isPositionOpenInBroker(position *models.Position, brokerPositi
 	return hasCallStrike && hasPutStrike
 }
 
+// getActualQuantityFromBroker returns the actual quantity of contracts for this position in the broker
+// It returns the minimum of the call and put quantities (since a strangle requires both legs)
+func (m *Manager) getActualQuantityFromBroker(position *models.Position, brokerPositions []broker.PositionItem) int {
+	wantExp := position.Expiration.Format("2006-01-02")
+	callQty := 0
+	putQty := 0
+
+	for _, bp := range brokerPositions {
+		brokerUnderlying := m.extractUnderlyingFromSymbol(bp.Symbol)
+		if brokerUnderlying != position.Symbol {
+			continue
+		}
+		exp := m.extractExpirationFromSymbol(bp.Symbol)
+		if exp != wantExp {
+			continue
+		}
+		strike, optType, err := m.parseOptionSymbol(bp.Symbol)
+		if err != nil {
+			continue
+		}
+
+		// Only count short legs (negative quantities)
+		if bp.Quantity < 0 {
+			qty := int(math.Abs(bp.Quantity))
+			if optType == "C" && math.Abs(strike-position.CallStrike) < 0.01 {
+				callQty += qty
+			}
+			if optType == "P" && math.Abs(strike-position.PutStrike) < 0.01 {
+				putQty += qty
+			}
+		}
+	}
+
+	// Return the minimum of call and put quantities (a strangle needs both legs)
+	if callQty > 0 && putQty > 0 {
+		if callQty < putQty {
+			return callQty
+		}
+		return putQty
+	}
+	return 0
+}
+
 // extractExpirationFromSymbol extracts expiration date from OPRA option symbol
 // Format: TICKER[YYMMDD][C/P][STRIKE*1000 padded to 8 digits]
 // Example: SPY240315C00610000 -> "2024-03-15"
@@ -628,4 +723,12 @@ func (m *Manager) parseOptionSymbol(symbol string) (float64, string, error) {
 // getPositionsWithTimeout wraps Broker.GetPositionsCtx() with a context timeout.
 func (m *Manager) getPositionsWithTimeout(ctx context.Context) ([]broker.PositionItem, error) {
 	return m.broker.GetPositionsCtx(ctx)
+}
+
+// parseOrderID converts a string order ID to integer
+func parseOrderID(orderIDStr string) (int, error) {
+	if orderIDStr == "" {
+		return 0, fmt.Errorf("empty order ID")
+	}
+	return strconv.Atoi(orderIDStr)
 }

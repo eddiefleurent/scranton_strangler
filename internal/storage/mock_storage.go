@@ -391,3 +391,28 @@ func (m *MockStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 
 // Ensure MockStorage implements Interface
 var _ Interface = (*MockStorage)(nil)
+
+// DeletePosition removes a position from storage without state transitions
+func (m *MockStorage) DeletePosition(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var found bool
+	var newPositions []models.Position
+
+	for i := range m.currentPositions {
+		if m.currentPositions[i].ID == id {
+			found = true
+			// Skip this position
+		} else {
+			newPositions = append(newPositions, m.currentPositions[i])
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("position with ID %s not found", id)
+	}
+
+	m.currentPositions = newPositions
+	return nil
+}

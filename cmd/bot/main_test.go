@@ -50,11 +50,7 @@ func (m *MockBroker) GetOptionBuyingPowerCtx(ctx context.Context) (float64, erro
 }
 
 func (m *MockBroker) GetPositions() ([]broker.PositionItem, error) {
-	args := m.Called()
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]broker.PositionItem), args.Error(1)
+	return m.GetPositionsCtx(context.Background())
 }
 
 func (m *MockBroker) GetPositionsCtx(ctx context.Context) ([]broker.PositionItem, error) {
@@ -133,6 +129,38 @@ func (m *MockBroker) GetOrderStatusCtx(ctx context.Context, orderID int) (*broke
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
+func (m *MockBroker) CancelOrder(orderID int) (*broker.OrderResponse, error) {
+	args := m.Called(orderID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
+func (m *MockBroker) CancelOrderCtx(ctx context.Context, orderID int) (*broker.OrderResponse, error) {
+	args := m.Called(ctx, orderID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
+func (m *MockBroker) GetOrders() (*broker.OrdersResponse, error) {
+	args := m.Called()
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrdersResponse), args.Error(1)
+}
+
+func (m *MockBroker) GetOrdersCtx(ctx context.Context) (*broker.OrdersResponse, error) {
+	args := m.Called(ctx)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrdersResponse), args.Error(1)
+}
+
 func (m *MockBroker) PlaceBuyToCloseOrder(optionSymbol string, quantity int, maxPrice float64, duration string, tag string) (*broker.OrderResponse, error) {
 	args := m.Called(optionSymbol, quantity, maxPrice, duration, tag)
 	if args.Get(0) == nil {
@@ -173,8 +201,24 @@ func (m *MockBroker) PlaceBuyToCloseMarketOrder(optionSymbol string, quantity in
 	return args.Get(0).(*broker.OrderResponse), args.Error(1)
 }
 
+func (m *MockBroker) PlaceBuyToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(ctx, optionSymbol, quantity, duration, tag)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
 func (m *MockBroker) PlaceSellToCloseMarketOrder(optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
 	args := m.Called(optionSymbol, quantity, duration, tag)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*broker.OrderResponse), args.Error(1)
+}
+
+func (m *MockBroker) PlaceSellToCloseMarketOrderCtx(ctx context.Context, optionSymbol string, quantity int, duration string, tag string) (*broker.OrderResponse, error) {
+	args := m.Called(ctx, optionSymbol, quantity, duration, tag)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -402,7 +446,10 @@ func TestBot_GracefulShutdown(t *testing.T) {
 	
 	// Setup broker connection check
 	tb.mockBroker.On("GetAccountBalanceCtx", mock.Anything).Return(10000.0, nil)
-	
+
+	// Setup positions reconciliation (called during startup)
+	tb.mockBroker.On("GetPositionsCtx", mock.Anything).Return([]broker.PositionItem{}, nil)
+
 	// Setup market calendar (will be called during trading cycle check)
 	tb.mockBroker.On("GetMarketCalendarCtx", mock.Anything, mock.Anything, mock.Anything).Return(&broker.MarketCalendarResponse{
 		Calendar: struct {
@@ -464,7 +511,7 @@ func TestReconciler_Components(t *testing.T) {
 	defer tb.cancel()
 	
 	// Test Reconciler creation
-	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger)
+	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger, 10*time.Minute)
 	assert.NotNil(t, reconciler)
 	assert.Equal(t, tb.mockBroker, reconciler.broker)
 	assert.Equal(t, tb.mockStorage, reconciler.storage)
@@ -479,10 +526,10 @@ func TestReconcilePositions_EmptyPositions(t *testing.T) {
 	storedPositions := []models.Position{}
 	
 	// Broker has no positions
-	tb.mockBroker.On("GetPositions").Return([]broker.PositionItem{}, nil)
+	tb.mockBroker.On("GetPositionsCtx", mock.AnythingOfType("*context.timerCtx")).Return([]broker.PositionItem{}, nil)
 	
 	// Run reconciliation
-	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger)
+	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger, 10*time.Minute)
 	activePositions := reconciler.ReconcilePositions(storedPositions)
 	
 	// Verify no positions after reconciliation

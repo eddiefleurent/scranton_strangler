@@ -3,13 +3,13 @@ SHELL := /bin/bash
 
 .PHONY: all help build build-prod test test-coverage test-integration lint run clean \
         deploy-unraid unraid-logs unraid-status unraid-restart \
-        dev-setup test-api test-paper security-scan build-test-helper tools check liquidate
+        dev-setup test-api test-paper security-scan build-test-helper build-utils tools check liquidate
 
 all: build
 
 # Default target
 help:
-	@printf "Targets:\n  build/test/test-integration/test-coverage/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
+	@printf "Targets:\n  build/build-utils/test/test-integration/test-coverage/lint/run/clean\n  deploy-unraid/unraid-logs/unraid-status/unraid-restart\n  security-scan/build-test-helper\n  dev-setup/check/liquidate\n"
 
 # Go binary name and paths
 BINARY_NAME=scranton-strangler
@@ -26,8 +26,9 @@ build:
 build-prod:
 	@echo "Building $(BINARY_NAME) for production..."
 	@echo "⏱️  Starting build timer..."
+	@mkdir -p $(BIN_DIR)
 	@START_TIME=$$(date +%s); \
-	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BINARY_NAME) ./cmd/bot; \
+	CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -trimpath -buildvcs=false -ldflags="-w -s" -o $(BIN_DIR)/$(BINARY_NAME) ./cmd/bot; \
 	END_TIME=$$(date +%s); \
 	DURATION=$$((END_TIME - START_TIME)); \
 	echo "⏱️  Build completed in $${DURATION} seconds"
@@ -115,10 +116,10 @@ test-paper:
 # Liquidate all positions via market orders
 liquidate:
 	@echo "🚨 LIQUIDATING ALL POSITIONS 🚨"
-	@echo "This will close ALL open positions using aggressive market pricing"
+	@echo "This will close ALL open positions using market orders"
 	@echo "Uses credentials from environment variables or config.yaml"
 	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	cd scripts && go run liquidate_positions.go
+	cd scripts && go run liquidate_positions.go -config ../config.yaml --yes
 
 # Build test helper
 build-test-helper:
@@ -126,15 +127,25 @@ build-test-helper:
 	@mkdir -p $(BIN_DIR)
 	go build -tags test -o $(BIN_DIR)/test_helper scripts/test_helper/test_helper.go
 
+# Build all utility binaries to bin/ directory
+build-utils:
+	@echo "Building utility binaries..."
+	@mkdir -p $(BIN_DIR)
+	go build -o $(BIN_DIR)/audit scripts/audit_positions/main.go
+	go build -o $(BIN_DIR)/liquidate_positions scripts/liquidate_positions_tool/main.go
+	go build -o $(BIN_DIR)/reset_positions scripts/reset_positions/main.go
+	go build -o $(BIN_DIR)/integration cmd/integration/main.go
+	@echo "All utilities built to $(BIN_DIR)/"
+
 # Security scan
 security-scan: tools
 	@echo "Running security scan..."
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" gosec ./...
 	@PATH="$(shell go env GOPATH)/bin:$$PATH" govulncheck ./...
 
-# Check: lint, test, integration test, security scan, and build
-check: lint test test-integration security-scan build
-	@echo "✅ All checks passed: lint, test, integration test, security scan, and build completed successfully"
+# Check: lint, test, integration test, security scan, and production build
+check: lint test test-integration security-scan build-prod
+	@echo "✅ All checks passed: lint, test, integration test, security scan, and production build completed successfully"
 
 # Install security tools
 tools:
