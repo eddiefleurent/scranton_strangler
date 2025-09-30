@@ -855,3 +855,33 @@ func (s *JSONStorage) ClosePositionByID(id string, finalPnL float64, reason stri
 	
 	return s.saveUnsafe()
 }
+
+// DeletePosition removes a position from storage without state transitions or history.
+// This is used for cleaning up phantom/invalid positions that never properly entered the system.
+func (s *JSONStorage) DeletePosition(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var found bool
+	var newPositions []models.Position
+
+	// Remove the position from current positions
+	for i := range s.data.CurrentPositions {
+		if s.data.CurrentPositions[i].ID == id {
+			found = true
+			// Skip this position (don't add to newPositions)
+		} else {
+			newPositions = append(newPositions, s.data.CurrentPositions[i])
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("position with ID %s not found", id)
+	}
+
+	// Update positions list (phantom is gone)
+	s.data.CurrentPositions = newPositions
+
+	// Save changes
+	return s.saveUnsafe()
+}
