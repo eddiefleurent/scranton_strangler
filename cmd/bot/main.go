@@ -378,8 +378,17 @@ func (b *Bot) performStartupReconciliation(ctx context.Context) error {
 			b.logger.Printf("❌ Failed to recover untracked positions: %v", err)
 		}
 
-		// Log any remaining issues
-		b.logReconciliationIssues(result)
+		// Re-analyze after healing to check for any remaining issues
+		localPositionsAfterHealing := b.storage.GetCurrentPositions()
+		finalResult := b.analyzePositionDifferences(brokerPositions, localPositionsAfterHealing)
+
+		// Log final state after healing
+		if finalResult.hasInconsistencies {
+			b.logger.Printf("⚠️  Some inconsistencies remain after self-healing:")
+			b.logReconciliationIssues(finalResult)
+		} else {
+			b.logger.Printf("✅ Self-healing complete - local storage is now consistent with broker")
+		}
 	} else {
 		b.logger.Printf("✅ Local storage is consistent with broker")
 	}
