@@ -42,6 +42,10 @@ const (
 	symbolTypeOffset    = 9  // Position of option type (C/P)
 	symbolStrikeOffset  = 10 // Position where strike price begins
 	strikeScaleDivisor  = 1000.0 // Divisor to convert strike from integer to decimal
+
+	// Option types
+	optionTypeCall = "call"
+	optionTypePut  = "put"
 )
 
 // reconciliationResult contains the analysis of broker vs local position differences
@@ -425,6 +429,10 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		if localCount > brokerCount {
 			// More local positions than broker positions - select extra local positions
 			positions := localPositionsBySymbol[symbol]
+			// Sort deterministically by EntryDate to avoid non-deterministic selection
+			sort.SliceStable(positions, func(i, j int) bool {
+				return positions[i].EntryDate.Before(positions[j].EntryDate)
+			})
 			extraCount := localCount - brokerCount
 			// Take the last N positions (most recent) as the extras
 			for i := len(positions) - extraCount; i < len(positions); i++ {
@@ -534,10 +542,15 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 	for groupKey, positions := range strangleGroups {
 		var calls, puts []broker.PositionItem
 		for _, p := range positions {
-			switch extractOptionType(p.Symbol) {
-			case "call":
+			optType, ok := extractOptionType(p.Symbol)
+			if !ok {
+				b.logger.Printf("⚠️  Skipping position with invalid option type: %s", p.Symbol)
+				continue
+			}
+			switch optType {
+			case optionTypeCall:
 				calls = append(calls, p)
-			case "put":
+			case optionTypePut:
 				puts = append(puts, p)
 			}
 		}
@@ -554,6 +567,10 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 		}
 		for i := 0; i < n; i++ {
 			recoveredPos := b.createRecoveredPosition([]broker.PositionItem{calls[i], puts[i]})
+			if recoveredPos.CreditReceived <= 0 {
+				b.logger.Printf("⚠️  Skipping recovered position %s: non-positive credit %.2f", recoveredPos.ID, recoveredPos.CreditReceived)
+				continue
+			}
 			if err := b.storage.AddPosition(&recoveredPos); err != nil {
 				b.logger.Printf("❌ Failed to save recovered position %s: %v", recoveredPos.ID, err)
 				continue
@@ -591,7 +608,11 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 
 	// Separate call and put strikes and calculate total credit
 	for _, brokerPos := range brokerPositions {
-		optType := extractOptionType(brokerPos.Symbol)
+		optType, ok := extractOptionType(brokerPos.Symbol)
+		if !ok {
+			b.logger.Printf("⚠️  Skipping position with invalid option type: %s", brokerPos.Symbol)
+			continue
+		}
 		strike := extractStrike(brokerPos.Symbol)
 
 		if strike <= 0 {
@@ -599,9 +620,9 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 			continue
 		}
 
-		if optType == "call" {
+		if optType == optionTypeCall {
 			callStrike = strike
-		} else if optType == "put" {
+		} else if optType == optionTypePut {
 			putStrike = strike
 		}
 
@@ -635,17 +656,18 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 }
 
 // extractOptionType extracts 'call' or 'put' from option symbol
-func extractOptionType(symbol string) string {
+// Returns (type, ok) where ok indicates if the type was successfully parsed
+func extractOptionType(symbol string) (string, bool) {
 	if len(symbol) < symbolTypeOffset+1 {
-		return "unknown"
+		return "", false
 	}
 	optType := symbol[symbolTypeOffset : symbolTypeOffset+1] // C or P
 	if optType == "C" {
-		return "call"
+		return optionTypeCall, true
 	} else if optType == "P" {
-		return "put"
+		return optionTypePut, true
 	}
-	return "unknown"
+	return "", false
 }
 
 // extractStrike extracts strike price from option symbol
@@ -655,11 +677,11 @@ func extractStrike(symbol string) float64 {
 		return 0.0
 	}
 	strikeStr := symbol[symbolStrikeOffset:] // 00690000
-	strike, err := strconv.ParseFloat(strikeStr, 64)
+	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
 	if err != nil {
 		return 0.0
 	}
-	return strike / strikeScaleDivisor // Convert to actual price
+	return float64(strikeInt) / strikeScaleDivisor // Convert to actual price
 }
 
 // getMarketCalendar gets the market calendar for a given month/year, with caching

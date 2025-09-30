@@ -363,17 +363,21 @@ func TestPerformStartupReconciliation(t *testing.T) {
 // TestExtractOptionType tests option type extraction from symbols
 func TestExtractOptionType(t *testing.T) {
 	tests := []struct {
-		symbol   string
-		expected string
+		symbol      string
+		expected    string
+		expectedOk  bool
 	}{
-		{"SPY251107C00650000", "call"},
-		{"SPY251107P00600000", "put"},
-		{"INVALID", "unknown"},
-		{"", "unknown"},
+		{"SPY251107C00650000", "call", true},
+		{"SPY251107P00600000", "put", true},
+		{"INVALID", "", false},
+		{"", "", false},
 	}
 
 	for _, tt := range tests {
-		result := extractOptionType(tt.symbol)
+		result, ok := extractOptionType(tt.symbol)
+		if ok != tt.expectedOk {
+			t.Errorf("extractOptionType(%s) ok = %v, expected %v", tt.symbol, ok, tt.expectedOk)
+		}
 		if result != tt.expected {
 			t.Errorf("extractOptionType(%s) = %s, expected %s", tt.symbol, result, tt.expected)
 		}
