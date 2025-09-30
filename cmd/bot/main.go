@@ -40,7 +40,7 @@ const (
 	symbolBaseLength    = 3  // Length of base symbol (e.g., "SPY")
 	symbolDateLength    = 6  // Length of YYMMDD date
 	symbolPrefixLength  = 9  // Base + Date (SPY + YYMMDD)
-	symbolMinLength     = 15 // Minimum valid option symbol length
+	symbolMinLength     = 16 // Minimum valid option symbol length (matches OSI parsing)
 	symbolTypeOffset    = 9  // Position of option type (C/P)
 	symbolStrikeOffset  = 10 // Position where strike price begins
 	strikeScaleDivisor  = 1000.0 // Divisor to convert strike from integer to decimal
@@ -426,9 +426,19 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		callSymbol := b.generateOptionSymbol(pos.Symbol, pos.Expiration, pos.CallStrike, "C")
 		putSymbol := b.generateOptionSymbol(pos.Symbol, pos.Expiration, pos.PutStrike, "P")
 
-		// Track each leg separately with quantity
-		localCounts[callSymbol] += pos.Quantity
-		localCounts[putSymbol] += pos.Quantity
+		// Validate generated symbols
+		if callSymbol == "" || putSymbol == "" {
+			b.logger.Printf("ERROR: empty OCC symbol for position %s; skipping", pos.ID)
+			continue
+		}
+
+		// Track each leg separately with normalized quantity
+		q := pos.Quantity
+		if q < 0 {
+			q = -q
+		}
+		localCounts[callSymbol] += q
+		localCounts[putSymbol] += q
 		localPositionsBySymbol[callSymbol] = append(localPositionsBySymbol[callSymbol], pos)
 		localPositionsBySymbol[putSymbol] = append(localPositionsBySymbol[putSymbol], pos)
 	}
@@ -630,26 +640,34 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 	// Use first position to extract common data
 	first := brokerPositions[0]
 
-	// Extract base symbol and expiration with validation
-	baseSymbol := first.Symbol[:symbolBaseLength] // SPY
-	expirationStr := first.Symbol[symbolBaseLength:symbolPrefixLength] // YYMMDD
-
-	// Parse expiration date with error handling
-	expiration, err := time.Parse("060102", expirationStr)
-	if err != nil {
-		b.logger.Printf("⚠️  Failed to parse expiration date %s: %v, using default", expirationStr, err)
-		expiration = time.Now().AddDate(0, 0, 45) // Default to 45 DTE
+	// Parse via OSI (variable-length root)
+	var baseSymbol string
+	var expiration time.Time
+	if root, exp, _, _, ok := parseOSI(first.Symbol); ok {
+		baseSymbol, expiration = root, exp
+	} else {
+		b.logger.Printf("⚠️  Failed to parse OSI for %s; falling back to legacy slicing", first.Symbol)
+		if len(first.Symbol) >= symbolPrefixLength {
+			if t, err := time.Parse("060102", first.Symbol[symbolBaseLength:symbolPrefixLength]); err == nil {
+				expiration = t
+			} else {
+				expiration = time.Now().AddDate(0, 0, 45)
+			}
+			baseSymbol = first.Symbol[:symbolBaseLength]
+		} else {
+			expiration = time.Now().AddDate(0, 0, 45)
+			baseSymbol = first.Symbol
+		}
 	}
 
 	// Default values
 	var callStrike, putStrike float64
-	var totalCredit float64
-	quantity := int(first.Quantity)
-	if quantity < 0 {
-		quantity = -quantity // Ensure positive quantity
-	}
+	// Aggregate per-contract credit to scale by recovered qty
+	var perContractCredit float64
+	// Derive minimal contract quantity across legs in this pair
+	quantity := -1
 
-	// Separate call and put strikes and calculate total credit
+	// Separate call and put strikes and calculate per-contract credit
 	for _, brokerPos := range brokerPositions {
 		optType, ok := extractOptionType(brokerPos.Symbol)
 		if !ok {
@@ -669,8 +687,25 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 			putStrike = strike
 		}
 
-		// Estimate credit from cost basis (negative cost basis means we received credit)
-		totalCredit += -brokerPos.CostBasis
+		// Per-contract credit (handle multi-contract legs)
+		absQ := int(math.Round(math.Abs(brokerPos.Quantity)))
+		if absQ > 0 {
+			perContractCredit += (-brokerPos.CostBasis) / float64(absQ)
+		}
+	}
+
+	// Compute recovered quantity as min(abs(leg qty))
+	for _, p := range brokerPositions {
+		q := int(math.Round(math.Abs(p.Quantity)))
+		if q == 0 {
+			continue
+		}
+		if quantity < 0 || q < quantity {
+			quantity = q
+		}
+	}
+	if quantity < 1 {
+		quantity = 1
 	}
 
 	// Validate strikes were found
@@ -692,7 +727,7 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 	pos.State = models.StateOpen
 	pos.StateMachine = models.NewStateMachineFromState(models.StateOpen)
 	pos.EntryDate = time.Now() // We don't know the actual entry time
-	pos.CreditReceived = totalCredit
+	pos.CreditReceived = perContractCredit * float64(quantity)
 	pos.Adjustments = make([]models.Adjustment, 0)
 
 	return *pos
