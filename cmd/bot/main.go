@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -409,7 +410,8 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 	// Build broker position counts by option symbol
 	for _, pos := range brokerPositions {
 		// Use absolute value since short positions have negative quantities
-		qty := int(math.Abs(pos.Quantity))
+		// Round to prevent floating-point precision issues (0.999999 -> 0)
+		qty := int(math.Round(math.Abs(pos.Quantity)))
 		brokerCounts[pos.Symbol] += qty
 	}
 
@@ -452,16 +454,21 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 			sort.SliceStable(positions, func(i, j int) bool {
 				return positions[i].EntryDate.Before(positions[j].EntryDate)
 			})
-			// Mark the excess positions for cleanup (avoid duplicates)
+			// Mark the minimal set of most-recent positions whose total Quantity covers the excess
 			seen := make(map[string]bool)
-			count := 0
-			needed := localCount - brokerCount
-			for i := len(positions) - 1; i >= 0 && count < needed; i-- {
-				if !seen[positions[i].ID] {
-					result.localOnlyPositions = append(result.localOnlyPositions, positions[i].ID)
-					seen[positions[i].ID] = true
-					count++
+			outstanding := localCount - brokerCount // contracts to remove for this leg
+			for i := len(positions) - 1; i >= 0 && outstanding > 0; i-- {
+				p := positions[i]
+				if seen[p.ID] {
+					continue
 				}
+				result.localOnlyPositions = append(result.localOnlyPositions, p.ID)
+				seen[p.ID] = true
+				q := p.Quantity
+				if q <= 0 { // safety to ensure progress
+					q = 1
+				}
+				outstanding -= q
 			}
 		} else if brokerCount > localCount {
 			// More broker positions than local positions - mark for recovery
@@ -562,15 +569,15 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 		}
 		untrackedMap[brokerPos.Symbol]--
 
-		// Extract base symbol and expiration to group strangles
-		// SPY251107C00690000 -> SPY251107
-		if len(brokerPos.Symbol) < symbolMinLength {
-			b.logger.Printf("⚠️  Skipping malformed symbol: %s (length %d, expected >= %d)",
-				brokerPos.Symbol, len(brokerPos.Symbol), symbolMinLength)
+		// Parse symbol to extract root and expiration for grouping
+		root, expiration, _, _, ok := parseOSI(brokerPos.Symbol)
+		if !ok {
+			b.logger.Printf("⚠️  Skipping malformed option symbol: %s", brokerPos.Symbol)
 			continue
 		}
 
-		key := brokerPos.Symbol[:symbolPrefixLength] // SPY + YYMMDD
+		// Group by root + expiration (e.g., "SPY-251107")
+		key := fmt.Sprintf("%s-%s", root, expiration.Format("060102"))
 		strangleGroups[key] = append(strangleGroups[key], brokerPos)
 	}
 
@@ -694,43 +701,84 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 // generateOptionSymbol creates an OCC option symbol from position data
 // Format: SPY251107C00690000 (Symbol + YYMMDD + C/P + Strike*1000)
 func (b *Bot) generateOptionSymbol(baseSymbol string, expiration time.Time, strike float64, optType string) string {
+	// Normalize and validate option type
+	optType = strings.ToUpper(optType)
+
+	// Validate option type is exactly "C" or "P"
+	if optType != "C" && optType != "P" {
+		b.logger.Printf("ERROR: Invalid option type '%s', must be 'C' or 'P'", optType)
+		return ""
+	}
+
 	// Format expiration as YYMMDD
 	expirationStr := expiration.Format("060102")
 
-	// Format strike as 8-digit integer (strike * 1000)
-	strikeInt := int(strike * strikeScaleDivisor)
+	// Format strike as 8-digit integer (strike * 1000) with proper rounding
+	strikeInt := int(math.Round(strike * strikeScaleDivisor))
 	strikeStr := fmt.Sprintf("%08d", strikeInt)
 
 	return fmt.Sprintf("%s%s%s%s", baseSymbol, expirationStr, optType, strikeStr)
 }
 
+// parseOSI parses an OCC option symbol from the end to support any underlying symbol length
+// Format: [ROOT][YYMMDD][C/P][STRIKE8]
+// Example: SPY251107C00690000, AAPL251107P00150000
+// Returns (root, expiration, optionType, strike, ok)
+func parseOSI(symbol string) (string, time.Time, string, float64, bool) {
+	// OCC format requires minimum 15 chars: 1+ char root, 6 date, 1 type, 8 strike
+	const minOSILength = 16
+	if len(symbol) < minOSILength {
+		return "", time.Time{}, "", 0, false
+	}
+
+	// Parse from the end: last 8 = strike, 9th from end = type, 15th-9th from end = date
+	strikeCode := symbol[len(symbol)-8:]
+	optType := symbol[len(symbol)-9 : len(symbol)-8]
+	dateCode := symbol[len(symbol)-15 : len(symbol)-9]
+	root := strings.TrimSpace(symbol[:len(symbol)-15])
+
+	// Parse strike (8-digit integer representing price * 1000)
+	strikeInt, err := strconv.ParseInt(strikeCode, 10, 64)
+	if err != nil {
+		return "", time.Time{}, "", 0, false
+	}
+	strike := float64(strikeInt) / strikeScaleDivisor
+
+	// Parse expiration date (YYMMDD)
+	expiration, err := time.Parse("060102", dateCode)
+	if err != nil {
+		return "", time.Time{}, "", 0, false
+	}
+
+	// Validate option type
+	if optType != "C" && optType != "P" {
+		return "", time.Time{}, "", 0, false
+	}
+
+	return root, expiration, optType, strike, true
+}
+
 // extractOptionType extracts 'call' or 'put' from option symbol
 // Returns (type, ok) where ok indicates if the type was successfully parsed
 func extractOptionType(symbol string) (string, bool) {
-	if len(symbol) < symbolTypeOffset+1 {
+	_, _, optType, _, ok := parseOSI(symbol)
+	if !ok {
 		return "", false
 	}
-	optType := symbol[symbolTypeOffset : symbolTypeOffset+1] // C or P
 	if optType == "C" {
 		return optionTypeCall, true
-	} else if optType == "P" {
-		return optionTypePut, true
 	}
-	return "", false
+	return optionTypePut, true
 }
 
 // extractStrike extracts strike price from option symbol
 // Returns 0.0 if the symbol is invalid or parsing fails
 func extractStrike(symbol string) float64 {
-	if len(symbol) < symbolMinLength {
+	_, _, _, strike, ok := parseOSI(symbol)
+	if !ok {
 		return 0.0
 	}
-	strikeStr := symbol[symbolStrikeOffset:] // 00690000
-	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
-	if err != nil {
-		return 0.0
-	}
-	return float64(strikeInt) / strikeScaleDivisor // Convert to actual price
+	return strike
 }
 
 // getMarketCalendar gets the market calendar for a given month/year, with caching
