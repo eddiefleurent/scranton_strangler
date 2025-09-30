@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"sync"
 	"syscall"
@@ -386,19 +387,19 @@ func (b *Bot) performStartupReconciliation(ctx context.Context) error {
 func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, localPositions []models.Position) reconciliationResult {
 	result := reconciliationResult{}
 
-	// Create sets for comparison by symbol (broker uses symbols, local uses position IDs)
-	brokerSymbols := make(map[string]bool)
-	localSymbols := make(map[string]bool)
+	// Create multiplicity maps to track position counts per symbol
+	brokerCounts := make(map[string]int)
+	localCounts := make(map[string]int)
 	localPositionsBySymbol := make(map[string][]models.Position)
 
-	// Build broker symbol set
+	// Build broker position counts by symbol
 	for _, pos := range brokerPositions {
-		brokerSymbols[pos.Symbol] = true
+		brokerCounts[pos.Symbol]++
 	}
 
-	// Build local symbol set and check for corruption
+	// Build local position counts by symbol and check for corruption
 	for _, pos := range localPositions {
-		localSymbols[pos.Symbol] = true
+		localCounts[pos.Symbol]++
 		localPositionsBySymbol[pos.Symbol] = append(localPositionsBySymbol[pos.Symbol], pos)
 
 		// Check for credit corruption using named constant
@@ -407,19 +408,33 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		}
 	}
 
-	// Find positions only in broker (missing from local)
-	for symbol := range brokerSymbols {
-		if !localSymbols[symbol] {
-			result.brokerOnlyPositions = append(result.brokerOnlyPositions, symbol)
-		}
+	// Get all unique symbols from both broker and local
+	allSymbols := make(map[string]bool)
+	for symbol := range brokerCounts {
+		allSymbols[symbol] = true
+	}
+	for symbol := range localCounts {
+		allSymbols[symbol] = true
 	}
 
-	// Find positions only in local (missing from broker)
-	for symbol := range localSymbols {
-		if !brokerSymbols[symbol] {
+	// Compare position counts for each symbol
+	for symbol := range allSymbols {
+		brokerCount := brokerCounts[symbol]
+		localCount := localCounts[symbol]
+
+		if localCount > brokerCount {
+			// More local positions than broker positions - select extra local positions
 			positions := localPositionsBySymbol[symbol]
-			for _, pos := range positions {
-				result.localOnlyPositions = append(result.localOnlyPositions, pos.ID)
+			extraCount := localCount - brokerCount
+			// Take the last N positions (most recent) as the extras
+			for i := len(positions) - extraCount; i < len(positions); i++ {
+				result.localOnlyPositions = append(result.localOnlyPositions, positions[i].ID)
+			}
+		} else if brokerCount > localCount {
+			// More broker positions than local positions - add symbol once per missing count
+			missingCount := brokerCount - localCount
+			for i := 0; i < missingCount; i++ {
+				result.brokerOnlyPositions = append(result.brokerOnlyPositions, symbol)
 			}
 		}
 	}
@@ -488,19 +503,20 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 
 	b.logger.Printf("🔄 Recovering %d untracked position(s)...", len(untrackedSymbols))
 
-	// Create a map for quick lookup
-	untrackedMap := make(map[string]bool)
+	// Track multiplicities of untracked symbols
+	untrackedMap := make(map[string]int)
 	for _, symbol := range untrackedSymbols {
-		untrackedMap[symbol] = true
+		untrackedMap[symbol]++
 	}
 
 	// Group broker positions by their strangle pairs
 	strangleGroups := make(map[string][]broker.PositionItem)
 
 	for _, brokerPos := range brokerPositions {
-		if !untrackedMap[brokerPos.Symbol] {
+		if untrackedMap[brokerPos.Symbol] <= 0 {
 			continue
 		}
+		untrackedMap[brokerPos.Symbol]--
 
 		// Extract base symbol and expiration to group strangles
 		// SPY251107C00690000 -> SPY251107
@@ -514,21 +530,36 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 		strangleGroups[key] = append(strangleGroups[key], brokerPos)
 	}
 
-	// Create recovery positions for each strangle group
+	// For each expiration group, pair calls and puts by strike to produce multiple positions
 	for groupKey, positions := range strangleGroups {
-		if len(positions) < 2 {
-			b.logger.Printf("⚠️  Incomplete strangle group %s (only %d legs), skipping recovery", groupKey, len(positions))
+		var calls, puts []broker.PositionItem
+		for _, p := range positions {
+			switch extractOptionType(p.Symbol) {
+			case "call":
+				calls = append(calls, p)
+			case "put":
+				puts = append(puts, p)
+			}
+		}
+		if len(calls) == 0 || len(puts) == 0 {
+			b.logger.Printf("⚠️  Incomplete strangle group %s (calls=%d, puts=%d), skipping", groupKey, len(calls), len(puts))
 			continue
 		}
-
-		// Create a recovered position
-		recoveredPos := b.createRecoveredPosition(positions)
-		if err := b.storage.AddPosition(&recoveredPos); err != nil {
-			b.logger.Printf("❌ Failed to save recovered position %s: %v", recoveredPos.ID, err)
-			continue
+		// Sort by strike to pair deterministically
+		sort.Slice(calls, func(i, j int) bool { return extractStrike(calls[i].Symbol) < extractStrike(calls[j].Symbol) })
+		sort.Slice(puts, func(i, j int) bool { return extractStrike(puts[i].Symbol) < extractStrike(puts[j].Symbol) })
+		n := len(calls)
+		if len(puts) < n {
+			n = len(puts)
 		}
-
-		b.logger.Printf("✅ Recovered position: %s with %d legs", recoveredPos.ID, len(positions))
+		for i := 0; i < n; i++ {
+			recoveredPos := b.createRecoveredPosition([]broker.PositionItem{calls[i], puts[i]})
+			if err := b.storage.AddPosition(&recoveredPos); err != nil {
+				b.logger.Printf("❌ Failed to save recovered position %s: %v", recoveredPos.ID, err)
+				continue
+			}
+			b.logger.Printf("✅ Recovered position: %s (pair %d/%d)", recoveredPos.ID, i+1, n)
+		}
 	}
 
 	return nil
