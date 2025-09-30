@@ -30,6 +30,7 @@ type Position struct {
 	Expiration     time.Time     `json:"expiration"`
 	EntryDate      time.Time     `json:"entry_date,omitempty"`
 	ExitDate       time.Time     `json:"exit_date,omitempty"`
+	LastChecked    time.Time     `json:"last_checked,omitempty"` // Last time reconciliation checked this position
 	CreditReceived   float64       `json:"credit_received"`
 	EntryLimitPrice float64       `json:"entry_limit_price"`
 	EntryIV         float64       `json:"entry_iv"`
