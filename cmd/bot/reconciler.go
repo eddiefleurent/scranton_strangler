@@ -22,14 +22,16 @@ type Reconciler struct {
 	storage        storage.Interface
 	logger         *log.Logger
 	coldStartOnce  sync.Once
+	phantomThreshold time.Duration
 }
 
 // NewReconciler creates a new position reconciler
-func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.Logger) *Reconciler {
+func NewReconciler(broker broker.Broker, storage storage.Interface, logger *log.Logger, phantomThreshold time.Duration) *Reconciler {
 	return &Reconciler{
 		broker:  broker,
 		storage: storage,
 		logger:  logger,
+		phantomThreshold: phantomThreshold,
 	}
 }
 
@@ -75,25 +77,62 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 
 		// PHANTOM POSITION DETECTION: Clean up positions with quantity=0 that never filled
 		// These are created when orders timeout during polling but never actually executed
+		// Check BEFORE updating LastChecked so we can use the old value for age calculation
 		if position.Quantity == 0 && position.CreditReceived == 0 {
-			// Additional check: make sure it's not just a newly submitted order
-			timeSinceEntry := time.Since(position.EntryDate)
-			const phantomThreshold = 10 * time.Minute // Give orders 10 minutes to fill
+			// Determine age of position using LastChecked from previous reconciliation or EntryDate
+			var timeSinceCreation time.Duration
+			const stalePhantomThreshold = 24 * time.Hour // 24 hours for stale phantoms
 
-			if timeSinceEntry > phantomThreshold {
+			if !position.EntryDate.IsZero() {
+				// If EntryDate is set, use it
+				timeSinceCreation = time.Since(position.EntryDate)
+			} else if !position.LastChecked.IsZero() {
+				// Use LastChecked from previous reconciliation pass
+				timeSinceCreation = time.Since(position.LastChecked)
+			} else {
+				// Never checked before, check if it has adjustment history indicating age
+				if len(position.Adjustments) > 0 {
+					// Has adjustment history, likely been around a while
+					// Treat as stale (2x the normal threshold)
+					timeSinceCreation = r.phantomThreshold * 2
+				} else {
+					// Brand new position with no history - wait for phantom threshold
+					timeSinceCreation = 0
+				}
+			}
+
+			// Use shorter threshold for recent phantoms, longer for stale ones
+			threshold := r.phantomThreshold
+			if timeSinceCreation > stalePhantomThreshold {
+				// After 24 hours, definitely clean it up
+				r.logger.Printf("STALE PHANTOM POSITION DETECTED: Position %s has quantity=0 and credit=0 after %.1f hours - cleaning up",
+					shortID(position.ID), timeSinceCreation.Hours())
+
+				if err := r.storage.DeletePosition(position.ID); err != nil {
+					r.logger.Printf("Failed to clean up stale phantom position %s: %v", shortID(position.ID), err)
+					activePositions = append(activePositions, position)
+				} else {
+					r.logger.Printf("Successfully cleaned up stale phantom position %s", shortID(position.ID))
+				}
+				continue
+			} else if timeSinceCreation > threshold {
 				r.logger.Printf("PHANTOM POSITION DETECTED: Position %s has quantity=0 and credit=0 after %.0f minutes - cleaning up",
-					shortID(position.ID), timeSinceEntry.Minutes())
+					shortID(position.ID), timeSinceCreation.Minutes())
 
-				// Close this phantom position with zero P&L
-				if err := r.storage.ClosePositionByID(position.ID, 0, "phantom_cleanup"); err != nil {
+				// Delete this phantom position directly without state machine transitions
+				// Phantoms never properly entered the system, so we just remove them
+				if err := r.storage.DeletePosition(position.ID); err != nil {
 					r.logger.Printf("Failed to clean up phantom position %s: %v", shortID(position.ID), err)
-					activePositions = append(activePositions, position) // Keep in list if can't close
+					activePositions = append(activePositions, position) // Keep in list if can't delete
 				} else {
 					r.logger.Printf("Successfully cleaned up phantom position %s", shortID(position.ID))
 				}
 				continue // Skip to next position
 			}
 		}
+
+		// Update LastChecked timestamp after phantom detection
+		position.LastChecked = time.Now().UTC()
 
 		// Check if this position still exists in the broker
 		isOpenInBroker := r.isPositionOpenInBroker(&position, brokerPositions)
@@ -119,6 +158,10 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 				shortID(position.ID), finalPnL)
 		} else {
 			// Position is still active in broker
+			// Update LastChecked in storage
+			if err := r.storage.UpdatePosition(&position); err != nil {
+				r.logger.Printf("Warning: Failed to update LastChecked for position %s: %v", shortID(position.ID), err)
+			}
 			activePositions = append(activePositions, position)
 		}
 	}
@@ -127,17 +170,40 @@ func (r *Reconciler) ReconcilePositions(storedPositions []models.Position) []mod
 	// This handles the case where orders timed out locally but actually filled
 	orphanedStrangles := r.findOrphanedStrangles(brokerPositions, activePositions)
 	for _, orphanStrangle := range orphanedStrangles {
-		r.logger.Printf("Detected orphaned strangle in broker: Put %.0f / Call %.0f, creating recovery position",
+		r.logger.Printf("Detected orphaned strangle in broker: Put %.0f / Call %.0f",
 			orphanStrangle.putStrike, orphanStrangle.callStrike)
 
-		// Create a recovery position for this orphaned strangle
-		recoveryPos := r.createRecoveryPosition(orphanStrangle)
-		if recoveryPos != nil {
-			if err := r.storage.AddPosition(recoveryPos); err != nil {
-				r.logger.Printf("Failed to add recovery position: %v", err)
+		// First, check if we have a phantom position that matches this strangle
+		// Phantoms are positions with quantity=0 that never filled, but now we see them in broker
+		phantomToUpdate := r.findMatchingPhantom(activePositions, orphanStrangle)
+
+		if phantomToUpdate != nil {
+			// Update the existing phantom with broker data
+			r.logger.Printf("Found matching phantom position %s, updating with broker data", shortID(phantomToUpdate.ID))
+			phantomToUpdate.Quantity = orphanStrangle.quantity
+			phantomToUpdate.CreditReceived = float64(-orphanStrangle.putCostBasis - orphanStrangle.callCostBasis)
+
+			// Transition from submitted/idle to open state
+			if err := phantomToUpdate.TransitionState(models.StateOpen, models.ConditionOrderFilled); err != nil {
+				r.logger.Printf("Failed to transition phantom to open: %v", err)
+			}
+
+			if err := r.storage.UpdatePosition(phantomToUpdate); err != nil {
+				r.logger.Printf("Failed to update phantom position: %v", err)
 			} else {
-				activePositions = append(activePositions, *recoveryPos)
-				r.logger.Printf("Added recovery position %s for orphaned strangle", shortID(recoveryPos.ID))
+				r.logger.Printf("Successfully updated phantom position %s with broker data", shortID(phantomToUpdate.ID))
+			}
+		} else {
+			// No phantom found, create a recovery position
+			r.logger.Printf("No matching phantom found, creating recovery position")
+			recoveryPos := r.createRecoveryPosition(orphanStrangle)
+			if recoveryPos != nil {
+				if err := r.storage.AddPosition(recoveryPos); err != nil {
+					r.logger.Printf("Failed to add recovery position: %v", err)
+				} else {
+					activePositions = append(activePositions, *recoveryPos)
+					r.logger.Printf("Added recovery position %s for orphaned strangle", shortID(recoveryPos.ID))
+				}
 			}
 		}
 	}
@@ -509,4 +575,27 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
+}
+// findMatchingPhantom looks for a phantom position (quantity=0) that matches the orphaned strangle
+func (r *Reconciler) findMatchingPhantom(positions []models.Position, orphan orphanedStrangle) *models.Position {
+	for i := range positions {
+		pos := &positions[i]
+
+		// Check if this is a phantom (quantity = 0, credit = 0)
+		if pos.Quantity != 0 || pos.CreditReceived != 0 {
+			continue
+		}
+
+		// Check if strikes and expiration match
+		expMatch := pos.Expiration.Format("2006-01-02") == orphan.expiration
+		strikeMatch := math.Abs(pos.PutStrike-orphan.putStrike) < 0.01 &&
+			math.Abs(pos.CallStrike-orphan.callStrike) < 0.01
+		symbolMatch := pos.Symbol == orphan.symbol
+
+		if expMatch && strikeMatch && symbolMatch {
+			return pos
+		}
+	}
+
+	return nil
 }

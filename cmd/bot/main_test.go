@@ -511,7 +511,7 @@ func TestReconciler_Components(t *testing.T) {
 	defer tb.cancel()
 	
 	// Test Reconciler creation
-	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger)
+	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger, 10*time.Minute)
 	assert.NotNil(t, reconciler)
 	assert.Equal(t, tb.mockBroker, reconciler.broker)
 	assert.Equal(t, tb.mockStorage, reconciler.storage)
@@ -529,7 +529,7 @@ func TestReconcilePositions_EmptyPositions(t *testing.T) {
 	tb.mockBroker.On("GetPositionsCtx", mock.AnythingOfType("*context.timerCtx")).Return([]broker.PositionItem{}, nil)
 	
 	// Run reconciliation
-	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger)
+	reconciler := NewReconciler(tb.mockBroker, tb.mockStorage, tb.logger, 10*time.Minute)
 	activePositions := reconciler.ReconcilePositions(storedPositions)
 	
 	// Verify no positions after reconciliation
