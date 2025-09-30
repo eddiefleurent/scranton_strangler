@@ -44,14 +44,16 @@ type EnvironmentConfig struct {
 
 // BrokerConfig defines broker API settings.
 type BrokerConfig struct {
-	Provider    string `yaml:"provider"`
-	APIKey      string `yaml:"api_key"`
-	AccountID   string `yaml:"account_id"`
-	UseOTOCO    bool   `yaml:"use_otoco"` // Use OTOCO orders for preset exits
+	Provider         string        `yaml:"provider"`
+	APIKey           string        `yaml:"api_key"`
+	AccountID        string        `yaml:"account_id"`
+	UseOTOCO         bool          `yaml:"use_otoco"` // Use OTOCO orders for preset exits
 	// OTOCOPreview enables preview validation for OTOCO orders before placement
-	OTOCOPreview bool `yaml:"otoco_preview"`
+	OTOCOPreview     bool          `yaml:"otoco_preview"`
 	// OTOCOFallback enables fallback to separate orders if OTOCO validation fails
-	OTOCOFallback bool `yaml:"otoco_fallback"`
+	OTOCOFallback    bool          `yaml:"otoco_fallback"`
+	// PhantomThreshold defines how long to wait before cleaning up phantom positions (quantity=0, credit=0)
+	PhantomThreshold time.Duration `yaml:"phantom_threshold"`
 }
 
 // StrategyConfig defines trading strategy parameters.
@@ -200,6 +202,11 @@ func (c *Config) Validate() error {
 	case "tradier":
 	default:
 		return fmt.Errorf("broker.provider must be 'tradier'")
+	}
+
+	// Phantom threshold validation
+	if c.Broker.PhantomThreshold < 0 {
+		return fmt.Errorf("broker.phantom_threshold must be >= 0")
 	}
 
 	// Strategy validation
@@ -406,6 +413,9 @@ func (c *Config) Normalize() {
 	}
 	if c.Dashboard.Port == 0 {
 		c.Dashboard.Port = 9847 // Default port as specified in tasks
+	}
+	if c.Broker.PhantomThreshold == 0 {
+		c.Broker.PhantomThreshold = 10 * time.Minute // Default to 10 minutes
 	}
 }
 

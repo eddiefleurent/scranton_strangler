@@ -12,6 +12,7 @@ broker:
   use_otoco: false  # Use OTOCO orders to preset exit at 50% profit (Tradier does not support OTOCO for multi-leg orders)
   otoco_preview: true  # Future: Use /orders/preview?preview=true to validate OTOCO before placement (currently no-op)
   otoco_fallback: true  # Future: Fall back to separate entry + linked exits if OTOCO validation fails (currently no-op)
+  phantom_threshold: "10m"  # Time to wait before cleaning up phantom positions (quantity=0, credit=0)
   
 strategy:
   symbol: "SPY"
