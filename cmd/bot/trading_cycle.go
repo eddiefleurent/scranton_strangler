@@ -27,7 +27,7 @@ type TradingCycle struct {
 func NewTradingCycle(bot *Bot) *TradingCycle {
 	return &TradingCycle{
 		bot:        bot,
-		reconciler: NewReconciler(bot.broker, bot.storage, bot.logger),
+		reconciler: NewReconciler(bot.broker, bot.storage, bot.logger, bot.config.Broker.PhantomThreshold),
 	}
 }
 
@@ -318,7 +318,7 @@ func (tc *TradingCycle) placeStrangleOrder(order *strategy.StrangleOrder) (*brok
 		order.Quantity,
 		px,
 		false,
-		string(broker.DurationGTC),
+		string(broker.DurationDay), // Day orders auto-cancel at market close
 		clientOrderID,
 	)
 }
