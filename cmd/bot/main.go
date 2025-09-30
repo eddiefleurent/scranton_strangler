@@ -452,35 +452,15 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		allSymbols[symbol] = true
 	}
 
-	// Compare position counts for each option symbol
+	// Track per-leg excess; we'll resolve it globally after the loop
+	phantomOutstanding := make(map[string]int)
 	for symbol := range allSymbols {
 		brokerCount := brokerCounts[symbol]
 		localCount := localCounts[symbol]
-
 		if localCount > brokerCount {
-			// More local positions than broker positions - mark positions as phantom
-			positions := localPositionsBySymbol[symbol]
-			// Sort deterministically by EntryDate to avoid non-deterministic selection
-			sort.SliceStable(positions, func(i, j int) bool {
-				return positions[i].EntryDate.Before(positions[j].EntryDate)
-			})
-			// Mark the minimal set of most-recent positions whose total Quantity covers the excess
-			seen := make(map[string]bool)
-			outstanding := localCount - brokerCount // contracts to remove for this leg
-			for i := len(positions) - 1; i >= 0 && outstanding > 0; i-- {
-				p := positions[i]
-				if seen[p.ID] {
-					continue
-				}
-				result.localOnlyPositions = append(result.localOnlyPositions, p.ID)
-				seen[p.ID] = true
-				q := p.Quantity
-				if q <= 0 { // safety to ensure progress
-					q = 1
-				}
-				outstanding -= q
-			}
-		} else if brokerCount > localCount {
+			phantomOutstanding[symbol] = localCount - brokerCount
+		}
+		if brokerCount > localCount {
 			// More broker positions than local positions - mark for recovery
 			missingCount := brokerCount - localCount
 			for i := 0; i < missingCount; i++ {
@@ -489,16 +469,72 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		}
 	}
 
-	// Deduplicate local-only positions (since we track by leg, same position can appear multiple times)
-	seenLocalIDs := make(map[string]bool)
-	uniqueLocalOnly := []string{}
-	for _, id := range result.localOnlyPositions {
-		if !seenLocalIDs[id] {
-			uniqueLocalOnly = append(uniqueLocalOnly, id)
-			seenLocalIDs[id] = true
+	// Globally choose a minimal set of most-recent positions covering all outstanding legs
+	if len(phantomOutstanding) > 0 {
+		type posInfo struct {
+			qty     int
+			entry   time.Time
+			symbols map[string]bool
+		}
+		posByID := make(map[string]*posInfo)
+		for sym, positions := range localPositionsBySymbol {
+			if phantomOutstanding[sym] <= 0 {
+				continue
+			}
+			for _, p := range positions {
+				info := posByID[p.ID]
+				if info == nil {
+					q := p.Quantity
+					if q <= 0 {
+						q = 1
+					}
+					info = &posInfo{qty: q, entry: p.EntryDate, symbols: make(map[string]bool)}
+					posByID[p.ID] = info
+				}
+				info.symbols[sym] = true
+			}
+		}
+		// Sort candidates by most recent first
+		ids := make([]string, 0, len(posByID))
+		for id := range posByID {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return posByID[ids[i]].entry.After(posByID[ids[j]].entry) })
+
+		// Greedy cover: pick a position only once and subtract its qty from all legs it covers
+		for _, id := range ids {
+			info := posByID[id]
+			helps := false
+			for sym := range info.symbols {
+				if phantomOutstanding[sym] > 0 {
+					helps = true
+					break
+				}
+			}
+			if !helps {
+				continue
+			}
+			result.localOnlyPositions = append(result.localOnlyPositions, id)
+			for sym := range info.symbols {
+				if phantomOutstanding[sym] > 0 {
+					phantomOutstanding[sym] -= info.qty
+					if phantomOutstanding[sym] < 0 {
+						phantomOutstanding[sym] = 0
+					}
+				}
+			}
+			done := true
+			for _, v := range phantomOutstanding {
+				if v > 0 {
+					done = false
+					break
+				}
+			}
+			if done {
+				break
+			}
 		}
 	}
-	result.localOnlyPositions = uniqueLocalOnly
 
 	// Determine if we have any inconsistencies
 	result.hasInconsistencies = len(result.brokerOnlyPositions) > 0 ||
