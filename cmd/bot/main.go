@@ -40,7 +40,6 @@ const (
 	symbolBaseLength    = 3  // Length of base symbol (e.g., "SPY")
 	symbolDateLength    = 6  // Length of YYMMDD date
 	symbolPrefixLength  = 9  // Base + Date (SPY + YYMMDD)
-	symbolMinLength     = 16 // Minimum valid option symbol length (matches OSI parsing)
 	symbolTypeOffset    = 9  // Position of option type (C/P)
 	symbolStrikeOffset  = 10 // Position where strike price begins
 	strikeScaleDivisor  = 1000.0 // Divisor to convert strike from integer to decimal
@@ -534,6 +533,13 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 				break
 			}
 		}
+
+		// Log any leftover deficits for visibility
+		for sym, v := range phantomOutstanding {
+			if v > 0 {
+				b.logger.Printf("METRIC: reconciliation_phantom_leftover=1 symbol=%s deficit=%d", sym, v)
+			}
+		}
 	}
 
 	// Determine if we have any inconsistencies
@@ -666,6 +672,10 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 			}
 			b.logger.Printf("✅ Recovered position: %s (pair %d/%d)", recoveredPos.ID, i+1, n)
 		}
+		if len(calls) != len(puts) {
+			b.logger.Printf("ℹ️  Partial recovery for %s: calls=%d puts=%d leftover_calls=%d leftover_puts=%d",
+				groupKey, len(calls), len(puts), len(calls)-n, len(puts)-n)
+		}
 	}
 
 	return nil
@@ -772,8 +782,9 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 // generateOptionSymbol creates an OCC option symbol from position data
 // Format: SPY251107C00690000 (Symbol + YYMMDD + C/P + Strike*1000)
 func (b *Bot) generateOptionSymbol(baseSymbol string, expiration time.Time, strike float64, optType string) string {
-	// Normalize and validate option type
-	optType = strings.ToUpper(optType)
+	// Normalize inputs
+	baseSymbol = strings.ToUpper(strings.TrimSpace(baseSymbol))
+	optType = strings.ToUpper(strings.TrimSpace(optType))
 
 	// Validate option type is exactly "C" or "P"
 	if optType != "C" && optType != "P" {
@@ -796,7 +807,7 @@ func (b *Bot) generateOptionSymbol(baseSymbol string, expiration time.Time, stri
 // Example: SPY251107C00690000, AAPL251107P00150000
 // Returns (root, expiration, optionType, strike, ok)
 func parseOSI(symbol string) (string, time.Time, string, float64, bool) {
-	// OCC format requires minimum 15 chars: 1+ char root, 6 date, 1 type, 8 strike
+	// OCC format requires minimum 16 chars: 1+ char root, 6 date, 1 type, 8 strike
 	const minOSILength = 16
 	if len(symbol) < minOSILength {
 		return "", time.Time{}, "", 0, false
