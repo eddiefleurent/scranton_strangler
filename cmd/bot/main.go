@@ -9,11 +9,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"os/signal"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -38,7 +40,7 @@ const (
 	symbolBaseLength    = 3  // Length of base symbol (e.g., "SPY")
 	symbolDateLength    = 6  // Length of YYMMDD date
 	symbolPrefixLength  = 9  // Base + Date (SPY + YYMMDD)
-	symbolMinLength     = 15 // Minimum valid option symbol length
+	symbolMinLength     = 16 // Minimum valid option symbol length (matches OSI parsing)
 	symbolTypeOffset    = 9  // Position of option type (C/P)
 	symbolStrikeOffset  = 10 // Position where strike price begins
 	strikeScaleDivisor  = 1000.0 // Divisor to convert strike from integer to decimal
@@ -400,28 +402,48 @@ func (b *Bot) performStartupReconciliation(ctx context.Context) error {
 func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, localPositions []models.Position) reconciliationResult {
 	result := reconciliationResult{}
 
-	// Create multiplicity maps to track position counts per symbol
+	// Create multiplicity maps to track position counts per option symbol
 	brokerCounts := make(map[string]int)
 	localCounts := make(map[string]int)
 	localPositionsBySymbol := make(map[string][]models.Position)
 
-	// Build broker position counts by symbol
+	// Build broker position counts by option symbol
 	for _, pos := range brokerPositions {
-		brokerCounts[pos.Symbol]++
+		// Use absolute value since short positions have negative quantities
+		// Round to prevent floating-point precision issues (0.999999 -> 0)
+		qty := int(math.Round(math.Abs(pos.Quantity)))
+		brokerCounts[pos.Symbol] += qty
 	}
 
-	// Build local position counts by symbol and check for corruption
+	// Build local position counts by generating option symbols from strikes/expiration
 	for _, pos := range localPositions {
-		localCounts[pos.Symbol]++
-		localPositionsBySymbol[pos.Symbol] = append(localPositionsBySymbol[pos.Symbol], pos)
-
-		// Check for credit corruption using named constant
+		// Check for credit corruption first
 		if pos.CreditReceived <= MinCreditThreshold {
 			result.corruptedPositions = append(result.corruptedPositions, pos.ID)
 		}
+
+		// Generate option symbols for this position's call and put legs
+		callSymbol := b.generateOptionSymbol(pos.Symbol, pos.Expiration, pos.CallStrike, "C")
+		putSymbol := b.generateOptionSymbol(pos.Symbol, pos.Expiration, pos.PutStrike, "P")
+
+		// Validate generated symbols
+		if callSymbol == "" || putSymbol == "" {
+			b.logger.Printf("ERROR: empty OCC symbol for position %s; skipping", pos.ID)
+			continue
+		}
+
+		// Track each leg separately with normalized quantity
+		q := pos.Quantity
+		if q < 0 {
+			q = -q
+		}
+		localCounts[callSymbol] += q
+		localCounts[putSymbol] += q
+		localPositionsBySymbol[callSymbol] = append(localPositionsBySymbol[callSymbol], pos)
+		localPositionsBySymbol[putSymbol] = append(localPositionsBySymbol[putSymbol], pos)
 	}
 
-	// Get all unique symbols from both broker and local
+	// Get all unique option symbols from both broker and local
 	allSymbols := make(map[string]bool)
 	for symbol := range brokerCounts {
 		allSymbols[symbol] = true
@@ -430,28 +452,86 @@ func (b *Bot) analyzePositionDifferences(brokerPositions []broker.PositionItem, 
 		allSymbols[symbol] = true
 	}
 
-	// Compare position counts for each symbol
+	// Track per-leg excess; we'll resolve it globally after the loop
+	phantomOutstanding := make(map[string]int)
 	for symbol := range allSymbols {
 		brokerCount := brokerCounts[symbol]
 		localCount := localCounts[symbol]
-
 		if localCount > brokerCount {
-			// More local positions than broker positions - select extra local positions
-			positions := localPositionsBySymbol[symbol]
-			// Sort deterministically by EntryDate to avoid non-deterministic selection
-			sort.SliceStable(positions, func(i, j int) bool {
-				return positions[i].EntryDate.Before(positions[j].EntryDate)
-			})
-			extraCount := localCount - brokerCount
-			// Take the last N positions (most recent) as the extras
-			for i := len(positions) - extraCount; i < len(positions); i++ {
-				result.localOnlyPositions = append(result.localOnlyPositions, positions[i].ID)
-			}
-		} else if brokerCount > localCount {
-			// More broker positions than local positions - add symbol once per missing count
+			phantomOutstanding[symbol] = localCount - brokerCount
+		}
+		if brokerCount > localCount {
+			// More broker positions than local positions - mark for recovery
 			missingCount := brokerCount - localCount
 			for i := 0; i < missingCount; i++ {
 				result.brokerOnlyPositions = append(result.brokerOnlyPositions, symbol)
+			}
+		}
+	}
+
+	// Globally choose a minimal set of most-recent positions covering all outstanding legs
+	if len(phantomOutstanding) > 0 {
+		type posInfo struct {
+			qty     int
+			entry   time.Time
+			symbols map[string]bool
+		}
+		posByID := make(map[string]*posInfo)
+		for sym, positions := range localPositionsBySymbol {
+			if phantomOutstanding[sym] <= 0 {
+				continue
+			}
+			for _, p := range positions {
+				info := posByID[p.ID]
+				if info == nil {
+					q := p.Quantity
+					if q <= 0 {
+						q = 1
+					}
+					info = &posInfo{qty: q, entry: p.EntryDate, symbols: make(map[string]bool)}
+					posByID[p.ID] = info
+				}
+				info.symbols[sym] = true
+			}
+		}
+		// Sort candidates by most recent first
+		ids := make([]string, 0, len(posByID))
+		for id := range posByID {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return posByID[ids[i]].entry.After(posByID[ids[j]].entry) })
+
+		// Greedy cover: pick a position only once and subtract its qty from all legs it covers
+		for _, id := range ids {
+			info := posByID[id]
+			helps := false
+			for sym := range info.symbols {
+				if phantomOutstanding[sym] > 0 {
+					helps = true
+					break
+				}
+			}
+			if !helps {
+				continue
+			}
+			result.localOnlyPositions = append(result.localOnlyPositions, id)
+			for sym := range info.symbols {
+				if phantomOutstanding[sym] > 0 {
+					phantomOutstanding[sym] -= info.qty
+					if phantomOutstanding[sym] < 0 {
+						phantomOutstanding[sym] = 0
+					}
+				}
+			}
+			done := true
+			for _, v := range phantomOutstanding {
+				if v > 0 {
+					done = false
+					break
+				}
+			}
+			if done {
+				break
 			}
 		}
 	}
@@ -535,15 +615,15 @@ func (b *Bot) recoverUntrackedPositions(ctx context.Context, brokerPositions []b
 		}
 		untrackedMap[brokerPos.Symbol]--
 
-		// Extract base symbol and expiration to group strangles
-		// SPY251107C00690000 -> SPY251107
-		if len(brokerPos.Symbol) < symbolMinLength {
-			b.logger.Printf("⚠️  Skipping malformed symbol: %s (length %d, expected >= %d)",
-				brokerPos.Symbol, len(brokerPos.Symbol), symbolMinLength)
+		// Parse symbol to extract root and expiration for grouping
+		root, expiration, _, _, ok := parseOSI(brokerPos.Symbol)
+		if !ok {
+			b.logger.Printf("⚠️  Skipping malformed option symbol: %s", brokerPos.Symbol)
 			continue
 		}
 
-		key := brokerPos.Symbol[:symbolPrefixLength] // SPY + YYMMDD
+		// Group by root + expiration (e.g., "SPY-251107")
+		key := fmt.Sprintf("%s-%s", root, expiration.Format("060102"))
 		strangleGroups[key] = append(strangleGroups[key], brokerPos)
 	}
 
@@ -596,26 +676,34 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 	// Use first position to extract common data
 	first := brokerPositions[0]
 
-	// Extract base symbol and expiration with validation
-	baseSymbol := first.Symbol[:symbolBaseLength] // SPY
-	expirationStr := first.Symbol[symbolBaseLength:symbolPrefixLength] // YYMMDD
-
-	// Parse expiration date with error handling
-	expiration, err := time.Parse("060102", expirationStr)
-	if err != nil {
-		b.logger.Printf("⚠️  Failed to parse expiration date %s: %v, using default", expirationStr, err)
-		expiration = time.Now().AddDate(0, 0, 45) // Default to 45 DTE
+	// Parse via OSI (variable-length root)
+	var baseSymbol string
+	var expiration time.Time
+	if root, exp, _, _, ok := parseOSI(first.Symbol); ok {
+		baseSymbol, expiration = root, exp
+	} else {
+		b.logger.Printf("⚠️  Failed to parse OSI for %s; falling back to legacy slicing", first.Symbol)
+		if len(first.Symbol) >= symbolPrefixLength {
+			if t, err := time.Parse("060102", first.Symbol[symbolBaseLength:symbolPrefixLength]); err == nil {
+				expiration = t
+			} else {
+				expiration = time.Now().AddDate(0, 0, 45)
+			}
+			baseSymbol = first.Symbol[:symbolBaseLength]
+		} else {
+			expiration = time.Now().AddDate(0, 0, 45)
+			baseSymbol = first.Symbol
+		}
 	}
 
 	// Default values
 	var callStrike, putStrike float64
-	var totalCredit float64
-	quantity := int(first.Quantity)
-	if quantity < 0 {
-		quantity = -quantity // Ensure positive quantity
-	}
+	// Aggregate per-contract credit to scale by recovered qty
+	var perContractCredit float64
+	// Derive minimal contract quantity across legs in this pair
+	quantity := -1
 
-	// Separate call and put strikes and calculate total credit
+	// Separate call and put strikes and calculate per-contract credit
 	for _, brokerPos := range brokerPositions {
 		optType, ok := extractOptionType(brokerPos.Symbol)
 		if !ok {
@@ -635,8 +723,25 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 			putStrike = strike
 		}
 
-		// Estimate credit from cost basis (negative cost basis means we received credit)
-		totalCredit += -brokerPos.CostBasis
+		// Per-contract credit (handle multi-contract legs)
+		absQ := int(math.Round(math.Abs(brokerPos.Quantity)))
+		if absQ > 0 {
+			perContractCredit += (-brokerPos.CostBasis) / float64(absQ)
+		}
+	}
+
+	// Compute recovered quantity as min(abs(leg qty))
+	for _, p := range brokerPositions {
+		q := int(math.Round(math.Abs(p.Quantity)))
+		if q == 0 {
+			continue
+		}
+		if quantity < 0 || q < quantity {
+			quantity = q
+		}
+	}
+	if quantity < 1 {
+		quantity = 1
 	}
 
 	// Validate strikes were found
@@ -658,39 +763,93 @@ func (b *Bot) createRecoveredPosition(brokerPositions []broker.PositionItem) mod
 	pos.State = models.StateOpen
 	pos.StateMachine = models.NewStateMachineFromState(models.StateOpen)
 	pos.EntryDate = time.Now() // We don't know the actual entry time
-	pos.CreditReceived = totalCredit
+	pos.CreditReceived = perContractCredit * float64(quantity)
 	pos.Adjustments = make([]models.Adjustment, 0)
 
 	return *pos
 }
 
+// generateOptionSymbol creates an OCC option symbol from position data
+// Format: SPY251107C00690000 (Symbol + YYMMDD + C/P + Strike*1000)
+func (b *Bot) generateOptionSymbol(baseSymbol string, expiration time.Time, strike float64, optType string) string {
+	// Normalize and validate option type
+	optType = strings.ToUpper(optType)
+
+	// Validate option type is exactly "C" or "P"
+	if optType != "C" && optType != "P" {
+		b.logger.Printf("ERROR: Invalid option type '%s', must be 'C' or 'P'", optType)
+		return ""
+	}
+
+	// Format expiration as YYMMDD
+	expirationStr := expiration.Format("060102")
+
+	// Format strike as 8-digit integer (strike * 1000) with proper rounding
+	strikeInt := int(math.Round(strike * strikeScaleDivisor))
+	strikeStr := fmt.Sprintf("%08d", strikeInt)
+
+	return fmt.Sprintf("%s%s%s%s", baseSymbol, expirationStr, optType, strikeStr)
+}
+
+// parseOSI parses an OCC option symbol from the end to support any underlying symbol length
+// Format: [ROOT][YYMMDD][C/P][STRIKE8]
+// Example: SPY251107C00690000, AAPL251107P00150000
+// Returns (root, expiration, optionType, strike, ok)
+func parseOSI(symbol string) (string, time.Time, string, float64, bool) {
+	// OCC format requires minimum 15 chars: 1+ char root, 6 date, 1 type, 8 strike
+	const minOSILength = 16
+	if len(symbol) < minOSILength {
+		return "", time.Time{}, "", 0, false
+	}
+
+	// Parse from the end: last 8 = strike, 9th from end = type, 15th-9th from end = date
+	strikeCode := symbol[len(symbol)-8:]
+	optType := symbol[len(symbol)-9 : len(symbol)-8]
+	dateCode := symbol[len(symbol)-15 : len(symbol)-9]
+	root := strings.TrimSpace(symbol[:len(symbol)-15])
+
+	// Parse strike (8-digit integer representing price * 1000)
+	strikeInt, err := strconv.ParseInt(strikeCode, 10, 64)
+	if err != nil {
+		return "", time.Time{}, "", 0, false
+	}
+	strike := float64(strikeInt) / strikeScaleDivisor
+
+	// Parse expiration date (YYMMDD)
+	expiration, err := time.Parse("060102", dateCode)
+	if err != nil {
+		return "", time.Time{}, "", 0, false
+	}
+
+	// Validate option type
+	if optType != "C" && optType != "P" {
+		return "", time.Time{}, "", 0, false
+	}
+
+	return root, expiration, optType, strike, true
+}
+
 // extractOptionType extracts 'call' or 'put' from option symbol
 // Returns (type, ok) where ok indicates if the type was successfully parsed
 func extractOptionType(symbol string) (string, bool) {
-	if len(symbol) < symbolTypeOffset+1 {
+	_, _, optType, _, ok := parseOSI(symbol)
+	if !ok {
 		return "", false
 	}
-	optType := symbol[symbolTypeOffset : symbolTypeOffset+1] // C or P
 	if optType == "C" {
 		return optionTypeCall, true
-	} else if optType == "P" {
-		return optionTypePut, true
 	}
-	return "", false
+	return optionTypePut, true
 }
 
 // extractStrike extracts strike price from option symbol
 // Returns 0.0 if the symbol is invalid or parsing fails
 func extractStrike(symbol string) float64 {
-	if len(symbol) < symbolMinLength {
+	_, _, _, strike, ok := parseOSI(symbol)
+	if !ok {
 		return 0.0
 	}
-	strikeStr := symbol[symbolStrikeOffset:] // 00690000
-	strikeInt, err := strconv.ParseInt(strikeStr, 10, 64)
-	if err != nil {
-		return 0.0
-	}
-	return float64(strikeInt) / strikeScaleDivisor // Convert to actual price
+	return strike
 }
 
 // getMarketCalendar gets the market calendar for a given month/year, with caching
